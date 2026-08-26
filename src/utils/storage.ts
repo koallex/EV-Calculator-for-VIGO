@@ -621,12 +621,26 @@ export function estimateTripConsumption(
 
     // Smoothly vary the aerodynamic share with speed instead of introducing a jump at 70 km/h.
     // This keeps the total consumption curve physically monotonic under headwind.
-    const aeroShare = Math.min(0.60, Math.max(0.30, 0.20 + effectiveSpeed * 0.003));
+    // Decompose the no-wind consumption into a speed-dependent aerodynamic part and
+    // a non-aerodynamic part.  Keep a conservative floor on the tailwind benefit: the
+    // car still spends energy on rolling resistance, drivetrain/electrical loads and
+    // auxiliaries, so a tailwind cannot make a higher road speed more economical than
+    // a lower road speed simply because relative airspeed falls faster.
+    const aeroShare = Math.min(0.55, Math.max(0.28, 0.22 + effectiveSpeed * 0.0026));
     const aeroBase = baseSpeedConsumption * aeroShare;
     const nonAeroBase = baseSpeedConsumption - aeroBase;
     const aeroWindFactor = Math.pow(relativeAirSpeed / effectiveSpeed, 2);
-    const windAdjustedConsumption = nonAeroBase + aeroBase * aeroWindFactor;
-    windMultiplier = Math.max(0.65, Math.min(1.60, windAdjustedConsumption / baseSpeedConsumption));
+    const rawWindAdjustedConsumption = nonAeroBase + aeroBase * aeroWindFactor;
+
+    // Limit the aerodynamic credit from a tailwind.  At very low relative airspeed,
+    // the pure v_air^2 formula can otherwise remove an unrealistically large share of
+    // the total road-load model.  A 15% minimum total-road-load credit keeps the model
+    // physically conservative and preserves a monotonic speed curve.
+    const tailwindFloor = relativeWindAngleDeg >= 135 && relativeWindAngleDeg <= 225
+      ? baseSpeedConsumption * 0.78
+      : 0;
+    const windAdjustedConsumption = Math.max(rawWindAdjustedConsumption, tailwindFloor);
+    windMultiplier = Math.max(0.78, Math.min(1.60, windAdjustedConsumption / baseSpeedConsumption));
     windImpactPct = Math.round((windMultiplier - 1) * 100);
 
     const normAngle = ((relativeWindAngleDeg % 360) + 360) % 360;
