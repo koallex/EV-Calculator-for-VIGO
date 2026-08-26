@@ -110,7 +110,7 @@ export async function fetchForecastWeatherAt(
     return {
       temperature: Math.round(temperature),
       weatherCode: data.daily.weather_code?.[idx] ?? 0,
-      precipitation: Number((data.daily.precipitation_sum?.[idx] ?? 0).toFixed(1)),
+      precipitation: Number(((data.daily.precipitation_sum?.[idx] ?? 0) / 24).toFixed(2)),
       windSpeed: Math.round(data.daily.wind_speed_10m_mean?.[idx] ?? 0),
       windDirection: Math.round(data.daily.wind_direction_10m_dominant?.[idx] ?? 0),
     };
@@ -125,6 +125,7 @@ export interface RouteWeatherSample {
   distanceFromStartKm: number;
   etaMinutes: number;
   weather: ForecastWeather;
+  routeBearing: number; // local road heading at this sample, degrees
 }
 
 export async function fetchForecastWeatherAlongRoute(
@@ -142,12 +143,20 @@ export async function fetchForecastWeatherAlongRoute(
   const speed = Math.max(5, avgSpeedKmH);
   const results = await Promise.all(selected.map(async (point) => {
     const etaMinutes = Math.round((point.distanceFromStartKm / speed) * 60);
+    const prev = points[Math.max(0, points.findIndex(p => p === point) - 1)];
+    const next = points[Math.min(points.length - 1, points.findIndex(p => p === point) + 1)];
+    const a = prev ?? point;
+    const b = next ?? point;
+    const r = Math.PI / 180;
+    const y = Math.sin((b.lon - a.lon) * r) * Math.cos(b.lat * r);
+    const x = Math.cos(a.lat * r) * Math.sin(b.lat * r) - Math.sin(a.lat * r) * Math.cos(b.lat * r) * Math.cos((b.lon - a.lon) * r);
+    const routeBearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
     const weather = await fetchForecastWeatherAt(
       point.lat,
       point.lon,
       new Date(departureDate.getTime() + etaMinutes * 60000)
     );
-    return weather ? { ...point, etaMinutes, weather } : null;
+    return weather ? { ...point, etaMinutes, weather, routeBearing } : null;
   }));
 
   return results.filter((v): v is RouteWeatherSample => v !== null);

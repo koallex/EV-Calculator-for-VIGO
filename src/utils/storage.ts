@@ -289,24 +289,28 @@ export function calculateClimateImpact(temperatureC: number | undefined, climate
   let description: string;
 
   if (temp >= 19 && temp <= 23) {
-    powerKw = 0.30;
+    powerKw = 0.40;
     label = 'Климат · комфорт';
-    description = 'Средняя электрическая нагрузка HVAC ~0,3 кВт';
+    description = 'Базовая электрическая нагрузка HVAC ~0,4 кВт';
   } else if (temp < 19) {
-    // VIGO is equipped with a heat pump. Model electrical input rather than
-    // thermal demand; allow supplemental resistive/PTC heating only at very low temperatures.
+    // Heat-pump vehicle: the heat pump carries most cabin heating, while a supplemental
+    // PTC heater assists increasingly in colder weather. These are planning estimates,
+    // not measured VIGO telemetry. The PTC share is intentionally moderate because cabin
+    // heat demand falls after the initial warm-up on a long trip.
     if (temp >= 10) {
-      powerKw = 0.55 + (19 - temp) * 0.075;
+      powerKw = 0.55 + (19 - temp) * 0.030;
     } else if (temp >= 0) {
-      powerKw = 1.225 + (10 - temp) * 0.10;
+      powerKw = 0.82 + (10 - temp) * 0.048;
     } else if (temp >= -10) {
-      powerKw = 2.225 + Math.abs(temp) * 0.11;
+      powerKw = 1.30 + Math.abs(temp) * 0.060;
+    } else if (temp >= -20) {
+      powerKw = 1.90 + (Math.abs(temp) - 10) * 0.080;
     } else {
-      powerKw = 3.325 + (Math.abs(temp) - 10) * 0.16;
+      powerKw = 2.70 + (Math.abs(temp) - 20) * 0.110;
     }
-    powerKw = Math.min(5.5, Math.max(0.55, powerKw));
-    label = `Тепловой насос (${powerKw.toFixed(1)} кВт)`;
-    description = `Оценочная электрическая нагрузка теплового насоса при ${temp}°C: ~${powerKw.toFixed(1)} кВт`;
+    powerKw = Math.min(3.8, Math.max(0.55, powerKw));
+    label = `Тепловой насос + ТЭН (${powerKw.toFixed(1)} кВт)`;
+    description = `Оценочная электрическая нагрузка теплового насоса с поддержкой ТЭН при ${temp}°C: ~${powerKw.toFixed(1)} кВт`;
   } else {
     powerKw = 0.65 + (temp - 23) * 0.10;
     powerKw = Math.min(2.6, Math.max(0.65, powerKw));
@@ -344,99 +348,64 @@ export function calculatePrecipitationImpact(
   precipitationMm?: number
 ): PrecipitationImpact {
   const code = weatherCode ?? 0;
-  const precip = precipitationMm ?? 0;
+  const precip = Math.max(0, precipitationMm ?? 0);
 
-  // Snow and freezing conditions (WMO codes: 71, 73, 75, 77, 85, 86)
+  // Snow: intensity matters. A light snowfall is not equivalent to slush/deep snow.
   if ([71, 73, 75, 77, 85, 86].includes(code) || (code >= 70 && code < 80)) {
-    if (code === 75 || code === 86 || precip >= 2.0) {
-      return {
-        impactPct: 22,
-        factor: 1.22,
-        type: 'heavy_snow',
-        label: 'Снегопад (+22%)',
-        roadState: 'Снежная каша / накат',
-        description: 'Высокое сопротивление качению шин по снегу (+22%)',
-      };
-    }
+    const impactPct = (code === 75 || code === 86 || precip >= 3.0) ? 22
+      : precip >= 1.0 ? 18
+      : precip >= 0.3 ? 14
+      : 8;
+    const heavy = impactPct >= 20;
     return {
-      impactPct: 14,
-      factor: 1.14,
-      type: 'snow',
-      label: 'Снег (+14%)',
-      roadState: 'Заснеженный асфальт',
-      description: 'Повышенное трение качения и пробуксовка (+14%)',
+      impactPct, factor: 1 + impactPct / 100,
+      type: heavy ? 'heavy_snow' : 'snow',
+      label: `Снег (${impactPct >= 20 ? 'сильный' : 'умеренный'}, +${impactPct}%)`,
+      roadState: heavy ? 'Снежная каша / накат' : 'Заснеженный асфальт',
+      description: `Поправка зависит от интенсивности снега: ${impactPct}%`,
     };
   }
 
-  // Freezing rain / ice glaze (WMO codes: 56, 57, 66, 67)
   if ([56, 57, 66, 67].includes(code)) {
     return {
-      impactPct: 18,
-      factor: 1.18,
-      type: 'heavy_snow',
-      label: 'Ледяной дождь (+18%)',
-      roadState: 'Гололедица / накат',
-      description: 'Потери на трение и пробуксовку (+18%)',
+      impactPct: 18, factor: 1.18, type: 'heavy_snow',
+      label: 'Ледяной дождь (+18%)', roadState: 'Гололедица / накат',
+      description: 'Потери на сцепление и сопротивление качению (+18%)',
     };
   }
 
-  // Heavy rain / thunderstorms / downpour (WMO codes: 65, 81, 82, 95, 96, 99)
-  if ([65, 81, 82, 95, 96, 99].includes(code) || precip >= 2.5) {
+  // Rain impact is now continuous with precipitation intensity instead of a hard
+  // 8%/12% jump. For the operational hourly forecast, precipitationMm is mm/h.
+  // Long-range seasonal data are converted to a daily-average hourly equivalent.
+  const rainCodes = [51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99];
+  if (rainCodes.includes(code) || precip > 0) {
+    let impactPct: number;
+    if (precip <= 0.1) impactPct = 2;
+    else if (precip <= 0.3) impactPct = 3;
+    else if (precip <= 0.7) impactPct = 5;
+    else if (precip <= 1.5) impactPct = 7;
+    else if (precip <= 3.0) impactPct = 9;
+    else if (precip <= 6.0) impactPct = 11;
+    else impactPct = 12;
+
+    // WMO heavy-rain codes retain a conservative minimum even when the API's
+    // instantaneous precipitation value happens to be small.
+    if ([65, 81, 82, 95, 96, 99].includes(code)) impactPct = Math.max(impactPct, 10);
+    const heavy = impactPct >= 10;
     return {
-      impactPct: 12,
-      factor: 1.12,
-      type: 'heavy_rain',
-      label: 'Ливень (+12%)',
-      roadState: 'Глубокие лужи / вода',
-      description: 'Гидродинамическое торможение шин водой (+12%)',
+      impactPct, factor: 1 + impactPct / 100,
+      type: heavy ? 'heavy_rain' : impactPct <= 3 ? 'damp' : 'rain',
+      label: `${impactPct >= 10 ? 'Ливень' : impactPct <= 3 ? 'Морось' : 'Дождь'} (+${impactPct}%)`,
+      roadState: impactPct >= 10 ? 'Глубокие лужи / вода' : 'Мокрый асфальт',
+      description: `Интенсивность осадков ~${precip.toFixed(1)} мм/ч → поправка +${impactPct}%`,
     };
   }
 
-  // Moderate rain (WMO codes: 63, 80)
-  if ([63, 80].includes(code) || (precip >= 0.8 && precip < 2.5)) {
-    return {
-      impactPct: 8,
-      factor: 1.08,
-      type: 'rain',
-      label: 'Дождь (+8%)',
-      roadState: 'Мокрый асфальт (слой воды)',
-      description: 'Вытеснение водяной пленки шинами (+8%)',
-    };
-  }
-
-  // Light rain / drizzle (WMO codes: 51, 53, 55, 61)
-  if ([51, 53, 55, 61].includes(code) || (precip > 0 && precip < 0.8)) {
-    return {
-      impactPct: 4,
-      factor: 1.04,
-      type: 'damp',
-      label: 'Морось (+4%)',
-      roadState: 'Влажный асфальт',
-      description: 'Легкая водяная пленка на дороге (+4%)',
-    };
-  }
-
-  // Fog / mist (WMO codes: 45, 48)
   if ([45, 48].includes(code)) {
-    return {
-      impactPct: 2,
-      factor: 1.02,
-      type: 'damp',
-      label: 'Туман (+2%)',
-      roadState: 'Сырой асфальт',
-      description: 'Влажная поверхность дороги (+2%)',
-    };
+    return { impactPct: 2, factor: 1.02, type: 'damp', label: 'Туман (+2%)', roadState: 'Сырой асфальт', description: 'Влажная поверхность дороги (+2%)' };
   }
 
-  // Dry / Normal road
-  return {
-    impactPct: 0,
-    factor: 1.0,
-    type: 'dry',
-    label: 'Сухо (0%)',
-    roadState: 'Сухой асфальт',
-    description: 'Оптимальное сопротивление качению (0%)',
-  };
+  return { impactPct: 0, factor: 1.0, type: 'dry', label: 'Сухо (0%)', roadState: 'Сухой асфальт', description: 'Оптимальное сопротивление качению (0%)' };
 }
 
 /**

@@ -172,11 +172,24 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         samples = await fetchForecastWeatherAlongRoute(data.points, departureDate, plannedSpeedKmH);
         if (!samples.length) throw new Error('Не удалось получить актуальный прогноз погоды по маршруту. Попробуйте повторить расчёт позже.');
         avgTemperature = avg(samples.map(s=>s.weather.temperature), 20);
-        avgWindSpeed = avg(samples.map(s=>s.weather.windSpeed), 0);
         avgPrecipitation = avg(samples.map(s=>s.weather.precipitation), 0);
         avgWeatherCode = samples[Math.floor(samples.length/2)].weather.weatherCode;
-        const relativeAngles=samples.map(s => (s.weather.windDirection-routeBearing+360)%360);
-        avgRelativeWindAngle=avg(relativeAngles, relativeAngles[0] ?? 0);
+
+        // Wind is resolved locally at each route sample. This avoids treating a long,
+        // curving route as if it had one single A→B bearing. We average the wind vector
+        // (longitudinal + lateral components), not compass angles as plain numbers.
+        let sumLong = 0;
+        let sumLat = 0;
+        samples.forEach(s => {
+          const rel = ((s.weather.windDirection - s.routeBearing + 540) % 360) - 180;
+          const rad = rel * Math.PI / 180;
+          sumLong += s.weather.windSpeed * Math.cos(rad);
+          sumLat += s.weather.windSpeed * Math.sin(rad);
+        });
+        sumLong /= samples.length;
+        sumLat /= samples.length;
+        avgWindSpeed = Math.sqrt(sumLong * sumLong + sumLat * sumLat);
+        avgRelativeWindAngle = (Math.atan2(sumLat, sumLong) * 180 / Math.PI + 360) % 360;
       } else {
         // Manual weather deliberately bypasses forecast APIs, so planning works for any future date/season.
         avgTemperature = manualTemperature;
@@ -186,9 +199,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         avgRelativeWindAngle = (manualWindDirection - routeBearing + 360) % 360;
       }
       const climatePowers = weatherMode === 'current' ? samples.map(s => calculateClimateImpact(s.weather.temperature, climateOn).powerKw) : [calculateClimateImpact(avgTemperature, climateOn).powerKw];
-      const avgClimatePowerKw = avg(climatePowers, 0);
+      const rawClimatePowerKw = avg(climatePowers, 0);
       const climateEnabled=climateOn;
       const tripDurationHours = etaMinutes / 60;
+      // On a long cold trip the PTC assist is mostly a warm-up load. After the cabin
+      // reaches target temperature, the heat pump carries a larger share. Model this
+      // as a small reduction in average electrical HVAC power with trip duration.
+      const warmCabinFactor = climateOn ? Math.max(0.92, 1 - Math.max(0, tripDurationHours - 1) * 0.02) : 1;
+      const avgClimatePowerKw = rawClimatePowerKw * warmCabinFactor;
       const forecast=estimateTripConsumption(plannedSpeedKmH,avgTemperature,sessions,settings.batteryCapacityKwh,climateEnabled,avgWindSpeed,avgRelativeWindAngle,undefined,avgWeatherCode,avgPrecipitation,{gainM:data.elevationGainM,lossM:data.elevationLossM,distanceKm:data.distanceKm},tripDurationHours,avgClimatePowerKw);
       const energyKwh=(data.distanceKm/100)*forecast.estimatedConsumption;
       const arrivalSoc=Math.max(0,Number((startSoc-(energyKwh/(settings.batteryCapacityKwh||51.87))*100).toFixed(1)));
@@ -219,7 +237,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       routeWeather.precipitation,
       { gainM: routeElevation.elevationGainM, lossM: routeElevation.elevationLossM, distanceKm: routeElevation.distanceKm },
       (routeElevation.distanceKm / Math.max(5, speed)) ,
-      routeWeather.samples.length ? routeWeather.samples.reduce((sum, s) => sum + (calculateClimateImpact(s.weather.temperature, climateOn).powerKw), 0) / routeWeather.samples.length : undefined
+      routeWeather.samples.length ? (() => {
+        const raw = routeWeather.samples.reduce((sum, s) => sum + calculateClimateImpact(s.weather.temperature, climateOn).powerKw, 0) / routeWeather.samples.length;
+        const hours = routeElevation.distanceKm / Math.max(5, speed);
+        const warmFactor = climateOn ? Math.max(0.92, 1 - Math.max(0, hours - 1) * 0.02) : 1;
+        return raw * warmFactor;
+      })() : undefined
     );
     const energyKwh = (routeElevation.distanceKm / 100) * forecast.estimatedConsumption;
     const arrivalSoc = Math.max(0, Number((startSoc - (energyKwh / (settings.batteryCapacityKwh || 51.87)) * 100).toFixed(1)));
