@@ -598,19 +598,36 @@ export function estimateTripConsumption(
   const precipMultiplier = precipInfo.factor;
 
   // 4. Aerodynamic Wind Impact (Relative to Vehicle Heading)
+  // IMPORTANT: wind is handled as air-relative velocity, not as a percentage bonus
+  // applied to the whole vehicle consumption. The previous multiplier formula made the
+  // wind penalty percentage shrink as vehicle speed increased, which could paradoxically
+  // make a higher speed use less total energy than a lower speed in a strong headwind.
+  // Physics: aerodynamic drag is proportional to airspeed^2. For a fixed road distance,
+  // aerodynamic energy per 100 km therefore scales with the square of the relative air speed.
   let windMultiplier = 1.0;
   let windImpactPct = 0;
   let windStatusText = '';
 
   if (windSpeedKmH && windSpeedKmH > 3 && relativeWindAngleDeg !== undefined && !isNaN(relativeWindAngleDeg)) {
     const rad = (relativeWindAngleDeg * Math.PI) / 180;
-    const headwindComponent = windSpeedKmH * Math.cos(rad);
-    const speedRatio = Math.max(0.6, (effectiveSpeed + headwindComponent) / effectiveSpeed);
-    const aeroShare = effectiveSpeed > 70 ? 0.55 : 0.35;
-    const aeroDelta = (Math.pow(speedRatio, 1.7) - 1) * aeroShare;
-    const clampedDelta = Math.max(-0.15, Math.min(0.25, aeroDelta));
-    windMultiplier += clampedDelta;
-    windImpactPct = Math.round(clampedDelta * 100);
+    // Open-Meteo wind direction is the direction the wind comes FROM. Angle 0° therefore
+    // means headwind and 180° means tailwind. Resolve the wind vector into longitudinal
+    // and lateral components relative to the car.
+    const longitudinalWind = windSpeedKmH * Math.cos(rad);
+    const lateralWind = windSpeedKmH * Math.sin(rad);
+    const relativeAirSpeed = Math.sqrt(
+      Math.pow(effectiveSpeed + longitudinalWind, 2) + Math.pow(lateralWind, 2)
+    );
+
+    // Smoothly vary the aerodynamic share with speed instead of introducing a jump at 70 km/h.
+    // This keeps the total consumption curve physically monotonic under headwind.
+    const aeroShare = Math.min(0.60, Math.max(0.30, 0.20 + effectiveSpeed * 0.003));
+    const aeroBase = baseSpeedConsumption * aeroShare;
+    const nonAeroBase = baseSpeedConsumption - aeroBase;
+    const aeroWindFactor = Math.pow(relativeAirSpeed / effectiveSpeed, 2);
+    const windAdjustedConsumption = nonAeroBase + aeroBase * aeroWindFactor;
+    windMultiplier = Math.max(0.65, Math.min(1.60, windAdjustedConsumption / baseSpeedConsumption));
+    windImpactPct = Math.round((windMultiplier - 1) * 100);
 
     const normAngle = ((relativeWindAngleDeg % 360) + 360) % 360;
     if (normAngle <= 45 || normAngle >= 315) {
