@@ -466,15 +466,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   <div><span className="text-slate-500">Расход</span><b className="block">{routeForecast.consumption.toFixed(1)} кВт⋅ч/100</b></div><div><span className="text-slate-500">Энергия</span><b className="block">{routeForecast.energyKwh.toFixed(2)} кВт⋅ч</b></div>
                   {routeWeather && <><div><span className="text-slate-500 inline-flex items-center gap-1"><CloudSun className="w-3.5 h-3.5" />Погода по маршруту</span><b className="block">{routeForecast.weatherLabel}</b><span className="text-[10px] text-slate-500">{weatherMode === 'planning' ? 'Ручные условия' : `${routeWeather.samples.length} точек · сейчас`} → {routeWeather.arrivalDate.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</span></div><div><span className="text-slate-500 inline-flex items-center gap-1"><Wind className="w-3.5 h-3.5" />Ветер</span><b className="flex items-center gap-1"><ArrowDown className="w-4 h-4 shrink-0" style={{ transform: `rotate(${routeForecast.relativeWindAngle}deg)` }} />{routeForecast.windLabel}</b></div></>}
                 </div>
-                <button onClick={() => setConsumptionOpen(v => !v)} className={`mt-4 w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-xs font-bold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-white text-slate-700 border border-slate-200'}`}><span className="inline-flex items-center gap-2"><Zap className="w-4 h-4 text-amber-500" />Почему такой расход?</span><ChevronDown className={`w-4 h-4 transition-transform ${consumptionOpen ? 'rotate-180' : ''}`} /></button>
-                {consumptionOpen && <div className={`mt-2 rounded-xl p-3 text-xs space-y-2 ${isDark ? 'bg-slate-900/70 text-slate-300' : 'bg-white/80 text-slate-600 border border-slate-200'}`}>
-                  <div className="flex justify-between"><span>🚗 Стиль езды</span><b>x{routeForecast.driverStyleFactor.toFixed(2)} · {routeForecast.driverStyleSource}</b></div>
-                  <div className="flex justify-between"><span>🏎️ Скорость ({plannedSpeedKmH} км/ч)</span><b>{routeForecast.speedImpactPct >= 0 ? '+' : ''}{routeForecast.speedImpactPct}%</b></div>
-                  <div className="flex justify-between"><span>🌡️ Климат</span><b>{getClimateModeLabel()} {routeForecast.climatePowerKw > 0 ? `${routeForecast.climatePowerKw.toFixed(1)} кВт⋅ч/ч` : '0 кВт⋅ч/ч'}</b></div>
-                  <div className="flex justify-between"><span>⛰️ Рельеф (нетто)</span><b>{routeElevation.netElevationEnergyKwh >= 0 ? '+' : ''}{routeElevation.netElevationEnergyKwh.toFixed(2)} кВт⋅ч</b></div>
-                  <div className="flex justify-between pt-2 border-t border-slate-500/20"><span>Итоговый прогноз</span><b>{routeForecast.consumption.toFixed(1)} кВт⋅ч/100</b></div>
-                  <p className="pt-1 text-[10px] text-slate-500">Климат считается как реальная мощность в кВт × время поездки; поэтому на той же дистанции медленная поездка расходует на отопление/кондиционер больше энергии.</p>
-                </div>}
               </div>
             )}
 
