@@ -119,13 +119,14 @@ export const buildRouteElevation=async(aLat:number,aLon:number,bLat:number,bLon:
       profile=await fetchElevationProfile(route.coords,route.distanceKm,onProgress);
       writeElevationCache(cacheKey,{coords:profile.coords,elevations:profile.elevations,savedAt:Date.now()});
     }catch(e){
-      if(e instanceof ElevationLimitError){
-        // Daily limit hit just now: don't fail the whole trip calculation — continue with a flat
-        // (zero elevation-delta) profile and tell the user plainly what happened.
-        elevationAvailable=false; elevationNote=ELEVATION_UNAVAILABLE_NOTE;
-        const flat=sampleRouteByDistance(route.coords,route.distanceKm);
-        profile={coords:flat,elevations:flat.map(()=>0)};
-      }else throw e;
+      // Elevation is an optional enrichment. Any provider/network/parsing failure must never
+      // abort the route SOC forecast: continue with a neutral (flat) profile.
+      elevationAvailable=false;
+      elevationNote = e instanceof ElevationLimitError
+        ? ELEVATION_UNAVAILABLE_NOTE
+        : `${ELEVATION_UNAVAILABLE_NOTE} Причина: ${e instanceof Error ? e.message : 'ошибка получения высот'}`;
+      const flat=sampleRouteByDistance(route.coords,route.distanceKm);
+      profile={coords:flat,elevations:flat.map(()=>0)};
     }
   }
 
