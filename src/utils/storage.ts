@@ -289,27 +289,33 @@ export function calculateClimateImpact(temperatureC: number | undefined, climate
   let description: string;
 
   if (temp >= 19 && temp <= 23) {
-    powerKw = 0.35;
-    label = 'A/C Комфорт';
-    description = 'Минимальная нагрузка климата ~0,35 кВт';
+    powerKw = 0.30;
+    label = 'Климат · комфорт';
+    description = 'Средняя электрическая нагрузка HVAC ~0,3 кВт';
   } else if (temp < 19) {
-    const delta = 21 - temp;
-    if (temp >= 0) {
-      powerKw = 1.2 + delta * 0.20;
+    // VIGO is equipped with a heat pump. Model electrical input rather than
+    // thermal demand; allow supplemental resistive/PTC heating only at very low temperatures.
+    if (temp >= 10) {
+      powerKw = 0.55 + (19 - temp) * 0.075;
+    } else if (temp >= 0) {
+      powerKw = 1.225 + (10 - temp) * 0.10;
+    } else if (temp >= -10) {
+      powerKw = 2.225 + Math.abs(temp) * 0.11;
     } else {
-      powerKw = 5.4 + Math.abs(temp) * 0.12;
+      powerKw = 3.325 + (Math.abs(temp) - 10) * 0.16;
     }
-    powerKw = Math.min(8.0, Math.max(1.2, powerKw));
-    label = `Обогрев (${powerKw.toFixed(1)} кВт)`;
-    description = `Нагрузка отопления при ${temp}°C: ~${powerKw.toFixed(1)} кВт`;
+    powerKw = Math.min(5.5, Math.max(0.55, powerKw));
+    label = `Тепловой насос (${powerKw.toFixed(1)} кВт)`;
+    description = `Оценочная электрическая нагрузка теплового насоса при ${temp}°C: ~${powerKw.toFixed(1)} кВт`;
   } else {
-    powerKw = 0.8 + (temp - 23) * 0.12;
-    powerKw = Math.min(3.0, Math.max(0.8, powerKw));
-    label = `A/C Охлаждение (${powerKw.toFixed(1)} кВт)`;
-    description = `Нагрузка охлаждения при ${temp}°C: ~${powerKw.toFixed(1)} кВт`;
+    powerKw = 0.65 + (temp - 23) * 0.10;
+    powerKw = Math.min(2.6, Math.max(0.65, powerKw));
+    label = `A/C охлаждение (${powerKw.toFixed(1)} кВт)`;
+    description = `Оценочная электрическая нагрузка охлаждения при ${temp}°C: ~${powerKw.toFixed(1)} кВт`;
   }
 
-  // Display-only equivalent at 60 km/h, so existing UI can still show a comparable kWh/100 km value.
+  // kWh/100 km is only a legacy equivalent. The primary HVAC metric is kW (= kWh/h),
+  // and route HVAC energy is calculated as power × actual trip time.
   const deltaKwh100 = Number((powerKw / 60 * 100).toFixed(2));
   const impactPct = Math.round((deltaKwh100 / BENCHMARK_CONSUMPTION_KWH_100KM) * 100);
   return { impactPct, deltaKwh100, powerKw, factor: Number((1 + impactPct / 100).toFixed(2)), label, description };

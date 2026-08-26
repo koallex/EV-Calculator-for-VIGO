@@ -196,7 +196,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       const windLabel=forecast.windStatusText || `Ветер ~${Math.round(avgWindSpeed)} км/ч`;
       const weatherLabel=`${Math.round(avgTemperature)>=0?'+':''}${Math.round(avgTemperature)}°C`;
       setRouteWeather({ ...displayWeather, temperature:Math.round(avgTemperature), windSpeed:Math.round(avgWindSpeed), precipitation:Number(avgPrecipitation.toFixed(1)), routeBearing, etaMinutes, arrivalDate, samples });
-      setRouteForecast({consumption:forecast.estimatedConsumption,energyKwh:Number(energyKwh.toFixed(2)),arrivalSoc,windLabel,weatherLabel,precipitationLabel:forecast.precipitationLabel||'Без существенных осадков',relativeWindAngle:avgRelativeWindAngle,driverStyleFactor:forecast.driverStyleFactor,driverStyleSource:getDriverStyleSourceLabel(forecast.dataSource),climateLabel:forecast.climateLabel,climateImpactPct:forecast.climateImpactPct,climateDeltaKwh100:forecast.climateDeltaKwh100??0,speedImpactPct:forecast.speedImpactPct});
+      setRouteForecast({consumption:forecast.estimatedConsumption,energyKwh:Number(energyKwh.toFixed(2)),arrivalSoc,windLabel,weatherLabel,precipitationLabel:forecast.precipitationLabel||'Без существенных осадков',relativeWindAngle:avgRelativeWindAngle,driverStyleFactor:forecast.driverStyleFactor,driverStyleSource:getDriverStyleSourceLabel(forecast.dataSource),climateLabel:forecast.climateLabel,climateImpactPct:forecast.climateImpactPct,climateDeltaKwh100:forecast.climateDeltaKwh100??0,climatePowerKw:forecast.climatePowerKw??0,speedImpactPct:forecast.speedImpactPct});
       setEndSoc(arrivalSoc); setRouteStatus('Готово');
     } catch (e) {
       const msg=e instanceof Error?e.message:'Ошибка расчёта маршрута';
@@ -234,6 +234,25 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     setRouteForecast({ ...routeForecast, consumption: scenario.consumption, energyKwh, arrivalSoc: scenario.arrivalSoc, speedImpactPct: scenario.speedImpactPct });
     setEndSoc(scenario.arrivalSoc);
   };
+
+  // Finds the speed that minimizes total route energy for the currently loaded route,
+  // weather, elevation, HVAC setting and battery state. This is a local calculation —
+  // it does not trigger any additional route/weather API requests.
+  const getOptimalSpeedScenario = () => {
+    if (!routeElevation || !routeWeather || !routeForecast) return null;
+    const candidates = Array.from({ length: 15 }, (_, i) => 50 + i * 5); // 50..120 km/h
+    const scenarios = candidates
+      .map((speed) => getWhatIfScenario(speed))
+      .filter((s): s is NonNullable<ReturnType<typeof getWhatIfScenario>> => Boolean(s));
+    if (!scenarios.length) return null;
+    return scenarios.reduce((best, current) => {
+      const bestEnergy = (routeElevation.distanceKm / 100) * best.consumption;
+      const currentEnergy = (routeElevation.distanceKm / 100) * current.consumption;
+      return currentEnergy < bestEnergy ? current : best;
+    });
+  };
+
+  const optimalSpeedScenario = getOptimalSpeedScenario();
 
   // Fast math calculations
   const batteryCap = settings.batteryCapacityKwh || 51.87;
@@ -428,11 +447,29 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 {consumptionOpen && <div className={`mt-2 rounded-xl p-3 text-xs space-y-2 ${isDark ? 'bg-slate-900/70 text-slate-300' : 'bg-white/80 text-slate-600 border border-slate-200'}`}>
                   <div className="flex justify-between"><span>🚗 Стиль езды</span><b>x{routeForecast.driverStyleFactor.toFixed(2)} · {routeForecast.driverStyleSource}</b></div>
                   <div className="flex justify-between"><span>🏎️ Скорость ({plannedSpeedKmH} км/ч)</span><b>{routeForecast.speedImpactPct >= 0 ? '+' : ''}{routeForecast.speedImpactPct}%</b></div>
-                  <div className="flex justify-between"><span>🌡️ Климат</span><b>{getClimateModeLabel()} {routeForecast.climateDeltaKwh100 > 0 ? `+${routeForecast.climateDeltaKwh100.toFixed(1)} кВт⋅ч/100` : '0 кВт⋅ч/100'}</b></div>
+                  <div className="flex justify-between"><span>🌡️ Климат</span><b>{getClimateModeLabel()} {routeForecast.climatePowerKw > 0 ? `${routeForecast.climatePowerKw.toFixed(1)} кВт⋅ч/ч` : '0 кВт⋅ч/ч'}</b></div>
                   <div className="flex justify-between"><span>⛰️ Рельеф (нетто)</span><b>{routeElevation.netElevationEnergyKwh >= 0 ? '+' : ''}{routeElevation.netElevationEnergyKwh.toFixed(2)} кВт⋅ч</b></div>
                   <div className="flex justify-between pt-2 border-t border-slate-500/20"><span>Итоговый прогноз</span><b>{routeForecast.consumption.toFixed(1)} кВт⋅ч/100</b></div>
                   <p className="pt-1 text-[10px] text-slate-500">Климат считается как реальная мощность в кВт × время поездки; поэтому на той же дистанции медленная поездка расходует на отопление/кондиционер больше энергии.</p>
                 </div>}
+              </div>
+            )}
+
+            {optimalSpeedScenario && (
+              <div className={`mt-3 rounded-xl border p-3 ${isDark ? 'bg-emerald-950/30 border-emerald-900/60' : 'bg-emerald-50 border-emerald-200'}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className={`text-[10px] font-bold uppercase tracking-wide ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>Оптимальная скорость</div>
+                    <div className={`mt-0.5 text-2xl font-black font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>{optimalSpeedScenario.speed} км/ч</div>
+                  </div>
+                  <div className="text-right text-[11px]">
+                    <div><span className="text-slate-500">Расход</span> <b>{optimalSpeedScenario.consumption.toFixed(1)} кВт⋅ч/100</b></div>
+                    <div className="mt-0.5"><span className="text-slate-500">Прибытие</span> <b>{optimalSpeedScenario.arrivalSoc}% SOC</b></div>
+                  </div>
+                </div>
+                <div className={`mt-2 text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                  Минимум энергии для текущих условий маршрута, погоды, рельефа и климата. Проверен диапазон 50–120 км/ч.
+                </div>
               </div>
             )}
 
