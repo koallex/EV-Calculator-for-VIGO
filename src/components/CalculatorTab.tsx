@@ -1,0 +1,1029 @@
+import React, { useEffect, useState } from 'react';
+import {
+  Zap,
+  Gauge,
+  Coins,
+  ChevronRight,
+  TrendingDown,
+  Mountain,
+  MapPin,
+  Loader2,
+  ArrowDown,
+  Navigation,
+  CloudSun,
+  CloudRain,
+  Sun,
+  Wind,
+  Thermometer,
+  Power,
+  ChevronDown,
+  Map,
+  ChartNoAxesCombined,
+  LocateFixed,
+} from 'lucide-react';
+import { UserSettings, RoadType, TripSession } from '../types';
+import { BatteryVisual } from './BatteryVisual';
+import { DecimalInput } from './DecimalInput';
+import { getTariffForType, estimateTripConsumption, calculateClimateImpact } from '../utils/storage';
+import { triggerHaptic } from '../utils/haptics';
+import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress } from '../services/routeElevation';
+import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
+import { RouteMap } from './RouteMap';
+import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts';
+
+interface CalculatorTabProps {
+  settings: UserSettings;
+  sessions: TripSession[];
+  onSaveToHistory: (tripData: Omit<TripSession, 'id' | 'createdAt'>) => void;
+  onOpenAddModalWithData: (initialData: Partial<TripSession>) => void;
+}
+
+export const CalculatorTab: React.FC<CalculatorTabProps> = ({
+  settings,
+  sessions,
+  onSaveToHistory,
+  onOpenAddModalWithData,
+}) => {
+  // Input states
+  const [startSoc, setStartSoc] = useState<number>(100);
+  const [endSoc, setEndSoc] = useState<number>(45);
+  const [distanceKm, setDistanceKm] = useState<number>(180);
+  const [roadType, setRoadType] = useState<RoadType>('city');
+  const [climateOn, setClimateOn] = useState(true);
+  // Weather mode: live API for trips now, or manual conditions for long-term planning.
+  const [weatherMode, setWeatherMode] = useState<'current' | 'planning'>('current');
+  const [manualTemperature, setManualTemperature] = useState(20);
+  const [manualWindSpeed, setManualWindSpeed] = useState(0);
+  const [manualWindDirection, setManualWindDirection] = useState(0);
+  const [manualPrecipitationType, setManualPrecipitationType] = useState<'none' | 'rain' | 'snow'>('none');
+  const [chargingType, setChargingType] = useState<TripSession['chargingType']>('malanka_dc');
+
+  // Planned route: current GPS point A -> selected destination B -> detailed elevation profile.
+  const [startMode, setStartMode] = useState<'gps' | 'address'>('gps');
+  const [startAddress, setStartAddress] = useState('');
+  const [destinationAddress, setDestinationAddress] = useState('');
+  const [routeStatus, setRouteStatus] = useState('');
+  const [routeElevation, setRouteElevation] = useState<RouteElevationData | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeError, setRouteError] = useState('');
+  const [plannedSpeedKmH, setPlannedSpeedKmH] = useState(70);
+  const [routeWeather, setRouteWeather] = useState<{ temperature:number; windSpeed:number; windDirection:number; weatherCode:number; precipitation:number; routeBearing:number; etaMinutes:number; arrivalDate: Date; samples: RouteWeatherSample[] } | null>(null);
+  const [routeForecast, setRouteForecast] = useState<{ consumption:number; energyKwh:number; arrivalSoc:number; windLabel:string; weatherLabel:string; precipitationLabel:string; relativeWindAngle:number; driverStyleFactor:number; driverStyleSource:string; climateLabel:string; climateImpactPct:number; climateDeltaKwh100:number; speedImpactPct:number } | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<'searching' | 'ok' | 'error'>('searching');
+  const [quickWeather, setQuickWeather] = useState<{ temperature:number; weatherCode:number; windSpeed:number } | null>(null);
+  const [routeMapOpen, setRouteMapOpen] = useState(false);
+  const [elevationOpen, setElevationOpen] = useState(false);
+  const [consumptionOpen, setConsumptionOpen] = useState(false);
+
+  const weatherIcon = (code: number, className = 'w-4 h-4') => {
+    if ([51,53,55,61,63,65,80,81,82].includes(code)) return <CloudRain className={className} />;
+    if ([0,1].includes(code)) return <Sun className={className} />;
+    return <CloudSun className={className} />;
+  };
+
+  useEffect(() => {
+    if (!navigator.geolocation) { setGpsStatus('error'); return; }
+    const id = navigator.geolocation.watchPosition(
+      async (position) => {
+        setGpsStatus('ok');
+        try {
+          const { latitude, longitude } = position.coords;
+          const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude.toFixed(4)}&longitude=${longitude.toFixed(4)}&current=temperature_2m,weather_code,wind_speed_10m&timezone=auto`);
+          if (!res.ok) return;
+          const data = await res.json();
+          if (data?.current) setQuickWeather({
+            temperature: Math.round(data.current.temperature_2m),
+            weatherCode: data.current.weather_code ?? 0,
+            windSpeed: Math.round(data.current.wind_speed_10m ?? 0),
+          });
+        } catch { /* keep last known weather */ }
+      },
+      () => setGpsStatus('error'),
+      { enableHighAccuracy: false, maximumAge: 60000, timeout: 10000 }
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, []);
+
+
+  const calculateBearing = (lat1:number, lon1:number, lat2:number, lon2:number) => {
+    const r=Math.PI/180, y=Math.sin((lon2-lon1)*r)*Math.cos(lat2*r), x=Math.cos(lat1*r)*Math.sin(lat2*r)-Math.sin(lat1*r)*Math.cos(lat2*r)*Math.cos((lon2-lon1)*r);
+    return (Math.atan2(y,x)*180/Math.PI+360)%360;
+  };
+
+  const fetchRouteWeather = async (lat: number, lon: number, arrivalDate: Date) => {
+    const result = await fetchForecastWeatherAt(lat, lon, arrivalDate);
+    if (!result) throw new Error('Не удалось получить прогноз погоды. Попробуйте ещё раз.');
+    return result;
+  };
+
+  const getDriverStyleSourceLabel = (source: string) => {
+    if (source === 'monthly_history') return 'Журнал за 30 дней';
+    if (source === 'all_history') return 'Вся история поездок';
+    if (source === 'current_trip') return 'Текущая поездка';
+    return 'Базовая модель';
+  };
+
+  const getClimateModeLabel = () => climateOn ? 'Включен · AUTO' : 'Выключен';
+
+  const updateRouteStartSoc = (value: number) => {
+    const next = Math.max(1, Math.min(100, Math.round(value)));
+    setStartSoc(next);
+    setRouteForecast((prev) => {
+      if (!prev) return prev;
+      const cap = settings.batteryCapacityKwh || 51.87;
+      const arrivalSoc = Math.max(0, Number((next - (prev.energyKwh / cap) * 100).toFixed(1)));
+      return { ...prev, arrivalSoc };
+    });
+  };
+
+  const calculateRouteProfile = async () => {
+    if (!destinationAddress.trim()) { setRouteError('Введите адрес точки Б'); return; }
+    if (startMode === 'address' && !startAddress.trim()) { setRouteError('Введите адрес точки А'); return; }
+    setRouteLoading(true); setRouteError(''); setRouteElevation(null); setRouteWeather(null); setRouteForecast(null);
+    const onProgress = (p: RouteProgress) => setRouteStatus(p.message);
+    try {
+      let start: { lat:number; lon:number; displayName:string };
+      if (startMode === 'gps') {
+        if (!navigator.geolocation) throw new Error('Геолокация недоступна');
+        setRouteStatus('Получаем текущую геопозицию…');
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy:true, timeout:15000, maximumAge:30000 }));
+        start = { lat:pos.coords.latitude, lon:pos.coords.longitude, displayName:'Текущая геопозиция' };
+      } else { setRouteStatus('Ищем начальный адрес…'); start = await geocodeAddress(startAddress.trim()); }
+      setRouteStatus('Ищем адрес назначения…');
+      const destination = await geocodeAddress(destinationAddress.trim());
+      const data = await buildRouteElevation(start.lat,start.lon,destination.lat,destination.lon,destination.displayName,onProgress);
+      setRouteElevation(data); setDistanceKm(data.distanceKm);
+      const etaMinutes=Math.max(1,Math.round((data.distanceKm/Math.max(10,plannedSpeedKmH))*60));
+      // Всегда используем текущее время: API прогноза корректно работает для актуального
+      // погодного окна, без выбора удалённой даты отправления.
+      const departureDate = new Date();
+      const arrivalDate=new Date(departureDate.getTime()+etaMinutes*60000);
+      const avg = <T,>(values:T[], fallback:T) => values.length ? values.reduce((a:any,b:any)=>a+b,0)/values.length : fallback;
+      let samples: RouteWeatherSample[] = [];
+      let avgTemperature = 20;
+      let avgWindSpeed = 0;
+      let avgPrecipitation = 0;
+      let avgWeatherCode = 0;
+      const routeBearing=calculateBearing(start.lat,start.lon,destination.lat,destination.lon);
+      let avgRelativeWindAngle = 0;
+
+      if (weatherMode === 'current') {
+        setRouteStatus('Получаем прогноз погоды по маршруту…');
+        samples = await fetchForecastWeatherAlongRoute(data.points, departureDate, plannedSpeedKmH);
+        if (!samples.length) throw new Error('Не удалось получить актуальный прогноз погоды по маршруту. Попробуйте повторить расчёт позже.');
+        avgTemperature = avg(samples.map(s=>s.weather.temperature), 20);
+        avgWindSpeed = avg(samples.map(s=>s.weather.windSpeed), 0);
+        avgPrecipitation = avg(samples.map(s=>s.weather.precipitation), 0);
+        avgWeatherCode = samples[Math.floor(samples.length/2)].weather.weatherCode;
+        const relativeAngles=samples.map(s => (s.weather.windDirection-routeBearing+360)%360);
+        avgRelativeWindAngle=avg(relativeAngles, relativeAngles[0] ?? 0);
+      } else {
+        // Manual weather deliberately bypasses forecast APIs, so planning works for any future date/season.
+        avgTemperature = manualTemperature;
+        avgWindSpeed = manualWindSpeed;
+        avgPrecipitation = manualPrecipitationType === 'rain' ? 2 : manualPrecipitationType === 'snow' ? 1 : 0;
+        avgWeatherCode = manualPrecipitationType === 'rain' ? 63 : manualPrecipitationType === 'snow' ? 71 : 0;
+        avgRelativeWindAngle = (manualWindDirection - routeBearing + 360) % 360;
+      }
+      const climatePowers = weatherMode === 'current' ? samples.map(s => calculateClimateImpact(s.weather.temperature, climateOn).powerKw) : [calculateClimateImpact(avgTemperature, climateOn).powerKw];
+      const avgClimatePowerKw = avg(climatePowers, 0);
+      const climateEnabled=climateOn;
+      const tripDurationHours = etaMinutes / 60;
+      const forecast=estimateTripConsumption(plannedSpeedKmH,avgTemperature,sessions,settings.batteryCapacityKwh,climateEnabled,avgWindSpeed,avgRelativeWindAngle,undefined,avgWeatherCode,avgPrecipitation,{gainM:data.elevationGainM,lossM:data.elevationLossM,distanceKm:data.distanceKm},tripDurationHours,avgClimatePowerKw);
+      const energyKwh=(data.distanceKm/100)*forecast.estimatedConsumption;
+      const arrivalSoc=Math.max(0,Number((startSoc-(energyKwh/(settings.batteryCapacityKwh||51.87))*100).toFixed(1)));
+      const displayWeather = weatherMode === 'current' && samples.length ? samples[Math.min(samples.length - 1, Math.floor(samples.length/2))].weather : { temperature: avgTemperature, windSpeed: avgWindSpeed, windDirection: manualWindDirection, weatherCode: avgWeatherCode, precipitation: avgPrecipitation };
+      const windLabel=forecast.windStatusText || `Ветер ~${Math.round(avgWindSpeed)} км/ч`;
+      const weatherLabel=`${Math.round(avgTemperature)>=0?'+':''}${Math.round(avgTemperature)}°C`;
+      setRouteWeather({ ...displayWeather, temperature:Math.round(avgTemperature), windSpeed:Math.round(avgWindSpeed), precipitation:Number(avgPrecipitation.toFixed(1)), routeBearing, etaMinutes, arrivalDate, samples });
+      setRouteForecast({consumption:forecast.estimatedConsumption,energyKwh:Number(energyKwh.toFixed(2)),arrivalSoc,windLabel,weatherLabel,precipitationLabel:forecast.precipitationLabel||'Без существенных осадков',relativeWindAngle:avgRelativeWindAngle,driverStyleFactor:forecast.driverStyleFactor,driverStyleSource:getDriverStyleSourceLabel(forecast.dataSource),climateLabel:forecast.climateLabel,climateImpactPct:forecast.climateImpactPct,climateDeltaKwh100:forecast.climateDeltaKwh100??0,speedImpactPct:forecast.speedImpactPct});
+      setEndSoc(arrivalSoc); setRouteStatus('Готово');
+    } catch (e) {
+      const msg=e instanceof Error?e.message:'Ошибка расчёта маршрута';
+      setRouteError(/denied|permission/i.test(msg)?'Разрешите доступ к геопозиции или выберите адрес точки А':msg); setRouteStatus('');
+    } finally { setRouteLoading(false); }
+  };
+
+  const getWhatIfScenario = (speed: number) => {
+    if (!routeElevation || !routeWeather) return null;
+    const forecast = estimateTripConsumption(
+      speed,
+      routeWeather.temperature,
+      sessions,
+      settings.batteryCapacityKwh,
+      climateOn,
+      routeWeather.windSpeed,
+      routeForecast?.relativeWindAngle ?? ((routeWeather.windDirection - routeWeather.routeBearing + 360) % 360),
+      undefined,
+      routeWeather.weatherCode,
+      routeWeather.precipitation,
+      { gainM: routeElevation.elevationGainM, lossM: routeElevation.elevationLossM, distanceKm: routeElevation.distanceKm },
+      (routeElevation.distanceKm / Math.max(5, speed)) ,
+      routeWeather.samples.length ? routeWeather.samples.reduce((sum, s) => sum + (calculateClimateImpact(s.weather.temperature, climateOn).powerKw), 0) / routeWeather.samples.length : undefined
+    );
+    const energyKwh = (routeElevation.distanceKm / 100) * forecast.estimatedConsumption;
+    const arrivalSoc = Math.max(0, Number((startSoc - (energyKwh / (settings.batteryCapacityKwh || 51.87)) * 100).toFixed(1)));
+    return { speed, consumption: forecast.estimatedConsumption, arrivalSoc, speedImpactPct: forecast.speedImpactPct };
+  };
+
+  const applyWhatIfSpeed = (speed: number) => {
+    const scenario = getWhatIfScenario(speed);
+    if (!scenario || !routeForecast || !routeElevation) return;
+    const energyKwh = Number(((routeElevation.distanceKm / 100) * scenario.consumption).toFixed(2));
+    setPlannedSpeedKmH(speed);
+    setRouteForecast({ ...routeForecast, consumption: scenario.consumption, energyKwh, arrivalSoc: scenario.arrivalSoc, speedImpactPct: scenario.speedImpactPct });
+    setEndSoc(scenario.arrivalSoc);
+  };
+
+  // Fast math calculations
+  const batteryCap = settings.batteryCapacityKwh || 51.87;
+  const socUsedPct = Math.max(0, startSoc - endSoc);
+  const energyUsedKwh = Math.max(0, (socUsedPct / 100) * batteryCap);
+  
+  // Consumption per 100 km
+  const consumptionPer100Km = distanceKm > 0 ? (energyUsedKwh / distanceKm) * 100 : 0;
+  const kmPerKwh = energyUsedKwh > 0 ? distanceKm / energyUsedKwh : 0;
+  
+  // Total potential real range at this consumption rate
+  const predictedFullRangeKm = consumptionPer100Km > 0 ? (batteryCap / consumptionPer100Km) * 100 : 0;
+  // Remaining range on current endSoc
+  const remainingRangeKm = consumptionPer100Km > 0 ? (((endSoc / 100) * batteryCap) / consumptionPer100Km) * 100 : 0;
+  const elevationAdjustedEnergyKwh = routeElevation ? Math.max(0, energyUsedKwh + routeElevation.netElevationEnergyKwh) : energyUsedKwh;
+  const elevationAdjustedConsumption = routeElevation && routeElevation.distanceKm > 0 ? (elevationAdjustedEnergyKwh / routeElevation.distanceKm) * 100 : consumptionPer100Km;
+
+  // Cost calculation
+  const activeTariff = getTariffForType(chargingType, settings);
+  const tripCost = energyUsedKwh * activeTariff;
+  const costPer100Km = consumptionPer100Km * activeTariff;
+
+  // Petrol comparison
+  const gasCostEquivalent = (distanceKm / 100) * settings.gasEquivalentL100km * settings.gasPricePerLiter;
+  const moneySaved = Math.max(0, gasCostEquivalent - tripCost);
+
+  // Efficiency Rating
+  const getEfficiencyRating = (cons: number) => {
+    if (cons <= 0) return { label: 'Ожидание ввода', color: 'text-slate-400', bg: 'bg-slate-800' };
+    if (cons < 13.5) return { label: 'Супер экономно', color: 'text-emerald-400', bg: 'bg-emerald-950/80 border-emerald-800/60' };
+    if (cons < 16.5) return { label: 'Отличный расход', color: 'text-cyan-400', bg: 'bg-cyan-950/80 border-cyan-800/60' };
+    if (cons < 19.5) return { label: 'Умеренный расход', color: 'text-amber-400', bg: 'bg-amber-950/80 border-amber-800/60' };
+    return { label: 'Повышенный расход', color: 'text-rose-400', bg: 'bg-rose-950/80 border-rose-800/60' };
+  };
+
+  const rating = getEfficiencyRating(consumptionPer100Km);
+
+  // Increment helper
+  const adjustValue = (
+    setter: React.Dispatch<React.SetStateAction<number>>,
+    delta: number,
+    min: number,
+    max: number
+  ) => {
+    triggerHaptic('light', settings.hapticFeedback);
+    setter((prev) => Math.min(max, Math.max(min, Number((prev + delta).toFixed(1)))));
+  };
+
+  const handleQuickSave = () => {
+    triggerHaptic('success', settings.hapticFeedback);
+    onSaveToHistory({
+      date: new Date().toISOString().split('T')[0],
+      startSoc,
+      endSoc,
+      distanceKm,
+      energyUsedKwh: Number(energyUsedKwh.toFixed(2)),
+      consumptionPer100Km: Number(consumptionPer100Km.toFixed(2)),
+      kmPerKwh: Number(kmPerKwh.toFixed(2)),
+      chargingType,
+      totalCost: Number(tripCost.toFixed(2)),
+      gasCostEquivalent: Number(gasCostEquivalent.toFixed(2)),
+      moneySaved: Number(moneySaved.toFixed(2)),
+      roadType,
+      climateOn,
+      temperature: routeWeather?.temperature ?? 20,
+      note: `Калькулятор: ${startSoc}% → ${endSoc}%, ${distanceKm} км${routeElevation ? ` · ▲${routeElevation.elevationGainM}м ▼${routeElevation.elevationLossM}м` : ''}`,
+      elevationGainM: routeElevation?.elevationGainM,
+      elevationLossM: routeElevation?.elevationLossM,
+      startElevationM: routeElevation?.startElevationM,
+      endElevationM: routeElevation?.endElevationM,
+      elevationEnergyUsedKwh: routeElevation?.grossClimbEnergyKwh,
+      regenEnergyRecoveredKwh: routeElevation?.recoveredEnergyKwh,
+    });
+  };
+
+  const isDark = settings.theme !== 'light';
+
+  return (
+    <div id="calculator-tab-container" className="space-y-4 pb-12 max-w-2xl mx-auto">
+      {/* Quick status */}
+      <section className={`rounded-2xl border px-4 py-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs">
+            <span className={`inline-flex h-2 w-2 rounded-full ${gpsStatus === 'ok' ? 'bg-emerald-500' : gpsStatus === 'error' ? 'bg-rose-500' : 'bg-amber-500 animate-pulse'}`} />
+            <LocateFixed className={`w-4 h-4 ${gpsStatus === 'ok' ? 'text-emerald-500' : gpsStatus === 'error' ? 'text-rose-500' : 'text-amber-500'}`} />
+            <span className="font-semibold">GPS</span>
+            <span className="text-slate-500">{gpsStatus === 'ok' ? 'Сигнал есть' : gpsStatus === 'error' ? 'Недоступен' : 'Поиск…'}</span>
+          </div>
+          {quickWeather ? (
+            <div className="flex items-center gap-1.5 text-xs">
+              {weatherIcon(quickWeather.weatherCode)}
+              <span className="font-semibold">{quickWeather.temperature >= 0 ? '+' : ''}{quickWeather.temperature}°C</span>
+              <span className="text-slate-500">·</span>
+              <Wind className="w-3.5 h-3.5 text-slate-400" />
+              <span>{quickWeather.windSpeed} км/ч</span>
+            </div>
+          ) : <span className="text-xs text-slate-500">Погода загружается…</span>}
+        </div>
+      </section>
+
+      {/* Climate control */}
+      <section className={`rounded-2xl border p-4 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 font-bold text-sm"><Thermometer className="w-4 h-4 text-emerald-500" />Климат</div>
+            <p className="text-[11px] text-slate-500 mt-0.5">AUTO учитывается по температуре на улице</p>
+          </div>
+          <button onClick={() => { triggerHaptic('light', settings.hapticFeedback); setClimateOn(v => !v); }}
+            className={`min-w-24 rounded-xl py-2.5 px-3 text-xs font-bold border transition-colors ${climateOn ? (isDark ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60' : 'bg-emerald-600 text-white border-emerald-700') : (isDark ? 'bg-slate-950 text-slate-400 border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200')}`}>
+            <span className="inline-flex items-center gap-1.5"><Power className="w-3.5 h-3.5" />{climateOn ? 'ВКЛ' : 'ВЫКЛ'}</span>
+          </button>
+        </div>
+      </section>
+
+      {/* Weather source */}
+      <section className={`rounded-2xl border p-4 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div><div className="flex items-center gap-2 font-bold text-sm"><CloudSun className="w-4 h-4 text-emerald-500" />Условия поездки</div><p className="text-[11px] text-slate-500 mt-0.5">Погода сейчас или ручное долгосрочное планирование</p></div>
+        </div>
+        <div className={`grid grid-cols-2 rounded-xl p-1 ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
+          <button onClick={() => setWeatherMode('current')} className={`rounded-lg py-2 text-xs font-semibold ${weatherMode === 'current' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>Сейчас</button>
+          <button onClick={() => setWeatherMode('planning')} className={`rounded-lg py-2 text-xs font-semibold ${weatherMode === 'planning' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>Планирование</button>
+        </div>
+        {weatherMode === 'current' ? <div className="text-xs text-slate-500">Используется актуальная погода по маршруту и расчётному времени прохождения.</div> : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-xs"><span className="block text-slate-500 mb-1">🌡️ Температура, °C</span><DecimalInput value={manualTemperature} onChange={setManualTemperature} min={-40} max={50} className="w-full" /></label>
+              <label className="text-xs"><span className="block text-slate-500 mb-1">💨 Ветер, м/с</span><DecimalInput value={manualWindSpeed} onChange={setManualWindSpeed} min={0} max={40} className="w-full" /></label>
+            </div>
+            <div className="flex items-center gap-2"><Navigation className="w-4 h-4 text-slate-400" style={{transform:`rotate(${manualWindDirection}deg)`}} /><span className="text-xs text-slate-500">Направление ветра</span><DecimalInput value={manualWindDirection} onChange={(v) => setManualWindDirection(((Math.round(v)%360)+360)%360)} min={0} max={359} className="ml-auto w-20 text-right" /><span className="text-xs text-slate-500">°</span></div>
+            <div><div className="text-[11px] text-slate-500 mb-1.5">Осадки</div><div className="grid grid-cols-3 gap-1">{([['none','Нет'],['rain','Дождь'],['snow','Снег']] as const).map(([v,label]) => <button key={v} onClick={() => setManualPrecipitationType(v)} className={`rounded-lg py-2 text-xs font-semibold border ${manualPrecipitationType===v ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : (isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600')}`}>{label}</button>)}</div></div>
+            <p className="text-[10px] text-slate-500">Ручные условия используются без погодных API — можно планировать поездку на любой сезон.</p>
+          </div>
+        )}
+      </section>
+
+      {/* Route elevation profile */}
+      <section className={`rounded-2xl border p-4 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+        <div className="flex items-center gap-2">
+          <Mountain className="w-5 h-5 text-emerald-500" />
+          <div>
+            <h2 className="font-bold">Рельеф маршрута</h2>
+            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Реальный маршрут · точки по расстоянию · погода, ветер и рекуперация</p>
+          </div>
+        </div>
+
+        <div className={`grid grid-cols-2 rounded-xl p-1 ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
+          <button onClick={() => setStartMode('gps')} className={`rounded-lg py-2 text-xs font-semibold ${startMode === 'gps' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>📍 Текущая геопозиция</button>
+          <button onClick={() => setStartMode('address')} className={`rounded-lg py-2 text-xs font-semibold ${startMode === 'address' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>🏠 Адрес точки А</button>
+        </div>
+
+        {startMode === 'address' && (
+          <div className="relative">
+            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input value={startAddress} onChange={e => setStartAddress(e.target.value)} placeholder="Откуда? Город, улица, дом" className={`w-full rounded-xl border py-3 pl-9 pr-3 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`} />
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input value={destinationAddress} onChange={e => setDestinationAddress(e.target.value)} placeholder="Куда? Город, улица, дом" className={`w-full rounded-xl border py-3 pl-9 pr-3 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`} />
+          </div>
+          <button onClick={calculateRouteProfile} disabled={routeLoading} className="rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white disabled:opacity-60">
+            {routeLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Расчёт'}
+          </button>
+        </div>
+
+        {routeLoading && <div className="text-xs text-emerald-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />{routeStatus || 'Подготавливаем расчёт…'}</div>}
+        <div className={`rounded-xl p-3 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="flex items-center justify-between gap-3"><div><div className="text-xs font-semibold">Планируемая средняя скорость</div><div className="text-[10px] text-slate-500">Для ETA и прогноза погоды к моменту прибытия</div></div><div className="flex items-center gap-1"><DecimalInput value={plannedSpeedKmH} onChange={setPlannedSpeedKmH} min={20} max={140} className="w-20 text-right" /><span className="text-xs text-slate-500 whitespace-nowrap">км/ч</span></div></div></div>
+        {routeError && <div className="text-xs text-rose-500">{routeError}</div>}
+        {routeElevation && !routeElevation.elevationAvailable && routeElevation.elevationNote && (
+          <div className={`text-xs rounded-lg px-3 py-2 ${isDark ? 'bg-amber-950/40 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>⚠ {routeElevation.elevationNote}</div>
+        )}
+
+        {routeElevation && (
+          <>
+            {routeForecast && (
+              <div className={`rounded-2xl border p-4 ${isDark ? 'bg-slate-950/70 border-emerald-900/60' : 'bg-emerald-50/60 border-emerald-200'}`}>
+                <div className="text-center">
+                  <div className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Прогноз прибытия</div>
+                  <div className={`mt-1 text-5xl font-black font-mono ${routeForecast.arrivalSoc >= 20 ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : routeForecast.arrivalSoc >= 10 ? 'text-amber-500' : 'text-rose-500'}`}>{routeForecast.arrivalSoc}%</div>
+                  <div className={`mt-1 text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{routeForecast.arrivalSoc >= 20 ? '✓ Доедете с хорошим запасом' : routeForecast.arrivalSoc >= 10 ? '⚠ Небольшой запас по прибытию' : startSoc >= 99 ? '⚠ Потребуется зарядка в пути' : '⚠ Недостаточно заряда — потребуется зарядка перед поездкой или в пути'}</div>
+                </div>
+                <div className={`mt-4 h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}><div className="h-full rounded-full bg-emerald-500 transition-all duration-300" style={{ width: `${Math.min(100, Math.max(0, routeForecast.arrivalSoc))}%` }} /></div>
+                <div className="mt-2 flex justify-between text-[10px] text-slate-500"><span>0%</span><span>Старт {startSoc}%</span><span>100%</span></div>
+                <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                  <div><span className="text-slate-500">Расход</span><b className="block">{routeForecast.consumption.toFixed(1)} кВт⋅ч/100</b></div><div><span className="text-slate-500">Энергия</span><b className="block">{routeForecast.energyKwh.toFixed(2)} кВт⋅ч</b></div>
+                  {routeWeather && <><div><span className="text-slate-500 inline-flex items-center gap-1"><CloudSun className="w-3.5 h-3.5" />Погода по маршруту</span><b className="block">{routeForecast.weatherLabel}</b><span className="text-[10px] text-slate-500">{weatherMode === 'planning' ? 'Ручные условия' : `${routeWeather.samples.length} точек · сейчас`} → {routeWeather.arrivalDate.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</span></div><div><span className="text-slate-500 inline-flex items-center gap-1"><Wind className="w-3.5 h-3.5" />Ветер</span><b className="flex items-center gap-1"><ArrowDown className="w-4 h-4 shrink-0" style={{ transform: `rotate(${routeForecast.relativeWindAngle}deg)` }} />{routeForecast.windLabel}</b></div></>}
+                </div>
+                <button onClick={() => setConsumptionOpen(v => !v)} className={`mt-4 w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-xs font-bold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-white text-slate-700 border border-slate-200'}`}><span className="inline-flex items-center gap-2"><Zap className="w-4 h-4 text-amber-500" />Почему такой расход?</span><ChevronDown className={`w-4 h-4 transition-transform ${consumptionOpen ? 'rotate-180' : ''}`} /></button>
+                {consumptionOpen && <div className={`mt-2 rounded-xl p-3 text-xs space-y-2 ${isDark ? 'bg-slate-900/70 text-slate-300' : 'bg-white/80 text-slate-600 border border-slate-200'}`}>
+                  <div className="flex justify-between"><span>🚗 Стиль езды</span><b>x{routeForecast.driverStyleFactor.toFixed(2)} · {routeForecast.driverStyleSource}</b></div>
+                  <div className="flex justify-between"><span>🏎️ Скорость ({plannedSpeedKmH} км/ч)</span><b>{routeForecast.speedImpactPct >= 0 ? '+' : ''}{routeForecast.speedImpactPct}%</b></div>
+                  <div className="flex justify-between"><span>🌡️ Климат</span><b>{getClimateModeLabel()} {routeForecast.climateDeltaKwh100 > 0 ? `+${routeForecast.climateDeltaKwh100.toFixed(1)} кВт⋅ч/100` : '0 кВт⋅ч/100'}</b></div>
+                  <div className="flex justify-between"><span>⛰️ Рельеф (нетто)</span><b>{routeElevation.netElevationEnergyKwh >= 0 ? '+' : ''}{routeElevation.netElevationEnergyKwh.toFixed(2)} кВт⋅ч</b></div>
+                  <div className="flex justify-between pt-2 border-t border-slate-500/20"><span>Итоговый прогноз</span><b>{routeForecast.consumption.toFixed(1)} кВт⋅ч/100</b></div>
+                  <p className="pt-1 text-[10px] text-slate-500">Климат считается как реальная мощность в кВт × время поездки; поэтому на той же дистанции медленная поездка расходует на отопление/кондиционер больше энергии.</p>
+                </div>}
+              </div>
+            )}
+
+            <div className={`rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold inline-flex items-center gap-2"><Gauge className="w-4 h-4 text-emerald-500" />А что если?</span>
+                <span className="text-[10px] text-slate-500">Изменить скорость</span>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {[Math.max(20, plannedSpeedKmH - 10), plannedSpeedKmH, Math.min(140, plannedSpeedKmH + 10)].map((speed) => {
+                  const scenario = getWhatIfScenario(speed);
+                  const active = speed === plannedSpeedKmH;
+                  return <button key={speed} onClick={() => applyWhatIfSpeed(speed)} className={`rounded-lg border px-2 py-2 text-center transition-colors ${active ? 'border-emerald-500 bg-emerald-500/10' : isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
+                    <div className="text-xs font-bold">{speed} км/ч</div>
+                    <div className={`mt-1 text-[11px] font-bold ${scenario && scenario.arrivalSoc >= 20 ? 'text-emerald-500' : scenario && scenario.arrivalSoc >= 10 ? 'text-amber-500' : 'text-rose-500'}`}>{scenario ? `${scenario.arrivalSoc}% SOC` : '—'}</div>
+                  </button>;
+                })}
+              </div>
+              <div className="mt-2 text-[10px] text-slate-500">Нажмите вариант — скорость и прогноз SOC обновятся без повторного запроса маршрута.</div>
+            </div>
+
+            <button onClick={() => setRouteMapOpen(v => !v)} className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 text-sm font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}><span className="inline-flex items-center gap-2"><Map className="w-4 h-4 text-emerald-500" />Интерактивная карта маршрута</span><ChevronDown className={`w-4 h-4 transition-transform ${routeMapOpen ? 'rotate-180' : ''}`} /></button>
+            {routeMapOpen && <RouteMap points={routeElevation.points} isDark={isDark} />}
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-center">
+              <div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold">{routeElevation.distanceKm}</div><div className="text-[10px] text-slate-500">км маршрута</div></div><div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold text-amber-500">▲ {routeElevation.elevationGainM} м</div><div className="text-[10px] text-slate-500">набор</div></div><div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold text-cyan-500">▼ {routeElevation.elevationLossM} м</div><div className="text-[10px] text-slate-500">спуск</div></div><div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold">{routeElevation.netElevationEnergyKwh > 0 ? '+' : ''}{routeElevation.netElevationEnergyKwh.toFixed(2)}</div><div className="text-[10px] text-slate-500">кВт⋅ч нетто</div></div>
+            </div>
+            <button onClick={() => setElevationOpen(v => !v)} className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 text-sm font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}><span className="inline-flex items-center gap-2"><ChartNoAxesCombined className="w-4 h-4 text-cyan-500" />Профиль высот</span><ChevronDown className={`w-4 h-4 transition-transform ${elevationOpen ? 'rotate-180' : ''}`} /></button>
+            {elevationOpen && (() => {
+              const profilePoints = routeElevation.points
+                .map((p: any, i: number) => ({
+                  distance: Number(p?.distanceFromStartKm ?? (i * routeElevation.distanceKm / Math.max(1, routeElevation.points.length - 1))),
+                  elevation: Number(p?.elevationM),
+                }))
+                .filter((p: any) => Number.isFinite(p.elevation));
+
+              return profilePoints.length >= 2 ? (
+                <div className={`mt-2 h-56 min-h-56 rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={profilePoints} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
+                      <XAxis dataKey="distance" type="number" domain={[0, 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v} км`} interval="preserveStartEnd" />
+                      <Tooltip formatter={(v: number) => [`${Math.round(v)} м`, 'Высота']} labelFormatter={(v) => `${v} км от старта`} />
+                      <Area type="monotone" dataKey="elevation" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.18} strokeWidth={2} isAnimationActive />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className={`mt-2 rounded-xl border p-4 text-center text-xs ${isDark ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-500'}`}>
+                  Недостаточно точек профиля высот для отображения графика
+                </div>
+              );
+            })()}
+            <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-slate-950 text-slate-300' : 'bg-slate-50 text-slate-600'}`}><div className="flex justify-between"><span>Подъёмы</span><b>+{routeElevation.grossClimbEnergyKwh.toFixed(2)} кВт⋅ч</b></div><div className="flex justify-between mt-1"><span>Рекуперация</span><b className="text-emerald-500">−{routeElevation.recoveredEnergyKwh.toFixed(2)} кВт⋅ч</b></div><div className="flex justify-between mt-2 pt-2 border-t border-slate-500/20"><span>Скорректированный расход</span><b>{elevationAdjustedConsumption.toFixed(1)} кВт⋅ч/100 км</b></div></div>
+          </>
+        )}
+      </section>
+
+      {/* Route start SoC — updates route arrival instantly without rebuilding the route */}
+      <section className={`rounded-2xl border p-4 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="font-bold text-sm">Начальный заряд</h2>
+            <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Изменение сразу обновляет прогноз прибытия</p>
+          </div>
+          <span className={`text-2xl font-black font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{startSoc}%</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => updateRouteStartSoc(startSoc - 5)} className={`w-11 h-10 rounded-xl font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>
+          <input type="range" min={1} max={100} value={startSoc} onChange={(e) => updateRouteStartSoc(Number(e.target.value))} className="flex-1 accent-emerald-500 h-2 rounded-lg cursor-pointer" />
+          <button onClick={() => updateRouteStartSoc(startSoc + 5)} className={`w-11 h-10 rounded-xl font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+5</button>
+        </div>
+      </section>
+
+      {/* Top Banner: Battery Gauge & Glance Summary */}
+      <div
+        className={`border rounded-2xl p-4 transition-colors ${
+          isDark
+            ? 'bg-slate-900/60 border-slate-800/80'
+            : 'bg-white border-slate-200/80 shadow-xs'
+        }`}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div
+              className={`p-1.5 rounded-lg ${
+                isDark ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-50 text-emerald-600'
+              }`}
+            >
+              <Gauge className="w-4 h-4" />
+            </div>
+            <span className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+              Состояние заряда (SoC)
+            </span>
+          </div>
+          <div className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Израсходовано:{' '}
+            <span className={`font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+              -{socUsedPct}%
+            </span>{' '}
+            ({energyUsedKwh.toFixed(1)} кВт⋅ч)
+          </div>
+        </div>
+
+        <BatteryVisual currentPercent={endSoc} capacityKwh={batteryCap} theme={settings.theme} />
+
+      </div>
+
+      {/* 2. Key Metrics Card: Consumption & Range */}
+      <div
+        className={`border rounded-2xl p-4 space-y-4 transition-colors ${
+          isDark
+            ? 'bg-slate-900/60 border-slate-800/80'
+            : 'bg-white border-slate-200/80 shadow-xs'
+        }`}
+      >
+        <div className="flex items-center justify-between">
+          <span className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Расчет эффективности
+          </span>
+          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${rating.bg} ${rating.color}`}>
+            {rating.label}
+          </span>
+        </div>
+
+        {/* Primary Big Metric: kWh / 100 km */}
+        <div className="grid grid-cols-2 gap-3">
+          <div
+            className={`p-3.5 rounded-xl border flex flex-col justify-between ${
+              isDark
+                ? 'bg-slate-950/70 border-slate-800'
+                : 'bg-slate-50 border-slate-200/90 shadow-xs'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Расход на 100 км
+              </span>
+              <Zap className={`w-3.5 h-3.5 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
+            </div>
+            <div className="my-1">
+              <span className={`text-3xl font-extrabold font-mono tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {consumptionPer100Km > 0 ? consumptionPer100Km.toFixed(1) : '—'}
+              </span>
+              <span className={`text-xs font-semibold ml-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                кВт⋅ч
+              </span>
+            </div>
+            <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              {kmPerKwh > 0 ? `${kmPerKwh.toFixed(1)} км на 1 кВт⋅ч` : '0.0 км/кВт⋅ч'}
+            </span>
+          </div>
+
+          <div
+            className={`p-3.5 rounded-xl border flex flex-col justify-between ${
+              isDark
+                ? 'bg-slate-950/70 border-slate-800'
+                : 'bg-slate-50 border-slate-200/90 shadow-xs'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Стоимость поездки
+              </span>
+              <Coins className={`w-3.5 h-3.5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
+            </div>
+            <div className="my-1">
+              <span className={`text-3xl font-extrabold font-mono tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {tripCost.toFixed(2)}
+              </span>
+              <span className={`text-xs font-semibold ml-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                {settings.currency}
+              </span>
+            </div>
+            <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              {costPer100Km.toFixed(2)} {settings.currency} / 100 км
+            </span>
+          </div>
+        </div>
+
+        {/* ICE Comparison & Savings */}
+        <div
+          className={`p-3 rounded-xl border flex items-center justify-between transition-colors ${
+            isDark
+              ? 'bg-emerald-950/25 border-emerald-800/40 text-emerald-300'
+              : 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <div
+              className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                isDark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
+              }`}
+            >
+              <TrendingDown className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="text-xs font-bold">
+                Экономия по сравнению с ДВС:
+              </div>
+              <div className={`text-[11px] ${isDark ? 'text-emerald-400/80' : 'text-emerald-700'}`}>
+                Аналог ДВС: {settings.gasEquivalentL100km} л/100км ({gasCostEquivalent.toFixed(2)} {settings.currency})
+              </div>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-sm font-extrabold font-mono">
+              +{moneySaved.toFixed(2)} {settings.currency}
+            </div>
+            <div className={`text-[10px] font-semibold ${isDark ? 'text-emerald-400/80' : 'text-emerald-700'}`}>
+              {gasCostEquivalent > 0 ? `в ${(gasCostEquivalent / Math.max(0.1, tripCost)).toFixed(1)}x раз дешевле` : ''}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. Interactive Input Controls */}
+      <div
+        className={`border rounded-2xl p-4 space-y-3.5 transition-colors ${
+          isDark
+            ? 'bg-slate-900/60 border-slate-800/80'
+            : 'bg-white border-slate-200/80 shadow-xs'
+        }`}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+            Параметры поездки
+          </h3>
+        </div>
+
+        {/* Finish SoC */}
+        <div className={`p-3 rounded-xl border transition-colors ${isDark ? 'bg-slate-950/60 border-slate-800/80' : 'bg-slate-50/80 border-slate-200'}`}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <span className={`text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>SOC на финише</span>
+              <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Для расчёта фактического расхода</p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => adjustValue(setEndSoc, -10, 0, Math.max(0, startSoc - 1))} className={`h-9 px-2 rounded-lg text-xs font-bold border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−10</button>
+              <button onClick={() => adjustValue(setEndSoc, -1, 0, Math.max(0, startSoc - 1))} className={`w-9 h-9 rounded-lg font-bold border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−</button>
+              <span className={`min-w-14 text-center text-lg font-bold font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{endSoc}%</span>
+              <button onClick={() => adjustValue(setEndSoc, 1, 0, Math.max(0, startSoc - 1))} className={`w-9 h-9 rounded-lg font-bold border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+</button>
+              <button onClick={() => adjustValue(setEndSoc, 10, 0, Math.max(0, startSoc - 1))} className={`h-9 px-2 rounded-lg text-xs font-bold border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+10</button>
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-3">
+            <span className={`text-[10px] font-medium ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>0%</span>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(0, startSoc - 1)}
+              value={Math.min(endSoc, Math.max(0, startSoc - 1))}
+              onChange={(e) => setEndSoc(Number(e.target.value))}
+              className="flex-1 accent-emerald-500 h-2 cursor-pointer"
+              aria-label="SOC на финише"
+            />
+            <span className={`text-[10px] font-medium ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>{Math.max(0, startSoc - 1)}%</span>
+          </div>
+          </div>
+        </div>
+
+        {/* Distance with Steppers and iOS-safe DecimalInput */}
+        <div
+          className={`p-3 rounded-xl border transition-colors ${
+            isDark ? 'bg-slate-950/60 border-slate-800/80' : 'bg-slate-50/80 border-slate-200'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className={`text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+              Пройденное расстояние:
+            </span>
+            <div className="w-28">
+              <DecimalInput
+                value={distanceKm}
+                onChange={(val) => setDistanceKm(Math.max(0.1, val))}
+                suffix="км"
+                className={`w-full text-right px-2.5 py-1 rounded-lg text-base font-bold font-mono focus:outline-none border ${
+                  isDark
+                    ? 'bg-slate-900 border-slate-700 text-emerald-400 focus:border-emerald-400'
+                    : 'bg-white border-slate-300 text-emerald-600 focus:border-emerald-500 shadow-xs'
+                }`}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-4 gap-1.5 mt-2">
+            <button
+              onClick={() => adjustValue(setDistanceKm, -10, 1, 1000)}
+              className={`py-1.5 rounded-lg text-xs font-bold border active:scale-95 transition-all ${
+                isDark
+                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs'
+              }`}
+            >
+              -10 км
+            </button>
+            <button
+              onClick={() => adjustValue(setDistanceKm, -1, 1, 1000)}
+              className={`py-1.5 rounded-lg text-xs font-semibold border active:scale-95 transition-all ${
+                isDark
+                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs'
+              }`}
+            >
+              -1 км
+            </button>
+            <button
+              onClick={() => adjustValue(setDistanceKm, 1, 1, 1000)}
+              className={`py-1.5 rounded-lg text-xs font-semibold border active:scale-95 transition-all ${
+                isDark
+                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs'
+              }`}
+            >
+              +1 км
+            </button>
+            <button
+              onClick={() => adjustValue(setDistanceKm, 10, 1, 1000)}
+              className={`py-1.5 rounded-lg text-xs font-bold border active:scale-95 transition-all ${
+                isDark
+                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs'
+              }`}
+            >
+              +10 км
+            </button>
+          </div>
+        </div>
+
+        {/* Road Type & Climate */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {/* Road Type */}
+          <div
+            className={`p-2.5 rounded-xl border transition-colors ${
+              isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
+            }`}
+          >
+            <span className={`text-[11px] font-semibold block mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              Условия движения:
+            </span>
+            <div className="grid grid-cols-3 gap-1">
+              <button
+                onClick={() => {
+                  triggerHaptic('light', settings.hapticFeedback);
+                  setRoadType('city');
+                }}
+                className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-all border ${
+                  roadType === 'city'
+                    ? isDark
+                      ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60'
+                      : 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                    : isDark
+                    ? 'bg-slate-900 text-slate-400 border-transparent'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                🏙️ Город
+              </button>
+              <button
+                onClick={() => {
+                  triggerHaptic('light', settings.hapticFeedback);
+                  setRoadType('highway');
+                }}
+                className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-all border ${
+                  roadType === 'highway'
+                    ? isDark
+                      ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60'
+                      : 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                    : isDark
+                    ? 'bg-slate-900 text-slate-400 border-transparent'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                🛣️ Трасса
+              </button>
+              <button
+                onClick={() => {
+                  triggerHaptic('light', settings.hapticFeedback);
+                  setRoadType('mixed');
+                }}
+                className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-all border ${
+                  roadType === 'mixed'
+                    ? isDark
+                      ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60'
+                      : 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                    : isDark
+                    ? 'bg-slate-900 text-slate-400 border-transparent'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                🔀 Смешан.
+              </button>
+            </div>
+          </div>
+
+        {/* 5. Tariff / Operator Selector */}
+        <div
+          className={`p-3 rounded-xl border transition-colors ${
+            isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              Оператор зарядки:
+            </span>
+            <span className={`text-xs font-mono font-bold ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+              {activeTariff} {settings.currency}/кВт⋅ч
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+            <button
+              onClick={() => {
+                triggerHaptic('light', settings.hapticFeedback);
+                setChargingType('malanka_dc');
+              }}
+              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
+                chargingType === 'malanka_dc' || chargingType === 'fast_day'
+                  ? isDark
+                    ? 'bg-amber-950/70 text-amber-300 border-amber-500/60'
+                    : 'bg-amber-500 text-white border-amber-600 shadow-xs'
+                  : isDark
+                  ? 'bg-slate-900 text-slate-400 border-transparent'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              ⚡ Маланка DC ({settings.malankaDcTariff ?? settings.fastDayTariff} {settings.currency})
+            </button>
+
+            <button
+              onClick={() => {
+                triggerHaptic('light', settings.hapticFeedback);
+                setChargingType('evika');
+              }}
+              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
+                chargingType === 'evika' || chargingType === 'malanka_ac' || chargingType === 'slow_public'
+                  ? isDark
+                    ? 'bg-teal-950/70 text-teal-300 border-teal-500/60'
+                    : 'bg-teal-600 text-white border-teal-700 shadow-xs'
+                  : isDark
+                  ? 'bg-slate-900 text-slate-400 border-transparent'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              🔌 AC / Evika ({settings.evikaTariff ?? settings.slowPublicTariff} {settings.currency})
+            </button>
+
+            <button
+              onClick={() => {
+                triggerHaptic('light', settings.hapticFeedback);
+                setChargingType('zaryadka_day');
+              }}
+              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
+                chargingType === 'zaryadka_day' || chargingType === 'zaryadka' || chargingType === 'zaryadka_dc'
+                  ? isDark
+                    ? 'bg-orange-950/70 text-orange-300 border-orange-500/60'
+                    : 'bg-orange-500 text-white border-orange-600 shadow-xs'
+                  : isDark
+                  ? 'bg-slate-900 text-slate-400 border-transparent'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              ☀️ Зарядка День ({settings.zaryadkaDayTariff ?? settings.zaryadkaTariff ?? 0.56} {settings.currency})
+            </button>
+
+            <button
+              onClick={() => {
+                triggerHaptic('light', settings.hapticFeedback);
+                setChargingType('zaryadka_night');
+              }}
+              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
+                chargingType === 'zaryadka_night'
+                  ? isDark
+                    ? 'bg-amber-950/70 text-amber-300 border-amber-500/60'
+                    : 'bg-amber-600 text-white border-amber-700 shadow-xs'
+                  : isDark
+                  ? 'bg-slate-900 text-slate-400 border-transparent'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              🌙 Зарядка Ночь ({settings.zaryadkaNightTariff ?? 0.43} {settings.currency})
+            </button>
+
+            <button
+              onClick={() => {
+                triggerHaptic('light', settings.hapticFeedback);
+                setChargingType('batteryfly');
+              }}
+              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
+                chargingType === 'batteryfly'
+                  ? isDark
+                    ? 'bg-cyan-950/70 text-cyan-300 border-cyan-500/60'
+                    : 'bg-cyan-600 text-white border-cyan-700 shadow-xs'
+                  : isDark
+                  ? 'bg-slate-900 text-slate-400 border-transparent'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              🔋 BatteryFly ({settings.batteryFlyTariff ?? 0.6} {settings.currency})
+            </button>
+
+            <button
+              onClick={() => {
+                triggerHaptic('light', settings.hapticFeedback);
+                setChargingType('home_night');
+              }}
+              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
+                chargingType === 'home_night' || chargingType === 'fast_night'
+                  ? isDark
+                    ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60'
+                    : 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                  : isDark
+                  ? 'bg-slate-900 text-slate-400 border-transparent'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              🌙 Дом Ночь ({settings.homeNightTariff ?? 0.16} {settings.currency})
+            </button>
+
+            <button
+              onClick={() => {
+                triggerHaptic('light', settings.hapticFeedback);
+                setChargingType('home');
+              }}
+              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
+                chargingType === 'home' || chargingType === 'home_day'
+                  ? isDark
+                    ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60'
+                    : 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                  : isDark
+                  ? 'bg-slate-900 text-slate-400 border-transparent'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              🏠 Дом День ({settings.homeTariff} {settings.currency})
+            </button>
+
+            <button
+              onClick={() => {
+                triggerHaptic('light', settings.hapticFeedback);
+                setChargingType('free');
+              }}
+              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
+                chargingType === 'free'
+                  ? isDark
+                    ? 'bg-purple-950/70 text-purple-300 border-purple-500/60'
+                    : 'bg-purple-600 text-white border-purple-700 shadow-xs'
+                  : isDark
+                  ? 'bg-slate-900 text-slate-400 border-transparent'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              🎁 Бесплатно (0 {settings.currency})
+            </button>
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="pt-2 flex flex-col sm:flex-row gap-2">
+          <button
+            id="save-trip-direct-button"
+            onClick={handleQuickSave}
+            className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-sm shadow-emerald-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+          >
+            <Zap className="w-4 h-4 fill-current" />
+            <span>Сохранить в историю ({consumptionPer100Km.toFixed(1)} кВт⋅ч/100км)</span>
+          </button>
+
+          <button
+            id="save-trip-detailed-button"
+            onClick={() => {
+              triggerHaptic('medium', settings.hapticFeedback);
+              onOpenAddModalWithData({
+                startSoc,
+                endSoc,
+                distanceKm,
+                roadType,
+                climateOn,
+                chargingType,
+              });
+            }}
+            className={`py-3 px-3.5 rounded-xl font-semibold text-xs border active:scale-95 transition-all flex items-center justify-center gap-1.5 ${
+              isDark
+                ? 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-800'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-200'
+            }`}
+          >
+            <span>Подробная запись...</span>
+            <ChevronRight className={`w-3.5 h-3.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
