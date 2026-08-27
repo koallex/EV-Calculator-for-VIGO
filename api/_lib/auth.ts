@@ -129,28 +129,16 @@ export async function authenticate(login: string, password: string): Promise<Aut
   const normalized = normalizeLogin(login);
   const adminLogin = normalizeLogin(process.env.ADMIN_LOGIN || '');
 
-  // TEMPORARY DIAGNOSTIC LOGGING — remove once the login issue is resolved.
-  // Logs only lengths/booleans, never the actual login or password values.
-  console.log('[auth] ADMIN_LOGIN configured:', Boolean(process.env.ADMIN_LOGIN));
-  console.log('[auth] ADMIN_PASSWORD configured:', Boolean(process.env.ADMIN_PASSWORD));
-  console.log('[auth] submitted login length:', normalized.length, 'env admin login length:', adminLogin.length);
-  console.log('[auth] login matches ADMIN_LOGIN:', Boolean(normalized) && normalized === adminLogin);
-
   // The administrator password is kept only as a Vercel Environment Variable.
   // It is never exposed to the browser, GitHub, Redis, or the client bundle.
   if (normalized && normalized === adminLogin) {
-    // ADMIN_PASSWORD is compared directly and independently from AUTH_SECRET.
-    // AUTH_SECRET is used only for signing/verifying the session cookie.
-    // Keep the password exact: leading/trailing spaces are valid password characters.
-    const adminPassword = String(process.env.ADMIN_PASSWORD ?? '');
+    const adminPassword = process.env.ADMIN_PASSWORD;
     if (!adminPassword) throw new Error('ADMIN_PASSWORD must be configured.');
+    if (adminPassword.length < 8) throw new Error('ADMIN_PASSWORD must contain at least 8 characters.');
 
     const expected = Buffer.from(adminPassword, 'utf8');
-    const actual = Buffer.from(String(password), 'utf8');
-    const passwordMatches = expected.length === actual.length && timingSafeEqual(expected, actual);
-    console.log('[auth] submitted password length:', password.length, 'env admin password length:', adminPassword.length);
-    console.log('[auth] password matches ADMIN_PASSWORD:', passwordMatches);
-    if (!passwordMatches) return null;
+    const actual = Buffer.from(password, 'utf8');
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
     return { login: normalized, role: 'admin' };
   }
 
