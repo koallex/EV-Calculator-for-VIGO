@@ -750,6 +750,208 @@ export function estimateTripConsumption(
   };
 }
 
+
+
+export interface SegmentedRoutePoint {
+  lat: number;
+  lon: number;
+  distanceFromStartKm: number;
+  elevationM?: number;
+}
+
+export interface SegmentedWeatherSample {
+  distanceFromStartKm: number;
+  weather: {
+    temperature: number;
+    weatherCode: number;
+    precipitation: number;
+    windSpeed: number;
+    windDirection: number;
+  };
+  routeBearing?: number;
+}
+
+export interface SegmentedRouteBreakdown {
+  distanceKm: number;
+  durationHours: number;
+  energyKwh: number;
+  baseEnergyKwh: number;
+  temperatureDeltaKwh: number;
+  windDeltaKwh: number;
+  precipitationDeltaKwh: number;
+  driverDeltaKwh: number;
+  elevationDeltaKwh: number;
+  climateEnergyKwh: number;
+  regenEnergyKwh: number;
+  avgTemperature: number;
+  avgWindSpeed: number;
+  avgPrecipitation: number;
+  segments: number;
+  windImpactPct: number;
+  precipitationImpactPct: number;
+  climatePowerKw: number;
+}
+
+const bearingBetween = (a: SegmentedRoutePoint, b: SegmentedRoutePoint) => {
+  const r = Math.PI / 180;
+  const y = Math.sin((b.lon - a.lon) * r) * Math.cos(b.lat * r);
+  const x = Math.cos(a.lat * r) * Math.sin(b.lat * r) - Math.sin(a.lat * r) * Math.cos(b.lat * r) * Math.cos((b.lon - a.lon) * r);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+};
+
+const circularInterpolateDeg = (a: number, b: number, t: number) => {
+  const delta = ((b - a + 540) % 360) - 180;
+  return (a + delta * t + 360) % 360;
+};
+
+const interpolateRouteWeather = (
+  distanceKm: number,
+  samples: SegmentedWeatherSample[],
+  fallback: SegmentedWeatherSample['weather']
+) => {
+  if (!samples.length) return fallback;
+  if (samples.length === 1) return samples[0].weather;
+  if (distanceKm <= samples[0].distanceFromStartKm) return samples[0].weather;
+  if (distanceKm >= samples[samples.length - 1].distanceFromStartKm) return samples[samples.length - 1].weather;
+  for (let i = 1; i < samples.length; i++) {
+    const left = samples[i - 1];
+    const right = samples[i];
+    if (distanceKm <= right.distanceFromStartKm) {
+      const span = Math.max(0.001, right.distanceFromStartKm - left.distanceFromStartKm);
+      const t = Math.max(0, Math.min(1, (distanceKm - left.distanceFromStartKm) / span));
+      return {
+        temperature: left.weather.temperature + (right.weather.temperature - left.weather.temperature) * t,
+        weatherCode: t < 0.5 ? left.weather.weatherCode : right.weather.weatherCode,
+        precipitation: left.weather.precipitation + (right.weather.precipitation - left.weather.precipitation) * t,
+        windSpeed: left.weather.windSpeed + (right.weather.windSpeed - left.weather.windSpeed) * t,
+        windDirection: circularInterpolateDeg(left.weather.windDirection, right.weather.windDirection, t),
+      };
+    }
+  }
+  return samples[samples.length - 1].weather;
+};
+
+/**
+ * Calculates route energy segment-by-segment. Weather is interpolated between the existing
+ * forecast points, while local road bearing and elevation are calculated for every segment.
+ * This keeps the API request count unchanged but removes the old "one average route" shortcut.
+ */
+export function estimateSegmentedRouteConsumption(
+  points: SegmentedRoutePoint[],
+  weatherSamples: SegmentedWeatherSample[],
+  fallbackWeather: SegmentedWeatherSample['weather'],
+  avgSpeedKmH: number,
+  sessions: TripSession[],
+  batteryCapacityKwh = 51.87,
+  climateOn = true,
+  customDriverStyleFactor?: number
+): SegmentedRouteBreakdown {
+  if (points.length < 2) {
+    return {
+      distanceKm: 0, durationHours: 0, energyKwh: 0, baseEnergyKwh: 0, temperatureDeltaKwh: 0,
+      windDeltaKwh: 0, precipitationDeltaKwh: 0, driverDeltaKwh: 0, elevationDeltaKwh: 0,
+      climateEnergyKwh: 0, regenEnergyKwh: 0, avgTemperature: fallbackWeather.temperature,
+      avgWindSpeed: fallbackWeather.windSpeed, avgPrecipitation: fallbackWeather.precipitation,
+      segments: 0, windImpactPct: 0, precipitationImpactPct: 0, climatePowerKw: 0,
+    };
+  }
+
+  const speed = Math.max(5, avgSpeedKmH);
+  const oneMonthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const recent = sessions.filter((s) => s.createdAt && s.createdAt >= oneMonthAgo && s.consumptionPer100Km > 8 && s.consumptionPer100Km < 35);
+  let styleFactor = 1;
+  if (customDriverStyleFactor !== undefined && Number.isFinite(customDriverStyleFactor)) styleFactor = customDriverStyleFactor;
+  else if (recent.length >= 2) {
+    const factors = recent.map((s) => {
+      const m = s.note?.match(/стиль поездки:\s*x([0-9]+(?:[.,][0-9]+)?)/i);
+      return m ? Number(m[1].replace(',', '.')) : NaN;
+    }).filter((x) => Number.isFinite(x) && x >= 0.75 && x <= 1.35);
+    if (factors.length >= 2) styleFactor = factors.reduce((a, b) => a + b, 0) / factors.length;
+    else {
+      const avg = recent.reduce((a, s) => a + s.consumptionPer100Km, 0) / recent.length;
+      styleFactor = 1 + (Math.max(0.92, Math.min(1.08, avg / BENCHMARK_CONSUMPTION_KWH_100KM)) - 1) * 0.35;
+    }
+  }
+  styleFactor = Math.max(0.75, Math.min(1.35, styleFactor));
+
+  let distanceKm = 0, durationHours = 0, energyKwh = 0, baseEnergyKwh = 0;
+  let temperatureDeltaKwh = 0, windDeltaKwh = 0, precipitationDeltaKwh = 0, driverDeltaKwh = 0;
+  let elevationDeltaKwh = 0, climateEnergyKwh = 0, regenEnergyKwh = 0;
+  let tempWeighted = 0, windWeighted = 0, precipWeighted = 0, climatePowerWeighted = 0;
+  let windWeightedBase = 0, precipWeightedBase = 0;
+
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1], b = points[i];
+    const segmentDistance = Math.max(0, b.distanceFromStartKm - a.distanceFromStartKm);
+    if (segmentDistance <= 0.001) continue;
+    const midpoint = (a.distanceFromStartKm + b.distanceFromStartKm) / 2;
+    const weather = interpolateRouteWeather(midpoint, weatherSamples, fallbackWeather);
+    const bearing = bearingBetween(a, b);
+    const relativeWindAngle = ((weather.windDirection - bearing + 360) % 360);
+    const segDuration = segmentDistance / speed;
+    const elevationGain = Math.max(0, (b.elevationM ?? 0) - (a.elevationM ?? 0));
+    const elevationLoss = Math.max(0, (a.elevationM ?? 0) - (b.elevationM ?? 0));
+    const climatePower = calculateClimateImpact(weather.temperature, climateOn).powerKw;
+    const warmFactor = climateOn ? Math.max(0.92, 1 - Math.max(0, segDuration - 1) * 0.02) : 1;
+    const effectiveClimatePower = climatePower * warmFactor;
+    const f = estimateTripConsumption(
+      speed, weather.temperature, sessions, batteryCapacityKwh, climateOn,
+      weather.windSpeed, relativeWindAngle, styleFactor, weather.weatherCode, weather.precipitation,
+      { gainM: elevationGain, lossM: elevationLoss, distanceKm: segmentDistance }, segDuration, effectiveClimatePower
+    );
+    const segEnergy = segmentDistance / 100 * f.estimatedConsumption;
+    // Keep the breakdown additive while preserving the exact segmented total produced by the
+    // established estimator. The "base" line is the no-weather/no-climate speed baseline.
+    const speedBase = segmentDistance / 100 * (() => {
+      const speedPoints: Array<[number, number]> = [[30,11.2],[50,12.0],[60,12.8],[70,13.5],[80,14.2],[90,15.0],[100,16.0],[110,17.2],[120,18.6],[130,20.2],[140,22.0],[150,24.0]];
+      if (speed <= speedPoints[0][0]) return speedPoints[0][1];
+      if (speed >= speedPoints.at(-1)![0]) return speedPoints.at(-1)![1];
+      for (let j=1;j<speedPoints.length;j++) if(speed<=speedPoints[j][0]) { const t=(speed-speedPoints[j-1][0])/(speedPoints[j][0]-speedPoints[j-1][0]); return speedPoints[j-1][1]+(speedPoints[j][1]-speedPoints[j-1][1])*t; }
+      return 16;
+    })();
+    const tempDelta = speedBase * (f.temperatureImpactPct / 100);
+    const windDelta = speedBase * (f.windImpactPct ?? 0) / 100;
+    const precipDelta = speedBase * (f.precipitationImpactPct ?? 0) / 100;
+    const elevationNet = (1600 * 9.80665 * elevationGain / 3.6e6 / 0.90) - (1600 * 9.80665 * elevationLoss / 3.6e6 * 0.65);
+    const climateEnergy = effectiveClimatePower * segDuration;
+    const driverDelta = speedBase * (styleFactor - 1);
+    const explained = speedBase + tempDelta + windDelta + precipDelta + driverDelta + elevationNet + climateEnergy;
+    const residual = segEnergy - explained;
+
+    distanceKm += segmentDistance;
+    durationHours += segDuration;
+    energyKwh += segEnergy;
+    baseEnergyKwh += speedBase;
+    temperatureDeltaKwh += tempDelta;
+    windDeltaKwh += windDelta;
+    precipitationDeltaKwh += precipDelta;
+    driverDeltaKwh += driverDelta + residual;
+    elevationDeltaKwh += elevationNet;
+    regenEnergyKwh += (1600 * 9.80665 * elevationLoss / 3.6e6 * 0.65);
+    climateEnergyKwh += climateEnergy;
+    tempWeighted += weather.temperature * segmentDistance;
+    windWeighted += weather.windSpeed * segmentDistance;
+    precipWeighted += weather.precipitation * segmentDistance;
+    climatePowerWeighted += effectiveClimatePower * segDuration;
+    windWeightedBase += speedBase;
+    precipWeightedBase += speedBase;
+  }
+
+  return {
+    distanceKm: Number(distanceKm.toFixed(2)), durationHours: Number(durationHours.toFixed(3)), energyKwh: Number(energyKwh.toFixed(2)),
+    baseEnergyKwh: Number(baseEnergyKwh.toFixed(2)), temperatureDeltaKwh: Number(temperatureDeltaKwh.toFixed(2)),
+    windDeltaKwh: Number(windDeltaKwh.toFixed(2)), precipitationDeltaKwh: Number(precipitationDeltaKwh.toFixed(2)),
+    driverDeltaKwh: Number(driverDeltaKwh.toFixed(2)), elevationDeltaKwh: Number(elevationDeltaKwh.toFixed(2)),
+    climateEnergyKwh: Number(climateEnergyKwh.toFixed(2)), regenEnergyKwh: Number(regenEnergyKwh.toFixed(2)),
+    avgTemperature: Number((tempWeighted / Math.max(0.001, distanceKm)).toFixed(1)),
+    avgWindSpeed: Number((windWeighted / Math.max(0.001, distanceKm)).toFixed(1)),
+    avgPrecipitation: Number((precipWeighted / Math.max(0.001, distanceKm)).toFixed(2)),
+    segments: Math.max(0, points.length - 1),
+    windImpactPct: Math.round((windWeightedBase ? windDeltaKwh / windWeightedBase : 0) * 100),
+    precipitationImpactPct: Math.round((precipWeightedBase ? precipitationDeltaKwh / precipWeightedBase : 0) * 100),
+    climatePowerKw: Number((climatePowerWeighted / Math.max(0.001, durationHours)).toFixed(2)),
+  };
+}
 export function calculateTripData(
   startSoc: number,
   endSoc: number,
@@ -797,7 +999,7 @@ export function calculateTripData(
 export function exportBackupJSON(settings: UserSettings, sessions: TripSession[]): void {
   const data = {
     appName: 'Dongfeng Vigo EV Calculator',
-    version: '1.0',
+    version: '1.01',
     exportDate: new Date().toISOString(),
     settings,
     sessions,
