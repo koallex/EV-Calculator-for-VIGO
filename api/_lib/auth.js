@@ -69,7 +69,7 @@ export async function createSession(user) {
 
 export async function getSession(req) {
   const raw = req.headers.cookie || '';
-  const match = raw.match(/(?:^|;\\s*)vigo_session=([^;]+)/);
+  const match = raw.match(/(?:^|;\s*)vigo_session=([^;]+)/);
   if (!match) return null;
   try { return await redis.get(`${SESS_PREFIX}${match[1]}`); } catch { return null; }
 }
@@ -82,7 +82,7 @@ export function setSessionCookie(res, user) {
 
 export async function clearSession(req, res) {
   const raw = req.headers.cookie || '';
-  const match = raw.match(/(?:^|;\\s*)vigo_session=([^;]+)/);
+  const match = raw.match(/(?:^|;\s*)vigo_session=([^;]+)/);
   if (match) await redis.del(`${SESS_PREFIX}${match[1]}`);
   res.setHeader('Set-Cookie', `vigo_session=; ${cookieOptions(0)}`);
 }
@@ -97,3 +97,39 @@ export async function requireAdmin(req, res) {
 }
 
 export { getUsers, saveUsers, hashPassword };
+
+
+export async function getCurrentUser(req) {
+  return getSession(req);
+}
+
+export async function listUsers() {
+  const users = await getUsers();
+  return Object.values(users);
+}
+
+export async function createUser(login, password) {
+  const normalized = login.trim().toLowerCase();
+  if (!/^[a-z0-9._-]{3,40}$/i.test(login.trim())) {
+    throw new Error('Логин: 3–40 символов, только латинские буквы, цифры, точка, дефис или подчёркивание.');
+  }
+  if (normalized === (process.env.ADMIN_LOGIN || '').trim().toLowerCase()) {
+    throw new Error('Этот логин зарезервирован для администратора.');
+  }
+  if (password.length < 8) throw new Error('Пароль должен содержать минимум 8 символов.');
+  const users = await getUsers();
+  if (users[normalized]) throw new Error('Пользователь с таким логином уже существует.');
+  const user = { login: login.trim(), role: 'user', passwordHash: hashPassword(password), createdAt: new Date().toISOString(), disabled: false };
+  users[normalized] = user;
+  await saveUsers(users);
+  return user;
+}
+
+export async function deleteUser(login) {
+  const normalized = login.trim().toLowerCase();
+  const users = await getUsers();
+  if (!users[normalized]) return false;
+  delete users[normalized];
+  await saveUsers(users);
+  return true;
+}
