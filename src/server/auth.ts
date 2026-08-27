@@ -139,16 +139,14 @@ export async function authenticate(login: string, password: string): Promise<Aut
   // The administrator password is kept only as a Vercel Environment Variable.
   // It is never exposed to the browser, GitHub, Redis, or the client bundle.
   if (normalized && normalized === adminLogin) {
-    // .trim() guards against a stray trailing newline/space that Vercel's
-    // dashboard sometimes keeps when a value is pasted from a clipboard/manager.
-    const adminPassword = (process.env.ADMIN_PASSWORD || '').trim();
+    // ADMIN_PASSWORD is compared directly and independently from AUTH_SECRET.
+    // AUTH_SECRET is used only for signing/verifying the session cookie.
+    // Keep the password exact: leading/trailing spaces are valid password characters.
+    const adminPassword = String(process.env.ADMIN_PASSWORD ?? '');
     if (!adminPassword) throw new Error('ADMIN_PASSWORD must be configured.');
 
-    // Compare fixed-length HMAC digests rather than the raw passwords directly.
-    // This avoids the length check short-circuiting on any accidental
-    // whitespace difference, and avoids leaking password length via timing.
-    const expected = Buffer.from(sign(adminPassword), 'base64url');
-    const actual = Buffer.from(sign(password), 'base64url');
+    const expected = Buffer.from(adminPassword, 'utf8');
+    const actual = Buffer.from(String(password), 'utf8');
     const passwordMatches = expected.length === actual.length && timingSafeEqual(expected, actual);
     console.log('[auth] submitted password length:', password.length, 'env admin password length:', adminPassword.length);
     console.log('[auth] password matches ADMIN_PASSWORD:', passwordMatches);
