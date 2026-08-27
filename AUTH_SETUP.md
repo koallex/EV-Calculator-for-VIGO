@@ -1,21 +1,25 @@
-# Настройка авторизации v1.01
+# VIGO authentication setup
 
-Добавьте в Vercel → Settings → Environment Variables:
+This patch adds login + admin user management. Existing calculator/HUD/settings files are not replaced.
 
-- `ADMIN_LOGIN` — логин администратора.
-- `ADMIN_PASSWORD_HASH` — хэш пароля администратора.
-- `AUTH_SECRET` — случайная строка минимум 32 символа.
-- `UPSTASH_REDIS_REST_URL` — URL Redis.
-- `UPSTASH_REDIS_REST_TOKEN` — токен Redis.
+## Vercel Environment Variables
 
-Redis нужен для хранения обычных пользователей. Пароли хранятся только в виде scrypt-хэшей.
+Add these variables to **Production** (Preview/Development are optional):
 
-Сгенерировать хэш пароля администратора можно командой Node:
+- `UPSTASH_REDIS_REST_URL` — REST URL from your free Upstash Redis database.
+- `UPSTASH_REDIS_REST_TOKEN` — REST token from Upstash. Keep it secret.
+- `AUTH_SECRET` — random secret, at least 32 characters. Keep it secret.
+- `ADMIN_LOGIN` — administrator login, for example `admin`.
+- `ADMIN_PASSWORD` — administrator password, at least 8 characters. Keep it secret.
 
-```bash
-node -e "const {randomBytes,scryptSync}=require('crypto'); const p=process.argv[1]; const s=randomBytes(16).toString('base64url'); console.log('scrypt$'+s+'$'+scryptSync(p,s,64).toString('base64url'))" "ВАШ_ПАРОЛЬ"
-```
+Do **not** add these secrets to GitHub or frontend source files.
 
-После добавления/изменения переменных окружения сделайте Redeploy.
+## First login
 
-Важно: не помещайте `ADMIN_PASSWORD_HASH`, `AUTH_SECRET` или Redis token в GitHub.
+After saving the variables, redeploy the project. Open the production URL and sign in with `ADMIN_LOGIN` and `ADMIN_PASSWORD`.
+
+The administrator sees a shield button in the header. It opens the admin panel, where ordinary users can be created and deleted.
+
+## Important
+
+The administrator account is defined by Vercel Environment Variables, not Redis. Ordinary users are stored in Redis with scrypt password hashes. Deleting an ordinary user immediately invalidates that user's next authenticated request/session check.
