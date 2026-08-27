@@ -129,6 +129,13 @@ export async function authenticate(login: string, password: string): Promise<Aut
   const normalized = normalizeLogin(login);
   const adminLogin = normalizeLogin(process.env.ADMIN_LOGIN || '');
 
+  // TEMPORARY DIAGNOSTIC LOGGING — remove once the login issue is resolved.
+  // Logs only lengths/booleans, never the actual login or password values.
+  console.log('[auth] ADMIN_LOGIN configured:', Boolean(process.env.ADMIN_LOGIN));
+  console.log('[auth] ADMIN_PASSWORD configured:', Boolean(process.env.ADMIN_PASSWORD));
+  console.log('[auth] submitted login length:', normalized.length, 'env admin login length:', adminLogin.length);
+  console.log('[auth] login matches ADMIN_LOGIN:', Boolean(normalized) && normalized === adminLogin);
+
   // The administrator password is kept only as a Vercel Environment Variable.
   // It is never exposed to the browser, GitHub, Redis, or the client bundle.
   if (normalized && normalized === adminLogin) {
@@ -142,7 +149,10 @@ export async function authenticate(login: string, password: string): Promise<Aut
     // whitespace difference, and avoids leaking password length via timing.
     const expected = Buffer.from(sign(adminPassword), 'base64url');
     const actual = Buffer.from(sign(password), 'base64url');
-    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
+    const passwordMatches = expected.length === actual.length && timingSafeEqual(expected, actual);
+    console.log('[auth] submitted password length:', password.length, 'env admin password length:', adminPassword.length);
+    console.log('[auth] password matches ADMIN_PASSWORD:', passwordMatches);
+    if (!passwordMatches) return null;
     return { login: normalized, role: 'admin' };
   }
 
