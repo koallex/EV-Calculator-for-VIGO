@@ -1,18 +1,26 @@
 import React from 'react';
-import { Zap, Moon, Sun, Plus } from 'lucide-react';
+import { Zap, Moon, Sun, Plus, ShieldCheck, LogOut } from 'lucide-react';
 import { UserSettings } from '../types';
 import { triggerHaptic } from '../utils/haptics';
+
+interface CurrentUser { login: string; role: 'admin' | 'user'; }
 
 interface HeaderProps {
   settings: UserSettings;
   onUpdateSettings: (newSettings: UserSettings) => void;
   onOpenAddTrip: () => void;
+  currentUser?: CurrentUser;
+  onOpenAdmin?: () => void;
+  onLogout?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   settings,
   onUpdateSettings,
   onOpenAddTrip,
+  currentUser,
+  onOpenAdmin,
+  onLogout,
 }) => {
   const toggleTheme = () => {
     triggerHaptic('light', settings.hapticFeedback);
@@ -87,6 +95,30 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Plus className="w-4 h-4 stroke-[2.5]" />
             <span>Запись</span>
+          </button>
+
+          {currentUser?.role === 'admin' && (
+            <button
+              id="admin-panel-button"
+              onClick={onOpenAdmin}
+              title="Админ-панель"
+              className={`w-9 h-9 rounded-xl flex items-center justify-center border active:scale-95 ${
+                isDark ? 'bg-slate-900/90 border-slate-800 text-emerald-400' : 'bg-slate-100 border-slate-200 text-emerald-600'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4" />
+            </button>
+          )}
+
+          <button
+            id="logout-button"
+            onClick={onLogout}
+            title={`Выйти (${currentUser?.login ?? ''})`}
+            className={`w-9 h-9 rounded-xl flex items-center justify-center border active:scale-95 ${
+              isDark ? 'bg-slate-900/90 border-slate-800 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-500'
+            }`}
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </div>
