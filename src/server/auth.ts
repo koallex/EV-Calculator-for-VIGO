@@ -129,9 +129,16 @@ export async function authenticate(login: string, password: string): Promise<Aut
   const normalized = normalizeLogin(login);
   const adminLogin = normalizeLogin(process.env.ADMIN_LOGIN || '');
 
+  // The administrator password is kept only as a Vercel Environment Variable.
+  // It is never exposed to the browser, GitHub, Redis, or the client bundle.
   if (normalized && normalized === adminLogin) {
-    const adminHash = process.env.ADMIN_PASSWORD_HASH;
-    if (!adminHash || !verifyPassword(password, adminHash)) return null;
+    const adminPassword = process.env.ADMIN_PASSWORD;
+    if (!adminPassword) throw new Error('ADMIN_PASSWORD must be configured.');
+    if (adminPassword.length < 8) throw new Error('ADMIN_PASSWORD must contain at least 8 characters.');
+
+    const expected = Buffer.from(adminPassword, 'utf8');
+    const actual = Buffer.from(password, 'utf8');
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
     return { login: normalized, role: 'admin' };
   }
 
