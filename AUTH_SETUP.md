@@ -23,3 +23,7 @@ The administrator sees a shield button in the header. It opens the admin panel, 
 ## Important
 
 The administrator account is defined by Vercel Environment Variables, not Redis. Ordinary users are stored in Redis with scrypt password hashes. Deleting an ordinary user immediately invalidates that user's next authenticated request/session check.
+
+
+## Vercel
+For Vercel, add ADMIN_LOGIN, ADMIN_PASSWORD and AUTH_SECRET to the same environment (Production and/or Preview) that serves the URL you test, then create a new deployment. ADMIN_PASSWORD is compared exactly; do not add quotes around the value in the Vercel dashboard.
