@@ -3,7 +3,7 @@ import {
   deleteUser,
   getCurrentUser,
   listUsers,
-} from '../_lib/auth.js';
+} from '../_lib/auth';
 
 export default async function handler(req: any, res: any) {
   const current = await getCurrentUser(req);

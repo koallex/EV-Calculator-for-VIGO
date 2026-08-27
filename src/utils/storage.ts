@@ -892,7 +892,24 @@ export function estimateSegmentedRouteConsumption(
     const elevationGain = Math.max(0, (b.elevationM ?? 0) - (a.elevationM ?? 0));
     const elevationLoss = Math.max(0, (a.elevationM ?? 0) - (b.elevationM ?? 0));
     const climatePower = calculateClimateImpact(weather.temperature, climateOn).powerKw;
-    const warmFactor = climateOn ? Math.max(0.92, 1 - Math.max(0, segDuration - 1) * 0.02) : 1;
+    // Cabin warm-up curve: heating/cooling a cold cabin from ambient to comfort draws noticeably
+    // more power than just maintaining it afterwards (defrost, heated surfaces, bigger delta-T
+    // for the heat pump to work against). We ramp from a peak multiplier at trip start down to
+    // the steady maintenance level (1.0x — calculateClimateImpact's powerKw already represents
+    // that steady-state load) over the first ~25 minutes, then hold flat.
+    // Uses cumulative elapsed trip time (durationHours before this segment, at its midpoint) —
+    // NOT this segment's own tiny duration, which is what made the old warm-up logic a no-op
+    // (individual route segments are seconds to minutes long, so "segDuration - 1 hour" was
+    // always negative and the multiplier never moved off 1).
+    const WARMUP_PEAK_MULTIPLIER = 1.4; // +40% power while the cabin is still cold
+    const WARMUP_DURATION_HOURS = 25 / 60; // ramps down to baseline over ~25 minutes
+    const elapsedAtSegmentMidpoint = durationHours + segDuration / 2;
+    const warmFactor = climateOn
+      ? elapsedAtSegmentMidpoint >= WARMUP_DURATION_HOURS
+        ? 1
+        : WARMUP_PEAK_MULTIPLIER -
+          (WARMUP_PEAK_MULTIPLIER - 1) * (elapsedAtSegmentMidpoint / WARMUP_DURATION_HOURS)
+      : 1;
     const effectiveClimatePower = climatePower * warmFactor;
     const f = estimateTripConsumption(
       speed, weather.temperature, sessions, batteryCapacityKwh, climateOn,
