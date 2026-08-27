@@ -23,8 +23,13 @@ import { HistoryTab } from './components/HistoryTab';
 import { ChargingTab } from './components/ChargingTab';
 import { SettingsTab } from './components/SettingsTab';
 import { AddTripModal } from './components/AddTripModal';
+import { LoginScreen, AuthUser } from './components/LoginScreen';
+import { AdminPanel } from './components/AdminPanel';
 
 export default function App() {
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [settings, setSettings] = useState<UserSettings>(loadSettings);
   const [sessions, setSessions] = useState<TripSession[]>(loadSessions);
   const [activeTab, setActiveTab] = useState<TabType>('calculator');
@@ -33,6 +38,28 @@ export default function App() {
   // Modals
   const [isAddTripOpen, setIsAddTripOpen] = useState(false);
   const [addTripInitialData, setAddTripInitialData] = useState<Partial<TripSession> | undefined>(undefined);
+
+  // Server-side authentication. No credentials are stored in localStorage.
+  useEffect(() => {
+    fetch('/api/auth/me', { credentials: 'same-origin' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('unauthorized');
+        const data = await response.json();
+        setAuthUser(data.user);
+      })
+      .catch(() => setAuthUser(null))
+      .finally(() => setAuthChecking(false));
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    } finally {
+      setAuthUser(null);
+      setShowAdmin(false);
+      setActiveTab('calculator');
+    }
+  };
 
   // Sync settings & sessions to localStorage
   useEffect(() => {
@@ -104,6 +131,14 @@ export default function App() {
     setIsAddTripOpen(true);
   };
 
+  if (authChecking) {
+    return <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center text-xs text-slate-400">Проверка авторизации…</div>;
+  }
+
+  if (!authUser) {
+    return <LoginScreen onLogin={setAuthUser} />;
+  }
+
   return (
     <div className={`min-h-screen transition-colors duration-200 flex flex-col font-sans ${
       settings.theme === 'light' 
@@ -118,10 +153,23 @@ export default function App() {
           setAddTripInitialData(undefined);
           setIsAddTripOpen(true);
         }}
+        currentUser={authUser}
+        onOpenAdmin={() => setShowAdmin(true)}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-4xl w-full mx-auto p-3 sm:p-4 mb-16">
+        {showAdmin ? (
+          <AdminPanel
+            currentLogin={authUser.login}
+            onClose={() => setShowAdmin(false)}
+            onLogout={handleLogout}
+          />
+        ) : null}
+
+        {!showAdmin && (
+        <>
         {/* HUD Tab: Kept mounted permanently so GPS tracking, distance, timer and SoC never reset on tab switch */}
         <div className={activeTab === 'hud' ? 'block animate-in fade-in duration-200' : 'hidden'}>
           <HudTab
@@ -202,17 +250,19 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+        </>
+        )}
       </main>
 
       {/* Bottom Sticky Mobile Navigation */}
-      <Navigation
+      {!showAdmin && <Navigation
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         hapticFeedback={settings.hapticFeedback}
         historyCount={sessions.length}
         theme={settings.theme}
         isHudTracking={isHudTracking}
-      />
+      />}
 
       {/* Add Trip Modal */}
       <AddTripModal
