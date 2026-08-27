@@ -30,17 +30,19 @@ import {
   Navigation,
   Loader2,
   Flag,
+  ChevronDown,
 } from 'lucide-react';
 import { UserSettings, TripSession } from '../types';
 import {
   estimateTripConsumption,
+  estimateSegmentedRouteConsumption,
   calculateClimateImpact,
   calculatePrecipitationImpact,
   ConsumptionForecast,
 } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
 import { geocodeAddress, buildRouteElevation } from '../services/routeElevation';
-import { fetchForecastWeatherAt } from '../services/weatherForecast';
+import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute } from '../services/weatherForecast';
 
 interface HudTabProps {
   settings: UserSettings;
@@ -104,6 +106,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   const [manualAvgSpeedKmH, setManualAvgSpeedKmH] = useState(60);
   const [destinationBusy, setDestinationBusy] = useState(false);
   const [destinationError, setDestinationError] = useState<string | null>(null);
+  const [destinationBreakdownOpen, setDestinationBreakdownOpen] = useState(false);
   const [destinationResult, setDestinationResult] = useState<{
     name: string;
     distanceKm: number;
@@ -129,6 +132,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     climateEnergyKwh?: number;
     speedImpactPct?: number;
     driverStyleFactor?: number;
+    breakdown?: any;
   } | null>(null);
 
   // Weather data fetched via GPS coordinates
@@ -874,6 +878,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     setDestinationBusy(true);
     setDestinationError(null);
     setDestinationResult(null);
+    setDestinationBreakdownOpen(false);
 
     // Speed used to estimate consumption + ETA for the destination forecast:
     // - Trekking already running -> use the live, GPS-derived average speed of this trip.
@@ -916,21 +921,23 @@ export const HudTab: React.FC<HudTabProps> = ({
           ? ((forecastWeather.windDirection - currentHeading + 360) % 360)
           : relativeWindAngle;
 
+        const segmented = estimateSegmentedRouteConsumption(
+          [
+            { lat: 0, lon: 0, distanceFromStartKm: 0, elevationM: 0 },
+            { lat: 0, lon: 0, distanceFromStartKm: distanceKm, elevationM: projectedGainM - projectedLossM },
+          ],
+          forecastWeather ? [{ distanceFromStartKm: distanceKm, weather: forecastWeather }] : [],
+          { temperature: calcTemperature ?? 20, weatherCode: calcWeatherCode ?? 0, precipitation: calcPrecipitation ?? 0, windSpeed: calcWindSpeed ?? 0, windDirection: forecastWeather?.windDirection ?? currentHeading },
+          destinationSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, isTracking ? currentTripStyle.factor : undefined
+        );
         const destForecast = estimateTripConsumption(
-          destinationSpeedKmH,
-          calcTemperature,
-          sessions,
-          settings.batteryCapacityKwh,
-          climateOn,
-          calcWindSpeed,
-          calcRelativeWindAngle,
-          isTracking ? currentTripStyle.factor : undefined,
-          calcWeatherCode,
-          calcPrecipitation,
-          { gainM: projectedGainM, lossM: projectedLossM, distanceKm }
+          destinationSpeedKmH, calcTemperature, sessions, settings.batteryCapacityKwh, climateOn,
+          calcWindSpeed, calcRelativeWindAngle, isTracking ? currentTripStyle.factor : undefined,
+          calcWeatherCode, calcPrecipitation, { gainM: projectedGainM, lossM: projectedLossM, distanceKm },
+          etaMinutes ? etaMinutes / 60 : distanceKm / Math.max(5, destinationSpeedKmH), segmented.climatePowerKw
         );
 
-        const energyNeededKwh = (distanceKm / 100) * destForecast.estimatedConsumption;
+        const energyNeededKwh = segmented.energyKwh;
         const predictedSoc = Math.max(0, Number((liveDynamicSoc - (energyNeededKwh / batteryCap) * 100).toFixed(1)));
 
         setDestinationResult({
@@ -960,6 +967,7 @@ export const HudTab: React.FC<HudTabProps> = ({
           climateEnergyKwh: Number(((destForecast.climatePowerKw ?? 0) * (etaMinutes ? etaMinutes / 60 : distanceKm / Math.max(5, destinationSpeedKmH))).toFixed(2)),
           speedImpactPct: destForecast.speedImpactPct,
           driverStyleFactor: destForecast.driverStyleFactor,
+          breakdown: segmented,
         });
         return;
       }
@@ -985,8 +993,9 @@ export const HudTab: React.FC<HudTabProps> = ({
       const etaMinutes = destinationSpeedKmH > 3 ? Math.round((route.distanceKm / destinationSpeedKmH) * 60) : undefined;
       const arrivalDate = new Date(Date.now() + (etaMinutes ?? 0) * 60000);
 
-      // Forecast weather right at the destination, timed to the estimated arrival — not the
-      // conditions at the current location, which may be quite different by the time you get there.
+      // Load a small number of weather samples along the route. The calculation itself is then
+      // performed segment-by-segment; weather between samples is interpolated by distance.
+      const routeWeatherSamples = await fetchForecastWeatherAlongRoute(route.points, new Date(), destinationSpeedKmH);
       const forecastWeather = await fetchForecastWeatherAt(geo.lat, geo.lon, arrivalDate);
       const forecastUsed = forecastWeather !== null;
       const calcTemperature = forecastWeather?.temperature ?? (weather.isLoaded ? weather.temperature : undefined);
@@ -994,28 +1003,18 @@ export const HudTab: React.FC<HudTabProps> = ({
       const calcWeatherCode = forecastWeather?.weatherCode ?? (weather.isLoaded ? weather.weatherCode : undefined);
       const calcPrecipitation = forecastWeather?.precipitation ?? (weather.isLoaded ? weather.precipitation : undefined);
 
-      // Approximate route heading (start -> destination) to project the forecasted wind onto
-      // the direction of travel, since the live device heading no longer applies at arrival.
       const routeBearing = calculateBearing(prevPositionRef.current.lat, prevPositionRef.current.lon, geo.lat, geo.lon);
       const calcRelativeWindAngle = forecastWeather
         ? ((forecastWeather.windDirection - routeBearing + 360) % 360)
         : relativeWindAngle;
-
-      const destForecast = estimateTripConsumption(
-        destinationSpeedKmH,
-        calcTemperature,
-        sessions,
-        settings.batteryCapacityKwh,
-        climateOn,
-        calcWindSpeed,
-        calcRelativeWindAngle,
-        isTracking ? currentTripStyle.factor : undefined,
-        calcWeatherCode,
-        calcPrecipitation,
-        { gainM, lossM, distanceKm: route.distanceKm }
+      const segmented = estimateSegmentedRouteConsumption(
+        route.points,
+        routeWeatherSamples.map(s => ({ distanceFromStartKm: s.distanceFromStartKm, weather: s.weather, routeBearing: s.routeBearing })),
+        { temperature: calcTemperature ?? 20, weatherCode: calcWeatherCode ?? 0, precipitation: calcPrecipitation ?? 0, windSpeed: calcWindSpeed ?? 0, windDirection: forecastWeather?.windDirection ?? 0 },
+        destinationSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, isTracking ? currentTripStyle.factor : undefined
       );
-
-      const energyNeededKwh = (route.distanceKm / 100) * destForecast.estimatedConsumption;
+      const destForecast = estimateTripConsumption(destinationSpeedKmH, calcTemperature, sessions, settings.batteryCapacityKwh, climateOn, segmented.avgWindSpeed, calcRelativeWindAngle, isTracking ? currentTripStyle.factor : undefined, calcWeatherCode, segmented.avgPrecipitation, { gainM, lossM, distanceKm: route.distanceKm }, segmented.durationHours, segmented.climatePowerKw);
+      const energyNeededKwh = segmented.energyKwh;
       const predictedSoc = Math.max(0, Number((liveDynamicSoc - (energyNeededKwh / batteryCap) * 100).toFixed(1)));
 
       setDestinationResult({
@@ -1045,6 +1044,7 @@ export const HudTab: React.FC<HudTabProps> = ({
         climateEnergyKwh: Number(((destForecast.climatePowerKw ?? 0) * (etaMinutes ? etaMinutes / 60 : 0)).toFixed(2)),
         speedImpactPct: destForecast.speedImpactPct,
         driverStyleFactor: destForecast.driverStyleFactor,
+        breakdown: segmented,
       });
     } catch (e) {
       // geocodeAddress / buildRouteElevation throw with a specific, user-readable message
@@ -1941,6 +1941,7 @@ export const HudTab: React.FC<HudTabProps> = ({
               <button
                 onClick={() => {
                   setDestinationResult(null);
+    setDestinationBreakdownOpen(false);
                   setDestinationQuery('');
                 }}
                 className={`shrink-0 text-[11px] ${isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-700'}`}
@@ -2019,25 +2020,28 @@ export const HudTab: React.FC<HudTabProps> = ({
                 {destinationResult.forecastPrecipLabel}
               </span>
             )}
-            <div className={`mt-3 rounded-xl border p-2.5 ${isDark ? 'bg-slate-900/80 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider">Факторы расхода маршрута</span>
-                <span className="text-[9px] text-slate-500">v14</span>
+            {destinationResult.breakdown && (
+              <div className={`mt-3 rounded-xl border ${isDark ? 'bg-slate-900/80 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                <button onClick={() => setDestinationBreakdownOpen(v => !v)} className="w-full p-3 flex items-center justify-between text-left">
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Разбор поездки</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${destinationBreakdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {destinationBreakdownOpen && <div className="px-3 pb-3">
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px]">
+                    <div className="flex justify-between gap-2"><span>Базовое движение</span><b>{destinationResult.breakdown.baseEnergyKwh.toFixed(2)} кВт⋅ч</b></div>
+                    <div className="flex justify-between gap-2"><span>Температура</span><b>{destinationResult.breakdown.temperatureDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.temperatureDeltaKwh.toFixed(2)}</b></div>
+                    <div className="flex justify-between gap-2"><span>Ветер</span><b>{destinationResult.breakdown.windDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.windDeltaKwh.toFixed(2)}</b></div>
+                    <div className="flex justify-between gap-2"><span>Осадки / дорога</span><b>{destinationResult.breakdown.precipitationDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.precipitationDeltaKwh.toFixed(2)}</b></div>
+                    <div className="flex justify-between gap-2"><span>Стиль</span><b>{destinationResult.breakdown.driverDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.driverDeltaKwh.toFixed(2)}</b></div>
+                    <div className="flex justify-between gap-2"><span>Рельеф</span><b>{destinationResult.breakdown.elevationDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.elevationDeltaKwh.toFixed(2)}</b></div>
+                    <div className="flex justify-between gap-2"><span>Климат</span><b>+{destinationResult.breakdown.climateEnergyKwh.toFixed(2)}</b></div>
+                    <div className="flex justify-between gap-2"><span>Рекуперация</span><b>−{destinationResult.breakdown.regenEnergyKwh.toFixed(2)}</b></div>
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-slate-500/20 flex justify-between text-[10px] font-bold"><span>Сегментов</span><span>{destinationResult.breakdown.segments}</span></div>
+                  <div className="mt-2 text-[9px] text-slate-500">Погода и ветер интерполируются по маршруту, рельеф считается по каждому сегменту.</div>
+                </div>}
               </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px]">
-                <div className="flex justify-between gap-2"><span>Скорость</span><b>{(destinationResult.speedImpactPct ?? 0) >= 0 ? '+' : ''}{destinationResult.speedImpactPct ?? 0}%</b></div>
-                <div className="flex justify-between gap-2"><span>Температура</span><b>{(destinationResult.temperatureImpactPct ?? 0) >= 0 ? '+' : ''}{destinationResult.temperatureImpactPct ?? 0}%</b></div>
-                <div className="flex justify-between gap-2"><span>Ветер</span><b>{(destinationResult.windImpactPct ?? 0) >= 0 ? '+' : ''}{destinationResult.windImpactPct ?? 0}%</b></div>
-                <div className="flex justify-between gap-2"><span>Осадки / дорога</span><b>{(destinationResult.precipitationImpactPct ?? 0) >= 0 ? '+' : ''}{destinationResult.precipitationImpactPct ?? 0}%</b></div>
-                <div className="flex justify-between gap-2"><span>Климат</span><b>{(destinationResult.climatePowerKw ?? 0).toFixed(1)} кВт·ч/ч</b></div>
-                <div className="flex justify-between gap-2"><span>Рельеф</span><b>{(destinationResult.elevationDeltaKwh100 ?? 0) >= 0 ? '+' : ''}{(destinationResult.elevationDeltaKwh100 ?? 0).toFixed(1)} кВт·ч/100</b></div>
-              </div>
-              <div className="mt-2 pt-2 border-t border-slate-500/20 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px]">
-                <div className="flex justify-between gap-2"><span>Климат за поездку</span><b>{(destinationResult.climateEnergyKwh ?? 0).toFixed(1)} кВт·ч</b></div>
-                <div className="flex justify-between gap-2"><span>Рекуперация</span><b>{destinationResult.regenEnergyKwh !== undefined ? `−${destinationResult.regenEnergyKwh.toFixed(1)} кВт·ч` : 'учтена в рельефе'}</b></div>
-              </div>
-              <div className="mt-2 text-[9px] text-slate-500">Климат считается по мощности и времени поездки. Ветер рассчитывается относительно направления движения, а осадки — по их интенсивности.</div>
-            </div>
+            )}
             <span className={`block mt-2 text-[9px] ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
               {destinationResult.forecastUsed
                 ? `Расчет использует прогноз погоды на время прибытия (${destinationResult.arrivalTimeLabel ?? '—'}), а не текущие условия.`

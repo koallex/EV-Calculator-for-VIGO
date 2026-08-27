@@ -511,6 +511,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         </button>
       </form>
 
+      <div className={`text-center text-[9px] ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>Версия 1.01</div>
+
       {/* 5. Backup & Data Management */}
       <div
         className={`border rounded-2xl p-4 space-y-3 transition-colors ${

@@ -24,7 +24,7 @@ import {
 import { UserSettings, RoadType, TripSession } from '../types';
 import { BatteryVisual } from './BatteryVisual';
 import { DecimalInput } from './DecimalInput';
-import { getTariffForType, estimateTripConsumption, calculateClimateImpact } from '../utils/storage';
+import { getTariffForType, estimateTripConsumption, estimateSegmentedRouteConsumption, calculateClimateImpact } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
 import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
@@ -68,12 +68,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [routeError, setRouteError] = useState('');
   const [plannedSpeedKmH, setPlannedSpeedKmH] = useState(70);
   const [routeWeather, setRouteWeather] = useState<{ temperature:number; windSpeed:number; windDirection:number; weatherCode:number; precipitation:number; routeBearing:number; etaMinutes:number; arrivalDate: Date; samples: RouteWeatherSample[] } | null>(null);
-  const [routeForecast, setRouteForecast] = useState<{ consumption:number; energyKwh:number; arrivalSoc:number; windLabel:string; weatherLabel:string; precipitationLabel:string; relativeWindAngle:number; driverStyleFactor:number; driverStyleSource:string; climateLabel:string; climateImpactPct:number; climateDeltaKwh100:number; speedImpactPct:number } | null>(null);
+  const [routeForecast, setRouteForecast] = useState<{ consumption:number; energyKwh:number; arrivalSoc:number; windLabel:string; weatherLabel:string; precipitationLabel:string; relativeWindAngle:number; driverStyleFactor:number; driverStyleSource:string; climateLabel:string; climateImpactPct:number; climateDeltaKwh100:number; speedImpactPct:number; breakdown?: any } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<'searching' | 'ok' | 'error'>('searching');
   const [quickWeather, setQuickWeather] = useState<{ temperature:number; weatherCode:number; windSpeed:number } | null>(null);
   const [routeMapOpen, setRouteMapOpen] = useState(false);
   const [elevationOpen, setElevationOpen] = useState(false);
-  const [consumptionOpen, setConsumptionOpen] = useState(false);
+  const [consumptionOpen, setConsumptionOpen] = useState(true);
 
   const weatherIcon = (code: number, className = 'w-4 h-4') => {
     if ([51,53,55,61,63,65,80,81,82].includes(code)) return <CloudRain className={className} />;
@@ -198,23 +198,25 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         avgWeatherCode = manualPrecipitationType === 'rain' ? 63 : manualPrecipitationType === 'snow' ? 71 : 0;
         avgRelativeWindAngle = (manualWindDirection - routeBearing + 360) % 360;
       }
-      const climatePowers = weatherMode === 'current' ? samples.map(s => calculateClimateImpact(s.weather.temperature, climateOn).powerKw) : [calculateClimateImpact(avgTemperature, climateOn).powerKw];
-      const rawClimatePowerKw = avg(climatePowers, 0);
-      const climateEnabled=climateOn;
-      const tripDurationHours = etaMinutes / 60;
-      // On a long cold trip the PTC assist is mostly a warm-up load. After the cabin
-      // reaches target temperature, the heat pump carries a larger share. Model this
-      // as a small reduction in average electrical HVAC power with trip duration.
-      const warmCabinFactor = climateOn ? Math.max(0.92, 1 - Math.max(0, tripDurationHours - 1) * 0.02) : 1;
-      const avgClimatePowerKw = rawClimatePowerKw * warmCabinFactor;
-      const forecast=estimateTripConsumption(plannedSpeedKmH,avgTemperature,sessions,settings.batteryCapacityKwh,climateEnabled,avgWindSpeed,avgRelativeWindAngle,undefined,avgWeatherCode,avgPrecipitation,{gainM:data.elevationGainM,lossM:data.elevationLossM,distanceKm:data.distanceKm},tripDurationHours,avgClimatePowerKw);
-      const energyKwh=(data.distanceKm/100)*forecast.estimatedConsumption;
-      const arrivalSoc=Math.max(0,Number((startSoc-(energyKwh/(settings.batteryCapacityKwh||51.87))*100).toFixed(1)));
-      const displayWeather = weatherMode === 'current' && samples.length ? samples[Math.min(samples.length - 1, Math.floor(samples.length/2))].weather : { temperature: avgTemperature, windSpeed: avgWindSpeed, windDirection: manualWindDirection, weatherCode: avgWeatherCode, precipitation: avgPrecipitation };
-      const windLabel=forecast.windStatusText || `Ветер ~${Math.round(avgWindSpeed)} км/ч`;
-      const weatherLabel=`${Math.round(avgTemperature)>=0?'+':''}${Math.round(avgTemperature)}°C`;
+      const fallbackWeather = {
+        temperature: avgTemperature, weatherCode: avgWeatherCode, precipitation: avgPrecipitation,
+        windSpeed: avgWindSpeed, windDirection: weatherMode === 'planning' ? manualWindDirection : (samples[0]?.weather.windDirection ?? 0),
+      };
+      const segmented = estimateSegmentedRouteConsumption(
+        data.points,
+        samples.map(s => ({ distanceFromStartKm: s.distanceFromStartKm, weather: s.weather, routeBearing: s.routeBearing })),
+        fallbackWeather, plannedSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn
+      );
+      const energyKwh = segmented.energyKwh;
+      const arrivalSoc = Math.max(0, Number((startSoc - (energyKwh/(settings.batteryCapacityKwh||51.87))*100).toFixed(1)));
+      const segmentedForecast = estimateTripConsumption(
+        plannedSpeedKmH, segmented.avgTemperature, sessions, settings.batteryCapacityKwh, climateOn,
+        segmented.avgWindSpeed, avgRelativeWindAngle, undefined, avgWeatherCode, segmented.avgPrecipitation,
+        {gainM:data.elevationGainM, lossM:data.elevationLossM, distanceKm:data.distanceKm}, segmented.durationHours, segmented.climatePowerKw
+      );
+      const displayWeather = weatherMode === 'current' && samples.length ? samples[Math.min(samples.length - 1, Math.floor(samples.length / 2))].weather : { temperature: avgTemperature, windSpeed: avgWindSpeed, windDirection: manualWindDirection, weatherCode: avgWeatherCode, precipitation: avgPrecipitation };
       setRouteWeather({ ...displayWeather, temperature:Math.round(avgTemperature), windSpeed:Math.round(avgWindSpeed), precipitation:Number(avgPrecipitation.toFixed(1)), routeBearing, etaMinutes, arrivalDate, samples });
-      setRouteForecast({consumption:forecast.estimatedConsumption,energyKwh:Number(energyKwh.toFixed(2)),arrivalSoc,windLabel,weatherLabel,precipitationLabel:forecast.precipitationLabel||'Без существенных осадков',relativeWindAngle:avgRelativeWindAngle,driverStyleFactor:forecast.driverStyleFactor,driverStyleSource:getDriverStyleSourceLabel(forecast.dataSource),climateLabel:forecast.climateLabel,climateImpactPct:forecast.climateImpactPct,climateDeltaKwh100:forecast.climateDeltaKwh100??0,climatePowerKw:forecast.climatePowerKw??0,speedImpactPct:forecast.speedImpactPct});
+      setRouteForecast({consumption:Number((energyKwh/data.distanceKm*100).toFixed(2)),energyKwh:Number(energyKwh.toFixed(2)),arrivalSoc,windLabel:segmentedForecast.windStatusText || `Ветер ~${Math.round(segmented.avgWindSpeed)} км/ч`,weatherLabel:`${Math.round(segmented.avgTemperature)>=0?'+':''}${Math.round(segmented.avgTemperature)}°C`,precipitationLabel:segmentedForecast.precipitationLabel||'Без существенных осадков',relativeWindAngle:avgRelativeWindAngle,driverStyleFactor:segmentedForecast.driverStyleFactor,driverStyleSource:getDriverStyleSourceLabel(segmentedForecast.dataSource),climateLabel:segmentedForecast.climateLabel || `Климат · ${segmented.climatePowerKw.toFixed(1)} кВт`,climateImpactPct:segmentedForecast.climateImpactPct || 0,climateDeltaKwh100:Number((segmented.climateEnergyKwh/data.distanceKm*100).toFixed(2)),climatePowerKw:segmented.climatePowerKw,speedImpactPct:segmentedForecast.speedImpactPct,breakdown:segmented});
       setEndSoc(arrivalSoc); setRouteStatus('Готово');
     } catch (e) {
       const msg=e instanceof Error?e.message:'Ошибка расчёта маршрута';
@@ -224,29 +226,33 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
   const getWhatIfScenario = (speed: number) => {
     if (!routeElevation || !routeWeather) return null;
-    const forecast = estimateTripConsumption(
+    const samples = routeWeather.samples ?? [];
+    const fallbackWeather = {
+      temperature: routeWeather.temperature,
+      weatherCode: routeWeather.weatherCode,
+      precipitation: routeWeather.precipitation,
+      windSpeed: routeWeather.windSpeed,
+      windDirection: routeWeather.windDirection,
+    };
+    const breakdown = estimateSegmentedRouteConsumption(
+      routeElevation.points,
+      samples.map(s => ({ distanceFromStartKm: s.distanceFromStartKm, weather: s.weather, routeBearing: s.routeBearing })),
+      fallbackWeather,
       speed,
-      routeWeather.temperature,
       sessions,
       settings.batteryCapacityKwh,
-      climateOn,
-      routeWeather.windSpeed,
-      routeForecast?.relativeWindAngle ?? ((routeWeather.windDirection - routeWeather.routeBearing + 360) % 360),
-      undefined,
-      routeWeather.weatherCode,
-      routeWeather.precipitation,
-      { gainM: routeElevation.elevationGainM, lossM: routeElevation.elevationLossM, distanceKm: routeElevation.distanceKm },
-      (routeElevation.distanceKm / Math.max(5, speed)) ,
-      routeWeather.samples.length ? (() => {
-        const raw = routeWeather.samples.reduce((sum, s) => sum + calculateClimateImpact(s.weather.temperature, climateOn).powerKw, 0) / routeWeather.samples.length;
-        const hours = routeElevation.distanceKm / Math.max(5, speed);
-        const warmFactor = climateOn ? Math.max(0.92, 1 - Math.max(0, hours - 1) * 0.02) : 1;
-        return raw * warmFactor;
-      })() : undefined
+      climateOn
     );
-    const energyKwh = (routeElevation.distanceKm / 100) * forecast.estimatedConsumption;
+    const energyKwh = breakdown.energyKwh;
     const arrivalSoc = Math.max(0, Number((startSoc - (energyKwh / (settings.batteryCapacityKwh || 51.87)) * 100).toFixed(1)));
-    return { speed, consumption: forecast.estimatedConsumption, arrivalSoc, speedImpactPct: forecast.speedImpactPct };
+    const forecast = estimateTripConsumption(
+      speed, breakdown.avgTemperature, sessions, settings.batteryCapacityKwh, climateOn,
+      breakdown.avgWindSpeed, routeForecast?.relativeWindAngle ?? 0, undefined,
+      routeWeather.weatherCode, breakdown.avgPrecipitation,
+      { gainM: routeElevation.elevationGainM, lossM: routeElevation.elevationLossM, distanceKm: routeElevation.distanceKm },
+      breakdown.durationHours, breakdown.climatePowerKw
+    );
+    return { speed, consumption: Number((energyKwh / routeElevation.distanceKm * 100).toFixed(2)), arrivalSoc, speedImpactPct: forecast.speedImpactPct, breakdown };
   };
 
   const applyWhatIfSpeed = (speed: number) => {
@@ -254,7 +260,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     if (!scenario || !routeForecast || !routeElevation) return;
     const energyKwh = Number(((routeElevation.distanceKm / 100) * scenario.consumption).toFixed(2));
     setPlannedSpeedKmH(speed);
-    setRouteForecast({ ...routeForecast, consumption: scenario.consumption, energyKwh, arrivalSoc: scenario.arrivalSoc, speedImpactPct: scenario.speedImpactPct });
+    setRouteForecast({ ...routeForecast, consumption: scenario.consumption, energyKwh, arrivalSoc: scenario.arrivalSoc, speedImpactPct: scenario.speedImpactPct, breakdown: scenario.breakdown });
     setEndSoc(scenario.arrivalSoc);
   };
 
@@ -466,6 +472,19 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   <div><span className="text-slate-500">Расход</span><b className="block">{routeForecast.consumption.toFixed(1)} кВт⋅ч/100</b></div><div><span className="text-slate-500">Энергия</span><b className="block">{routeForecast.energyKwh.toFixed(2)} кВт⋅ч</b></div>
                   {routeWeather && <><div><span className="text-slate-500 inline-flex items-center gap-1"><CloudSun className="w-3.5 h-3.5" />Погода по маршруту</span><b className="block">{routeForecast.weatherLabel}</b><span className="text-[10px] text-slate-500">{weatherMode === 'planning' ? 'Ручные условия' : `${routeWeather.samples.length} точек · сейчас`} → {routeWeather.arrivalDate.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</span></div><div><span className="text-slate-500 inline-flex items-center gap-1"><Wind className="w-3.5 h-3.5" />Ветер</span><b className="flex items-center gap-1"><ArrowDown className="w-4 h-4 shrink-0" style={{ transform: `rotate(${routeForecast.relativeWindAngle}deg)` }} />{routeForecast.windLabel}</b></div></>}
                 </div>
+              </div>
+            )}
+
+            {routeForecast?.breakdown && (
+              <div className={`mt-3 w-full rounded-xl border p-3 text-left ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                <button type="button" onClick={() => setConsumptionOpen(v => !v)} className="w-full flex items-center justify-between">
+                  <span className="text-xs font-bold">Факторы расхода</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${consumptionOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {consumptionOpen && <div className="mt-3 space-y-2 text-xs">
+                  {[['Базовое движение',routeForecast.breakdown.baseEnergyKwh],['Температура',routeForecast.breakdown.temperatureDeltaKwh],['Ветер',routeForecast.breakdown.windDeltaKwh],['Осадки / дорога',routeForecast.breakdown.precipitationDeltaKwh],['Стиль',routeForecast.breakdown.driverDeltaKwh],['Рельеф',routeForecast.breakdown.elevationDeltaKwh],['Климат',routeForecast.breakdown.climateEnergyKwh],['Рекуперация',-routeForecast.breakdown.regenEnergyKwh]].map(([label,value]) => <div key={String(label)} className="flex justify-between gap-3"><span>{label}</span><b>{Number(value)>=0?'+':''}{Number(value).toFixed(2)} кВт⋅ч</b></div>)}
+                  <div className="pt-2 border-t border-slate-700/30 flex justify-between font-bold"><span>Сегментов</span><span>{routeForecast.breakdown.segments}</span></div>
+                </div>}
               </div>
             )}
 
