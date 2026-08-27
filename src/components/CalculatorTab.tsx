@@ -73,7 +73,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [quickWeather, setQuickWeather] = useState<{ temperature:number; weatherCode:number; windSpeed:number } | null>(null);
   const [routeMapOpen, setRouteMapOpen] = useState(false);
   const [elevationOpen, setElevationOpen] = useState(false);
-  const [consumptionOpen, setConsumptionOpen] = useState(true);
+  const [consumptionOpen, setConsumptionOpen] = useState(false);
 
   const weatherIcon = (code: number, className = 'w-4 h-4') => {
     if ([51,53,55,61,63,65,80,81,82].includes(code)) return <CloudRain className={className} />;
@@ -193,7 +193,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       } else {
         // Manual weather deliberately bypasses forecast APIs, so planning works for any future date/season.
         avgTemperature = manualTemperature;
-        avgWindSpeed = manualWindSpeed;
+        // The manual input field is in m/s (matches how wind is usually reported), but the
+        // whole consumption model (estimateTripConsumption / estimateSegmentedRouteConsumption)
+        // works in km/h — same unit Open-Meteo returns for the "current" weather mode. Convert
+        // here so both weather modes feed the physics model consistently.
+        avgWindSpeed = manualWindSpeed * 3.6;
         avgPrecipitation = manualPrecipitationType === 'rain' ? 2 : manualPrecipitationType === 'snow' ? 1 : 0;
         avgWeatherCode = manualPrecipitationType === 'rain' ? 63 : manualPrecipitationType === 'snow' ? 71 : 0;
         avgRelativeWindAngle = (manualWindDirection - routeBearing + 360) % 360;
@@ -408,7 +412,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         {weatherMode === 'current' ? <div className="text-xs text-slate-500">Используется актуальная погода по маршруту и расчётному времени прохождения.</div> : (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
-              <label className="text-xs"><span className="block text-slate-500 mb-1">🌡️ Температура, °C</span><DecimalInput value={manualTemperature} onChange={setManualTemperature} min={-40} max={50} className="w-full" /></label>
+              <label className="text-xs"><span className="block text-slate-500 mb-1">🌡️ Температура, °C</span><DecimalInput value={manualTemperature} onChange={setManualTemperature} min={-40} max={50} allowNegative className="w-full" /></label>
               <label className="text-xs"><span className="block text-slate-500 mb-1">💨 Ветер, м/с</span><DecimalInput value={manualWindSpeed} onChange={setManualWindSpeed} min={0} max={40} className="w-full" /></label>
             </div>
             <div className="flex items-center gap-2"><Navigation className="w-4 h-4 text-slate-400" style={{transform:`rotate(${manualWindDirection}deg)`}} /><span className="text-xs text-slate-500">Направление ветра</span><DecimalInput value={manualWindDirection} onChange={(v) => setManualWindDirection(((Math.round(v)%360)+360)%360)} min={0} max={359} className="ml-auto w-20 text-right" /><span className="text-xs text-slate-500">°</span></div>
@@ -476,16 +480,13 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             )}
 
             {routeForecast?.breakdown && (
-              <div className={`mt-3 w-full rounded-xl border p-3 text-left ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                <button type="button" onClick={() => setConsumptionOpen(v => !v)} className="w-full flex items-center justify-between">
-                  <span className="text-xs font-bold">Факторы расхода</span>
-                  <ChevronDown className={`w-4 h-4 transition-transform ${consumptionOpen ? 'rotate-180' : ''}`} />
-                </button>
+              <button onClick={() => setConsumptionOpen(v => !v)} className={`mt-3 w-full rounded-xl border p-3 text-left ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center justify-between"><span className="text-xs font-bold">Факторы расхода</span><ChevronDown className={`w-4 h-4 transition-transform ${consumptionOpen ? 'rotate-180' : ''}`} /></div>
                 {consumptionOpen && <div className="mt-3 space-y-2 text-xs">
-                  {[['Базовое движение',routeForecast.breakdown.baseEnergyKwh],['Температура',routeForecast.breakdown.temperatureDeltaKwh],['Ветер',routeForecast.breakdown.windDeltaKwh],['Осадки / дорога',routeForecast.breakdown.precipitationDeltaKwh],['Стиль',routeForecast.breakdown.driverDeltaKwh],['Рельеф',routeForecast.breakdown.elevationDeltaKwh],['Климат',routeForecast.breakdown.climateEnergyKwh],['Рекуперация',-routeForecast.breakdown.regenEnergyKwh]].map(([label,value]) => <div key={String(label)} className="flex justify-between gap-3"><span>{label}</span><b>{Number(value)>=0?'+':''}{Number(value).toFixed(2)} кВт⋅ч</b></div>)}
+                  {[['Базовое движение',routeForecast.breakdown.baseEnergyKwh],['Температура',routeForecast.breakdown.temperatureDeltaKwh],['Ветер',routeForecast.breakdown.windDeltaKwh],['Осадки / дорога',routeForecast.breakdown.precipitationDeltaKwh],['Стиль',routeForecast.breakdown.driverDeltaKwh],['Рельеф',routeForecast.breakdown.elevationDeltaKwh],['Климат',routeForecast.breakdown.climateEnergyKwh]].map(([label,value]) => <div key={String(label)} className="flex justify-between gap-3"><span>{label}</span><b>{Number(value)>=0?'+':''}{Number(value).toFixed(2)} кВт⋅ч</b></div>)}
                   <div className="pt-2 border-t border-slate-700/30 flex justify-between font-bold"><span>Сегментов</span><span>{routeForecast.breakdown.segments}</span></div>
                 </div>}
-              </div>
+              </button>
             )}
 
             {optimalSpeedScenario && (

@@ -13,6 +13,9 @@ interface DecimalInputProps {
   prefix?: React.ReactNode;
   suffix?: React.ReactNode;
   autoSelectOnFocus?: boolean;
+  // iOS's numeric/decimal keyboard has no minus key, so fields that allow negative
+  // values (e.g. temperature) need an explicit sign toggle to stay usable on touch.
+  allowNegative?: boolean;
 }
 
 export const DecimalInput: React.FC<DecimalInputProps> = ({
@@ -28,6 +31,7 @@ export const DecimalInput: React.FC<DecimalInputProps> = ({
   prefix,
   suffix,
   autoSelectOnFocus = false,
+  allowNegative = false,
 }) => {
   // Keep local string state to allow natural typing of decimals on iOS/Android (e.g. "0.", "15,5")
   const [text, setText] = useState<string>(() => (value !== undefined && value !== null && !isNaN(value) ? String(value) : ''));
@@ -100,9 +104,34 @@ export const DecimalInput: React.FC<DecimalInputProps> = ({
     }
   };
 
+  // iOS's "decimal" software keyboard never shows a minus key, so typing a negative
+  // value (e.g. -15°C) is impossible on a phone even though the field logically
+  // supports it (min < 0). Give those fields an explicit sign-toggle button instead.
+  const toggleSign = () => {
+    const current = parseFloat((text || '0').replace(',', '.'));
+    const base = isNaN(current) ? 0 : current;
+    const flipped = base === 0 ? base : -base;
+    const bounded = Math.max(min ?? -Infinity, Math.min(max ?? Infinity, flipped));
+    setText(String(bounded));
+    onChange(bounded);
+  };
+
+  const showSignToggle = allowNegative && !disabled;
+
   return (
     <div className="relative flex items-center w-full">
-      {prefix && (
+      {showSignToggle && (
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={toggleSign}
+          aria-label="Сменить знак"
+          className="absolute left-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold text-slate-400 hover:text-slate-200 active:scale-90 transition-all"
+        >
+          ±
+        </button>
+      )}
+      {prefix && !showSignToggle && (
         <div className="absolute left-3 pointer-events-none flex items-center z-10">
           {prefix}
         </div>
@@ -120,7 +149,7 @@ export const DecimalInput: React.FC<DecimalInputProps> = ({
         onChange={handleChange}
         onFocus={handleFocus}
         onBlur={handleBlur}
-        className={`${prefix ? 'pl-9 ' : ''}${suffix ? 'pr-12 ' : ''}${className}`}
+        className={`${prefix || showSignToggle ? 'pl-9 ' : ''}${suffix ? 'pr-12 ' : ''}${className}`}
       />
       {suffix && (
         <div className="absolute right-3 pointer-events-none flex items-center text-xs font-semibold opacity-60 z-10">
