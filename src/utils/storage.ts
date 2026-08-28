@@ -13,7 +13,7 @@ export const BENCHMARK_CONSUMPTION_KWH_100KM = 14.5;
 // the dominant road-load component for this crossover. The curve is calibrated conservatively
 // from observed highway behaviour and should be refined as more real trips are logged.
 export const VIGO_SPEED_CONSUMPTION_CURVE: Array<[number, number]> = [
-  [30, 11.17], [50, 11.88], [60, 12.60], [70, 13.16],
+  [30, 11.2], [50, 12.0], [60, 12.8], [70, 13.5],
 ];
 
 // Above ~80 km/h aerodynamic drag becomes a major part of road load. For a fixed road
@@ -37,28 +37,29 @@ export function interpolateVigoSpeedConsumption(speedKmH: number): number {
       return c1 + (c2 - c1) * t;
     }
   }
-  const s1 = 70, c1 = 13.25;
-  const s2 = 80, c2 = (VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s2 * s2) * 0.965;
-  if (speed < 80) {
-    const t = (speed - s1) / (s2 - s1);
-    return c1 + (c2 - c1) * t;
+  // Smooth the transition above 70 km/h. The previous implementation switched
+  // directly from the 30–70 km/h linear curve to the steeper quadratic aero branch
+  // at 80 km/h, which made the slope noticeably steeper around 70–80 km/h.
+  // Use one continuous quadratic through 70, 80 and the existing 105 km/h calibration
+  // anchor. This keeps the curve monotonic while avoiding an artificial kink at 70–80.
+  const s1 = 70, c1 = 13.5;
+  const s2 = 80, c2 = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s2 * s2;
+  const s3 = 105, c3 = 19.3;
+  // Smooth cubic through the new calibration points:
+  // 70=13.5, 80=14.2, 100=17.3, 105=19.3 kWh/100km.
+  const qA = 0.000199047619047619;
+  const qB = -0.0469285714285714;
+  const qC = 3.74538095238095;
+  const qD = -87.0;
+  if (speed <= 105) {
+    return qA * speed * speed * speed + qB * speed * speed + qC * speed + qD;
   }
-  const raw = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * speed * speed;
-
-  // Small empirical calibration while we collect more real-trip data.
-  // Low/mid speeds are reduced only slightly; the stronger correction is kept
-  // in the 70-100 km/h range where the latest real trip showed the largest bias.
-  // Current calibration: 70 km/h is lowered via the low/mid curve; 80 km/h: -3.5%, 90 km/h: -4.7%, 100 km/h: -5.5%.
-  // Then smoothly returns to 0% by 105 km/h to preserve the existing 105 km/h anchor.
-  let correctionPct = 0;
-  if (speed <= 90) {
-    correctionPct = -3.5 - (speed - 80) * 0.12;
-  } else if (speed <= 100) {
-    correctionPct = -4.7 - (speed - 90) * 0.08;
-  } else if (speed < 105) {
-    correctionPct = -5.5 + (speed - 100) * 1.10;
-  }
-  return raw * (1 + correctionPct / 100);
+  // Above the calibration anchor, continue the established aero relationship
+  // while preserving continuity at 105 km/h.
+  const baseAt105 = qA * s3 * s3 * s3 + qB * s3 * s3 + qC * s3 + qD;
+  const aeroAt105 = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s3 * s3;
+  const offset = baseAt105 - aeroAt105;
+  return VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * speed * speed + offset;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
