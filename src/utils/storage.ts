@@ -27,18 +27,22 @@ const VIGO_HIGH_SPEED_AERO_B = 0.0011905;
 
 export function interpolateVigoSpeedConsumption(speedKmH: number): number {
   const speed = Math.max(15, Math.min(150, speedKmH));
-  if (speed <= VIGO_SPEED_CONSUMPTION_CURVE[0][0]) return VIGO_SPEED_CONSUMPTION_CURVE[0][1];
-
-  // Preserve the measured/previous low-speed calibration, then transition smoothly into
-  // the aerodynamic branch from 70 to 80 km/h.
+  const curve = VIGO_SPEED_CONSUMPTION_CURVE;
+  if (speed <= curve[0][0]) return curve[0][1];
+  for (let i = 1; i < curve.length; i++) {
+    const [s1, c1] = curve[i - 1];
+    const [s2, c2] = curve[i];
+    if (speed <= s2) {
+      const t = (speed - s1) / Math.max(0.001, s2 - s1);
+      return c1 + (c2 - c1) * t;
+    }
+  }
+  const s1 = 70, c1 = 13.5;
+  const s2 = 80, c2 = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s2 * s2;
   if (speed < 80) {
-    const s1 = 70, c1 = 13.5;
-    const s2 = 80, c2 = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s2 * s2;
     const t = (speed - s1) / (s2 - s1);
     return c1 + (c2 - c1) * t;
   }
-
-  // Energy per 100 km from aerodynamic drag is proportional to airspeed².
   return VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * speed * speed;
 }
 
@@ -771,6 +775,7 @@ export interface SegmentedRoutePoint {
   lon: number;
   distanceFromStartKm: number;
   elevationM?: number;
+  roadSpeedKmH?: number;
 }
 
 export interface SegmentedWeatherSample {
@@ -871,6 +876,21 @@ export function estimateSegmentedRouteConsumption(
   }
 
   const speed = Math.max(5, avgSpeedKmH);
+  // Preserve the user's planned average, but use OSRM's relative road-speed profile
+  // so city/slow and highway sections are not all calculated at one flat speed.
+  const roadSpeeds = points.map((p) => Number.isFinite(p.roadSpeedKmH) && (p.roadSpeedKmH ?? 0) > 0
+    ? Math.max(10, Math.min(140, p.roadSpeedKmH!)) : speed);
+  let rawTime = 0, rawDistance = 0;
+  for (let i = 1; i < points.length; i++) {
+    const d = Math.max(0, points[i].distanceFromStartKm - points[i - 1].distanceFromStartKm);
+    if (d > 0.001) { rawDistance += d; rawTime += d / roadSpeeds[i]; }
+  }
+  const rawHarmonic = rawTime > 0 ? rawDistance / rawTime : speed;
+  const speedScale = rawHarmonic > 0 ? speed / rawHarmonic : 1;
+  const getSegmentSpeed = (index: number) => {
+    if (!Number.isFinite(points[index].roadSpeedKmH) || (points[index].roadSpeedKmH ?? 0) <= 0) return speed;
+    return Math.max(10, Math.min(140, (points[index].roadSpeedKmH ?? speed) * speedScale));
+  };
   const oneMonthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
   const recent = sessions.filter((s) => s.createdAt && s.createdAt >= oneMonthAgo && s.consumptionPer100Km > 8 && s.consumptionPer100Km < 35);
   let styleFactor = 1;
@@ -902,7 +922,8 @@ export function estimateSegmentedRouteConsumption(
     const weather = interpolateRouteWeather(midpoint, weatherSamples, fallbackWeather);
     const bearing = bearingBetween(a, b);
     const relativeWindAngle = ((weather.windDirection - bearing + 360) % 360);
-    const segDuration = segmentDistance / speed;
+    const segmentSpeed = getSegmentSpeed(i);
+    const segDuration = segmentDistance / segmentSpeed;
     const elevationGain = Math.max(0, (b.elevationM ?? 0) - (a.elevationM ?? 0));
     const elevationLoss = Math.max(0, (a.elevationM ?? 0) - (b.elevationM ?? 0));
     const climatePower = calculateClimateImpact(weather.temperature, climateOn).powerKw;
@@ -926,14 +947,14 @@ export function estimateSegmentedRouteConsumption(
       : 1;
     const effectiveClimatePower = climatePower * warmFactor;
     const f = estimateTripConsumption(
-      speed, weather.temperature, sessions, batteryCapacityKwh, climateOn,
+      segmentSpeed, weather.temperature, sessions, batteryCapacityKwh, climateOn,
       weather.windSpeed, relativeWindAngle, styleFactor, weather.weatherCode, weather.precipitation,
       { gainM: elevationGain, lossM: elevationLoss, distanceKm: segmentDistance }, segDuration, effectiveClimatePower
     );
     const segEnergy = segmentDistance / 100 * f.estimatedConsumption;
     // Keep the breakdown additive while preserving the exact segmented total produced by the
     // established estimator. The "base" line is the no-weather/no-climate speed baseline.
-    const speedBase = segmentDistance / 100 * interpolateVigoSpeedConsumption(speed);
+    const speedBase = segmentDistance / 100 * interpolateVigoSpeedConsumption(segmentSpeed);
     const tempDelta = speedBase * (f.temperatureImpactPct / 100);
     const windDelta = speedBase * (f.windImpactPct ?? 0) / 100;
     const precipDelta = speedBase * (f.precipitationImpactPct ?? 0) / 100;
