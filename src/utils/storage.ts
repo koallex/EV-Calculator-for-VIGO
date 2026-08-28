@@ -7,6 +7,34 @@ import { UserSettings, TripSession } from '../types';
 // reference, which could make related percentages disagree with each other.
 export const BENCHMARK_CONSUMPTION_KWH_100KM = 14.5;
 
+// Unified real-world speed consumption curve for Dongfeng Vigo.
+// Kept in one place so Calculator, HUD and segmented-route calculations cannot drift apart.
+// High-speed points are intentionally steeper from ~90 km/h because aerodynamic drag becomes
+// the dominant road-load component for this crossover. The curve is calibrated conservatively
+// from observed highway behaviour and should be refined as more real trips are logged.
+export const VIGO_SPEED_CONSUMPTION_CURVE: Array<[number, number]> = [
+  [30, 11.2], [50, 12.0], [60, 12.8], [70, 13.5], [80, 14.2],
+  [90, 15.5], [100, 17.5], [110, 20.0], [120, 22.8], [130, 25.6],
+  [140, 28.5], [150, 31.5],
+];
+
+export function interpolateVigoSpeedConsumption(speedKmH: number): number {
+  const speed = Math.max(15, Math.min(150, speedKmH));
+  if (speed <= VIGO_SPEED_CONSUMPTION_CURVE[0][0]) return VIGO_SPEED_CONSUMPTION_CURVE[0][1];
+  const last = VIGO_SPEED_CONSUMPTION_CURVE[VIGO_SPEED_CONSUMPTION_CURVE.length - 1];
+  if (speed >= last[0]) return last[1];
+
+  for (let i = 1; i < VIGO_SPEED_CONSUMPTION_CURVE.length; i++) {
+    const [s1, c1] = VIGO_SPEED_CONSUMPTION_CURVE[i - 1];
+    const [s2, c2] = VIGO_SPEED_CONSUMPTION_CURVE[i];
+    if (speed <= s2) {
+      const t = (speed - s1) / (s2 - s1);
+      return c1 + (c2 - c1) * t;
+    }
+  }
+  return last[1];
+}
+
 export const DEFAULT_SETTINGS: UserSettings = {
   batteryCapacityKwh: 51.87,
   currency: 'Br',
@@ -519,30 +547,9 @@ export function estimateTripConsumption(
   // Physics curve: rolling resistance + aerodynamic drag (Cd*A*v^3) + base electrical load
   const effectiveSpeed = Math.max(15, Math.min(150, avgSpeedKmH > 0 ? avgSpeedKmH : 55));
   
-  // Highway-calibrated speed curve for the Vigo.
-  // IMPORTANT: the previous quadratic produced ~18.6 kWh/100 km already at 90 km/h
-  // and ~20.6 at 110 km/h, despite the comments claiming 15.4 / 18.2. That was the
-  // main reason long 200–300 km routes looked systematically too hungry.
-  // We now interpolate a conservative real-world curve anchored to plausible Vigo values.
-  const speedPoints: Array<[number, number]> = [
-    [30, 11.2], [50, 12.0], [60, 12.8], [70, 13.5], [80, 14.2],
-    [90, 15.0], [100, 16.0], [110, 17.2], [120, 18.6], [130, 20.2],
-    [140, 22.0], [150, 24.0],
-  ];
-  const interpolateSpeedConsumption = (speed: number) => {
-    if (speed <= speedPoints[0][0]) return speedPoints[0][1];
-    if (speed >= speedPoints[speedPoints.length - 1][0]) return speedPoints[speedPoints.length - 1][1];
-    for (let i = 1; i < speedPoints.length; i++) {
-      const [s1, c1] = speedPoints[i - 1];
-      const [s2, c2] = speedPoints[i];
-      if (speed <= s2) {
-        const t = (speed - s1) / (s2 - s1);
-        return c1 + (c2 - c1) * t;
-      }
-    }
-    return 16.0;
-  };
-  const baseSpeedConsumption = interpolateSpeedConsumption(effectiveSpeed);
+  // Unified speed curve. Keeping this shared with segmented-route calculations guarantees
+  // the same high-speed model in Calculator and HUD.
+  const baseSpeedConsumption = interpolateVigoSpeedConsumption(effectiveSpeed);
 
   // 2. Temperature & Climate Impact (Separating physical battery cell resistance vs HVAC load)
   const temp = temperatureC ?? 20; // Default optimal 20°C if weather not loaded
@@ -919,13 +926,7 @@ export function estimateSegmentedRouteConsumption(
     const segEnergy = segmentDistance / 100 * f.estimatedConsumption;
     // Keep the breakdown additive while preserving the exact segmented total produced by the
     // established estimator. The "base" line is the no-weather/no-climate speed baseline.
-    const speedBase = segmentDistance / 100 * (() => {
-      const speedPoints: Array<[number, number]> = [[30,11.2],[50,12.0],[60,12.8],[70,13.5],[80,14.2],[90,15.0],[100,16.0],[110,17.2],[120,18.6],[130,20.2],[140,22.0],[150,24.0]];
-      if (speed <= speedPoints[0][0]) return speedPoints[0][1];
-      if (speed >= speedPoints.at(-1)![0]) return speedPoints.at(-1)![1];
-      for (let j=1;j<speedPoints.length;j++) if(speed<=speedPoints[j][0]) { const t=(speed-speedPoints[j-1][0])/(speedPoints[j][0]-speedPoints[j-1][0]); return speedPoints[j-1][1]+(speedPoints[j][1]-speedPoints[j-1][1])*t; }
-      return 16;
-    })();
+    const speedBase = segmentDistance / 100 * interpolateVigoSpeedConsumption(speed);
     const tempDelta = speedBase * (f.temperatureImpactPct / 100);
     const windDelta = speedBase * (f.windImpactPct ?? 0) / 100;
     const precipDelta = speedBase * (f.precipitationImpactPct ?? 0) / 100;
