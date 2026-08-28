@@ -29,7 +29,14 @@ const VIGO_HIGH_SPEED_AERO_B = 0.0011905;
 // so the 100 km/h calibration anchor was nudged up from 17.3 -> 17.9 kWh/100km (~+0.6-0.75
 // kWh/100km through the 95-100 km/h range specifically). 70/80/105 anchors are unchanged.
 
-export function interpolateVigoSpeedConsumption(speedKmH: number): number {
+// Owner reported the whole curve (30-150 km/h) was running slightly high against their real
+// routes, so the entire curve is scaled down by a flat 4% here rather than re-deriving every
+// anchor point individually — this preserves the curve's shape (including the 95-100 km/h
+// bump above) while bringing every speed down uniformly. Tune this single constant if further
+// real-trip data suggests a different overall calibration.
+const VIGO_SPEED_CURVE_CALIBRATION_SCALE = 0.96;
+
+function interpolateVigoSpeedConsumptionRaw(speedKmH: number): number {
   const speed = Math.max(15, Math.min(150, speedKmH));
   const curve = VIGO_SPEED_CONSUMPTION_CURVE;
   if (speed <= curve[0][0]) return curve[0][1];
@@ -64,6 +71,10 @@ export function interpolateVigoSpeedConsumption(speedKmH: number): number {
   const aeroAt105 = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s3 * s3;
   const offset = baseAt105 - aeroAt105;
   return VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * speed * speed + offset;
+}
+
+export function interpolateVigoSpeedConsumption(speedKmH: number): number {
+  return interpolateVigoSpeedConsumptionRaw(speedKmH) * VIGO_SPEED_CURVE_CALIBRATION_SCALE;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
