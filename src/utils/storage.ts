@@ -13,7 +13,7 @@ export const BENCHMARK_CONSUMPTION_KWH_100KM = 14.5;
 // the dominant road-load component for this crossover. The curve is calibrated conservatively
 // from observed highway behaviour and should be refined as more real trips are logged.
 export const VIGO_SPEED_CONSUMPTION_CURVE: Array<[number, number]> = [
-  [30, 11.17], [50, 11.92], [60, 12.66], [70, 13.25],
+  [30, 11.17], [50, 11.88], [60, 12.60], [70, 13.16],
 ];
 
 // Above ~80 km/h aerodynamic drag becomes a major part of road load. For a fixed road
@@ -38,7 +38,7 @@ export function interpolateVigoSpeedConsumption(speedKmH: number): number {
     }
   }
   const s1 = 70, c1 = 13.25;
-  const s2 = 80, c2 = (VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s2 * s2) * 0.975;
+  const s2 = 80, c2 = (VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s2 * s2) * 0.965;
   if (speed < 80) {
     const t = (speed - s1) / (s2 - s1);
     return c1 + (c2 - c1) * t;
@@ -48,15 +48,15 @@ export function interpolateVigoSpeedConsumption(speedKmH: number): number {
   // Small empirical calibration while we collect more real-trip data.
   // Low/mid speeds are reduced only slightly; the stronger correction is kept
   // in the 70-100 km/h range where the latest real trip showed the largest bias.
-  // 70 km/h: -1.5%, 80 km/h: -2.5%, 90 km/h: -3.5%, 100 km/h: -4.0%.
+  // Current calibration: 70 km/h is lowered via the low/mid curve; 80 km/h: -3.5%, 90 km/h: -4.7%, 100 km/h: -5.5%.
   // Then smoothly returns to 0% by 105 km/h to preserve the existing 105 km/h anchor.
   let correctionPct = 0;
   if (speed <= 90) {
-    correctionPct = -2.5 - (speed - 80) * 0.10;
+    correctionPct = -3.5 - (speed - 80) * 0.12;
   } else if (speed <= 100) {
-    correctionPct = -3.5 - (speed - 90) * 0.05;
+    correctionPct = -4.7 - (speed - 90) * 0.08;
   } else if (speed < 105) {
-    correctionPct = -4.0 + (speed - 100) * 0.80;
+    correctionPct = -5.5 + (speed - 100) * 1.10;
   }
   return raw * (1 + correctionPct / 100);
 }
