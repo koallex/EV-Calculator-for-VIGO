@@ -13,7 +13,7 @@ export const BENCHMARK_CONSUMPTION_KWH_100KM = 14.5;
 // the dominant road-load component for this crossover. The curve is calibrated conservatively
 // from observed highway behaviour and should be refined as more real trips are logged.
 export const VIGO_SPEED_CONSUMPTION_CURVE: Array<[number, number]> = [
-  [30, 11.2], [50, 12.0], [60, 12.8], [70, 13.5],
+  [30, 11.19], [50, 11.98], [60, 12.76], [70, 13.45],
 ];
 
 // Above ~80 km/h aerodynamic drag becomes a major part of road load. For a fixed road
@@ -37,29 +37,26 @@ export function interpolateVigoSpeedConsumption(speedKmH: number): number {
       return c1 + (c2 - c1) * t;
     }
   }
-  const s1 = 70, c1 = 13.5;
+  const s1 = 70, c1 = 13.45;
   const s2 = 80, c2 = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s2 * s2;
   if (speed < 80) {
     const t = (speed - s1) / (s2 - s1);
     return c1 + (c2 - c1) * t;
   }
-  const rawConsumption = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * speed * speed;
+  const raw = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * speed * speed;
 
-  // Small calibration trim for the 80–100 km/h band. Real-trip comparison suggests
-  // the current segmented model is slightly conservative in this range (about 1–1.5%
-  // on the final SoC for the reference route). Keep the correction deliberately small
-  // and smooth so we do not disturb the 60–70 km/h calibration or the 105 km/h highway
-  // anchor. The trim reaches its maximum at 100 km/h and fades back to zero by 105 km/h.
-  let speedBandCorrection = 0;
-  if (speed >= 80 && speed <= 100) {
-    // -0.5% at 80, -1.0% at 90, -1.5% at 100.
-    speedBandCorrection = 0.005 + ((speed - 80) / 20) * 0.010;
-  } else if (speed > 100 && speed < 105) {
-    // Preserve the existing ~105 km/h calibration anchor.
-    speedBandCorrection = 0.015 * ((105 - speed) / 5);
+  // Very small empirical calibration while we collect more real-trip data.
+  // 80 km/h: -0.5%, 90 km/h: -1.0%, 100 km/h: -1.5%,
+  // then smoothly returns to 0% by 105 km/h to preserve the existing 105 km/h anchor.
+  let correctionPct = 0;
+  if (speed <= 90) {
+    correctionPct = -0.5 - (speed - 80) * 0.05;
+  } else if (speed <= 100) {
+    correctionPct = -1.0 - (speed - 90) * 0.05;
+  } else if (speed < 105) {
+    correctionPct = -1.5 + (speed - 100) * 0.30;
   }
-
-  return rawConsumption * (1 - speedBandCorrection);
+  return raw * (1 + correctionPct / 100);
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
