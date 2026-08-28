@@ -1,4 +1,4 @@
-export interface RoutePoint { lat:number; lon:number; elevationM:number; distanceFromStartKm:number; }
+export interface RoutePoint { lat:number; lon:number; elevationM:number; distanceFromStartKm:number; roadSpeedKmH?:number; }
 export interface RouteElevationData { name:string; distanceKm:number; points:RoutePoint[]; startElevationM:number; endElevationM:number; elevationGainM:number; elevationLossM:number; grossClimbEnergyKwh:number; recoveredEnergyKwh:number; netElevationEnergyKwh:number; elevationAvailable:boolean; elevationNote?:string; }
 export interface RouteProgress { stage:'geocoding'|'routing'|'sampling'|'elevation'|'calculating'; message:string; completed?:number; total?:number; }
 const EARTH_RADIUS_M=6371000, DEFAULT_MASS_KG=1600, GRAVITY=9.80665, DRIVETRAIN_EFFICIENCY=.90, REGEN_EFFICIENCY=.65, NOISE_THRESHOLD_M=3;
@@ -15,7 +15,25 @@ const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 class ElevationLimitError extends Error { constructor(msg:string){ super(msg); this.name='ElevationLimitError'; } }
 
 export const geocodeAddress=async(query:string)=>{const res=await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=0&q=${encodeURIComponent(query)}`,{headers:{Accept:'application/json'}});if(!res.ok)throw new Error(`Не удалось найти адрес (${res.status})`);const d=await res.json();if(!Array.isArray(d)||!d[0])throw new Error('Адрес не найден');return{lat:Number(d[0].lat),lon:Number(d[0].lon),displayName:String(d[0].display_name||query)}};
-export const fetchDrivingRoute=async(aLat:number,aLon:number,bLat:number,bLon:number)=>{const res=await fetch(`https://router.project-osrm.org/route/v1/driving/${aLon},${aLat};${bLon},${bLat}?overview=full&geometries=geojson&steps=false`);if(!res.ok)throw new Error(`Не удалось построить маршрут (${res.status})`);const d=await res.json(),r=d?.routes?.[0];if(!r?.geometry?.coordinates?.length)throw new Error('Маршрут не найден');return{distanceKm:Number(r.distance)/1000,coords:r.geometry.coordinates as [number,number][]}};
+export const fetchDrivingRoute=async(aLat:number,aLon:number,bLat:number,bLon:number)=>{
+  const res=await fetch(`https://router.project-osrm.org/route/v1/driving/${aLon},${aLat};${bLon},${bLat}?overview=full&geometries=geojson&steps=true`);
+  if(!res.ok)throw new Error(`Не удалось построить маршрут (${res.status})`);
+  const d=await res.json(),r=d?.routes?.[0];
+  if(!r?.geometry?.coordinates?.length)throw new Error('Маршрут не найден');
+  let cumulativeKm=0;
+  const speedSegments:{startKm:number;endKm:number;speedKmH:number}[]=[];
+  for(const leg of (r.legs||[])){
+    for(const step of (leg.steps||[])){
+      const distanceKm=Math.max(0,Number(step.distance||0)/1000);
+      const durationHours=Math.max(0.001,Number(step.duration||0)/3600);
+      if(distanceKm>0.001){
+        speedSegments.push({startKm:cumulativeKm,endKm:cumulativeKm+distanceKm,speedKmH:Math.max(10,Math.min(140,distanceKm/durationHours))});
+        cumulativeKm+=distanceKm;
+      }
+    }
+  }
+  return{distanceKm:Number(r.distance)/1000,coords:r.geometry.coordinates as [number,number][],speedSegments};
+};
 const haversineM=(a:[number,number],b:[number,number])=>{const[lo1,la1]=a,[lo2,la2]=b,dLa=(la2-la1)*Math.PI/180,dLo=(lo2-lo1)*Math.PI/180,x=Math.sin(dLa/2)**2+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dLo/2)**2;return 2*EARTH_RADIUS_M*Math.asin(Math.min(1,Math.sqrt(x)))};
 
 // Sample by travelled distance, not by geometry vertex count. Point budget is tiered by trip length:
@@ -93,6 +111,13 @@ export const calculateElevationEnergy=(gain:number,loss:number,massKg=DEFAULT_MA
 
 const ELEVATION_UNAVAILABLE_NOTE='Рельеф временно недоступен — расчёт выполнен без его влияния';
 
+const speedAtDistance=(distanceKm:number,segments:{startKm:number;endKm:number;speedKmH:number}[],fallback=60)=>{
+  if(!segments.length)return fallback;
+  const hit=segments.find(s=>distanceKm>=s.startKm-0.01&&distanceKm<=s.endKm+0.01);
+  if(hit)return hit.speedKmH;
+  return distanceKm<segments[0].startKm?segments[0].speedKmH:segments[segments.length-1].speedKmH;
+};
+
 export const buildRouteElevation=async(aLat:number,aLon:number,bLat:number,bLon:number,name='Маршрут',onProgress?:(p:RouteProgress)=>void):Promise<RouteElevationData>=>{
   onProgress?.({stage:'routing',message:'Строим автомобильный маршрут…'});
   const route=await fetchDrivingRoute(aLat,aLon,bLat,bLon);
@@ -132,7 +157,11 @@ export const buildRouteElevation=async(aLat:number,aLon:number,bLat:number,bLon:
 
   onProgress?.({stage:'calculating',message:'Считаем подъёмы, спуски и рекуперацию…'});
   let cum=0;
-  const points=profile.coords.map((c,i)=>{if(i>0)cum+=haversineM(profile.coords[i-1],c);return{lon:c[0],lat:c[1],elevationM:profile.elevations[i],distanceFromStartKm:Number((cum/1000).toFixed(2))}});
+  const points=profile.coords.map((c,i)=>{
+    if(i>0)cum+=haversineM(profile.coords[i-1],c);
+    const distanceFromStartKm=Number((cum/1000).toFixed(2));
+    return{lon:c[0],lat:c[1],elevationM:profile.elevations[i],distanceFromStartKm,roadSpeedKmH:speedAtDistance(distanceFromStartKm,route.speedSegments)};
+  });
   const{gainM,lossM}=computeElevationGainLoss(profile.elevations),energy=calculateElevationEnergy(gainM,lossM);
   return{name,distanceKm:Number(route.distanceKm.toFixed(1)),points,startElevationM:profile.elevations[0],endElevationM:profile.elevations.at(-1)!,elevationGainM:gainM,elevationLossM:lossM,...energy,elevationAvailable,elevationNote};
 };
