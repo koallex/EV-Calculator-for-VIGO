@@ -43,7 +43,23 @@ export function interpolateVigoSpeedConsumption(speedKmH: number): number {
     const t = (speed - s1) / (s2 - s1);
     return c1 + (c2 - c1) * t;
   }
-  return VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * speed * speed;
+  const rawConsumption = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * speed * speed;
+
+  // Small calibration trim for the 80–100 km/h band. Real-trip comparison suggests
+  // the current segmented model is slightly conservative in this range (about 1–1.5%
+  // on the final SoC for the reference route). Keep the correction deliberately small
+  // and smooth so we do not disturb the 60–70 km/h calibration or the 105 km/h highway
+  // anchor. The trim reaches its maximum at 100 km/h and fades back to zero by 105 km/h.
+  let speedBandCorrection = 0;
+  if (speed >= 80 && speed <= 100) {
+    // -0.5% at 80, -1.0% at 90, -1.5% at 100.
+    speedBandCorrection = 0.005 + ((speed - 80) / 20) * 0.010;
+  } else if (speed > 100 && speed < 105) {
+    // Preserve the existing ~105 km/h calibration anchor.
+    speedBandCorrection = 0.015 * ((105 - speed) / 5);
+  }
+
+  return rawConsumption * (1 - speedBandCorrection);
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
