@@ -25,6 +25,10 @@ export const VIGO_SPEED_CONSUMPTION_CURVE: Array<[number, number]> = [
 const VIGO_HIGH_SPEED_AERO_A = 6.857;
 const VIGO_HIGH_SPEED_AERO_B = 0.0011905;
 
+// 95-100 km/h cruise band was slightly under-costed versus real-world dashboard readings,
+// so the 100 km/h calibration anchor was nudged up from 17.3 -> 17.9 kWh/100km (~+0.6-0.75
+// kWh/100km through the 95-100 km/h range specifically). 70/80/105 anchors are unchanged.
+
 export function interpolateVigoSpeedConsumption(speedKmH: number): number {
   const speed = Math.max(15, Math.min(150, speedKmH));
   const curve = VIGO_SPEED_CONSUMPTION_CURVE;
@@ -45,12 +49,12 @@ export function interpolateVigoSpeedConsumption(speedKmH: number): number {
   const s1 = 70, c1 = 13.5;
   const s2 = 80, c2 = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s2 * s2;
   const s3 = 105, c3 = 19.3;
-  // Smooth cubic through the new calibration points:
-  // 70=13.5, 80=14.2, 100=17.3, 105=19.3 kWh/100km.
-  const qA = 0.000199047619047619;
-  const qB = -0.0469285714285714;
-  const qC = 3.74538095238095;
-  const qD = -87.0;
+  // Smooth cubic through the calibration points:
+  // 70=13.5, 80=14.2, 100=17.9, 105=19.3 kWh/100km.
+  const qA = -0.000000952380952381;
+  const qB = 0.00407142857142857;
+  const qC = -0.524619047619048;
+  const qD = 30.6;
   if (speed <= 105) {
     return qA * speed * speed * speed + qB * speed * speed + qC * speed + qD;
   }
@@ -555,46 +559,50 @@ export function computeElevationGainLoss(
   return { gainM: Math.round(gainM), lossM: Math.round(lossM) };
 }
 
-export function estimateTripConsumption(
-  avgSpeedKmH: number,
+// "Flat road" portion of the consumption model: speed curve + cold-battery penalty +
+// precipitation/road-surface resistance + relative-wind aerodynamic impact. Deliberately
+// excludes elevation (order-independent, additive over a whole trip from total gain/loss)
+// and HVAC/climate (a time-based load, not a distance-based one). Extracted as its own
+// function so it can be evaluated per-GPS-segment at that segment's own instantaneous
+// speed (see HudTab's live SoC tracking) as well as from estimateTripConsumption's
+// whole-trip average — keeping both call sites on exactly the same physical model instead
+// of letting a second, hand-copied formula drift out of sync over time.
+export interface FlatRoadConsumptionRate {
+  effectiveSpeed: number;
+  baseSpeedConsumption: number; // kWh/100km from the speed curve alone
+  tempMultiplier: number;
+  precipMultiplier: number;
+  windMultiplier: number;
+  windImpactPct: number;
+  windStatusText?: string;
+}
+
+export function computeFlatRoadConsumptionRate(
+  speedKmH: number,
   temperatureC: number | undefined,
-  sessions: TripSession[],
-  batteryCapacityKwh = 51.87,
-  climateOn = true,
   windSpeedKmH?: number,
   relativeWindAngleDeg?: number,
-  customDriverStyleFactor?: number,
   weatherCode?: number,
-  precipitationMm?: number,
-  elevation?: { gainM: number; lossM: number; distanceKm: number },
-  tripDurationHours?: number,
-  climatePowerOverrideKw?: number
-): ConsumptionForecast {
+  precipitationMm?: number
+): FlatRoadConsumptionRate {
   // 1. Calculate base physical consumption for Dongfeng Vigo (51.87 kWh, ~1526 kg curb weight)
   // Physics curve: rolling resistance + aerodynamic drag (Cd*A*v^3) + base electrical load
-  const effectiveSpeed = Math.max(15, Math.min(150, avgSpeedKmH > 0 ? avgSpeedKmH : 55));
-  
+  const effectiveSpeed = Math.max(15, Math.min(150, speedKmH > 0 ? speedKmH : 55));
+
   // Unified speed curve. Keeping this shared with segmented-route calculations guarantees
   // the same high-speed model in Calculator and HUD.
   const baseSpeedConsumption = interpolateVigoSpeedConsumption(effectiveSpeed);
 
-  // 2. Temperature & Climate Impact (Separating physical battery cell resistance vs HVAC load)
-  const temp = temperatureC ?? 20; // Default optimal 20°C if weather not loaded
-
-  // A. Physical battery cell efficiency in cold (independent of cabin HVAC).
+  // 2A. Physical battery cell efficiency in cold (independent of cabin HVAC).
   // Saturating curve instead of unbounded linear growth: internal resistance really does rise as
   // cells get colder, but it approaches a physical ceiling rather than climbing forever — a real
   // pack doesn't lose 40%+ efficiency at -40°C just because -20°C already cost 20%.
+  const temp = temperatureC ?? 20; // Default optimal 20°C if weather not loaded
   const BATTERY_RESISTANCE_MAX_PENALTY = 0.30; // asymptotic ceiling: +30% at extreme cold
   const BATTERY_RESISTANCE_SATURATION_TAU = 48; // controls how quickly the curve approaches the ceiling
   const degreesBelowComfort = Math.max(0, 18 - temp);
-  const batteryResistanceMultiplier =
+  const tempMultiplier =
     1 + BATTERY_RESISTANCE_MAX_PENALTY * (1 - Math.exp(-degreesBelowComfort / BATTERY_RESISTANCE_SATURATION_TAU));
-
-  // B. Cabin HVAC load. It is power in kW; when trip duration is known, actual energy is power × hours.
-  const climateInfo = calculateClimateImpact(temp, climateOn);
-
-  const tempMultiplier = batteryResistanceMultiplier;
 
   // 3. Precipitation & Road Surface Resistance Impact (water displacement, slush, snow)
   const precipInfo = calculatePrecipitationImpact(weatherCode, precipitationMm);
@@ -609,7 +617,7 @@ export function estimateTripConsumption(
   // aerodynamic energy per 100 km therefore scales with the square of the relative air speed.
   let windMultiplier = 1.0;
   let windImpactPct = 0;
-  let windStatusText = '';
+  let windStatusText: string | undefined;
 
   if (windSpeedKmH && windSpeedKmH > 3 && relativeWindAngleDeg !== undefined && !isNaN(relativeWindAngleDeg)) {
     const rad = (relativeWindAngleDeg * Math.PI) / 180;
@@ -657,6 +665,52 @@ export function estimateTripConsumption(
       windStatusText = `Боковой слева ${Math.round(windSpeedKmH)} км/ч (${windImpactPct >= 0 ? '+' : ''}${windImpactPct}%)`;
     }
   }
+
+  return {
+    effectiveSpeed,
+    baseSpeedConsumption,
+    tempMultiplier,
+    precipMultiplier,
+    windMultiplier,
+    windImpactPct,
+    windStatusText,
+  };
+}
+
+export function estimateTripConsumption(
+  avgSpeedKmH: number,
+  temperatureC: number | undefined,
+  sessions: TripSession[],
+  batteryCapacityKwh = 51.87,
+  climateOn = true,
+  windSpeedKmH?: number,
+  relativeWindAngleDeg?: number,
+  customDriverStyleFactor?: number,
+  weatherCode?: number,
+  precipitationMm?: number,
+  elevation?: { gainM: number; lossM: number; distanceKm: number },
+  tripDurationHours?: number,
+  climatePowerOverrideKw?: number
+): ConsumptionForecast {
+  // 1-4. Speed curve + cold-battery penalty + precipitation + relative-wind impact, shared
+  // with the per-segment live calculation in HudTab (see computeFlatRoadConsumptionRate above).
+  const flatRoad = computeFlatRoadConsumptionRate(
+    avgSpeedKmH,
+    temperatureC,
+    windSpeedKmH,
+    relativeWindAngleDeg,
+    weatherCode,
+    precipitationMm
+  );
+  const { effectiveSpeed, baseSpeedConsumption, tempMultiplier, precipMultiplier, windMultiplier, windImpactPct, windStatusText } = flatRoad;
+
+  // Re-derive the precipitation descriptive fields (label/description/roadState) for the
+  // return payload below; precipMultiplier itself already came from computeFlatRoadConsumptionRate.
+  const precipInfo = calculatePrecipitationImpact(weatherCode, precipitationMm);
+
+  // 2B. Cabin HVAC load. It is power in kW; when trip duration is known, actual energy is power × hours.
+  const temp = temperatureC ?? 20; // Default optimal 20°C if weather not loaded
+  const climateInfo = calculateClimateImpact(temp, climateOn);
 
   // 5. Elevation profile: climbs cost potential energy, sustained descents return it via regen.
   // Physics: E = m*g*h. Climbing energy is reduced by drivetrain efficiency; descent energy is
