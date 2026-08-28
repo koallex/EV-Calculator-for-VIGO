@@ -13,7 +13,7 @@ export const BENCHMARK_CONSUMPTION_KWH_100KM = 14.5;
 // the dominant road-load component for this crossover. The curve is calibrated conservatively
 // from observed highway behaviour and should be refined as more real trips are logged.
 export const VIGO_SPEED_CONSUMPTION_CURVE: Array<[number, number]> = [
-  [30, 11.19], [50, 11.98], [60, 12.76], [70, 13.45],
+  [30, 11.17], [50, 11.92], [60, 12.66], [70, 13.25],
 ];
 
 // Above ~80 km/h aerodynamic drag becomes a major part of road load. For a fixed road
@@ -37,24 +37,26 @@ export function interpolateVigoSpeedConsumption(speedKmH: number): number {
       return c1 + (c2 - c1) * t;
     }
   }
-  const s1 = 70, c1 = 13.45;
-  const s2 = 80, c2 = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s2 * s2;
+  const s1 = 70, c1 = 13.25;
+  const s2 = 80, c2 = (VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s2 * s2) * 0.975;
   if (speed < 80) {
     const t = (speed - s1) / (s2 - s1);
     return c1 + (c2 - c1) * t;
   }
   const raw = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * speed * speed;
 
-  // Very small empirical calibration while we collect more real-trip data.
-  // 80 km/h: -0.5%, 90 km/h: -1.0%, 100 km/h: -1.5%,
-  // then smoothly returns to 0% by 105 km/h to preserve the existing 105 km/h anchor.
+  // Small empirical calibration while we collect more real-trip data.
+  // Low/mid speeds are reduced only slightly; the stronger correction is kept
+  // in the 70-100 km/h range where the latest real trip showed the largest bias.
+  // 70 km/h: -1.5%, 80 km/h: -2.5%, 90 km/h: -3.5%, 100 km/h: -4.0%.
+  // Then smoothly returns to 0% by 105 km/h to preserve the existing 105 km/h anchor.
   let correctionPct = 0;
   if (speed <= 90) {
-    correctionPct = -0.5 - (speed - 80) * 0.05;
+    correctionPct = -2.5 - (speed - 80) * 0.10;
   } else if (speed <= 100) {
-    correctionPct = -1.0 - (speed - 90) * 0.05;
+    correctionPct = -3.5 - (speed - 90) * 0.05;
   } else if (speed < 105) {
-    correctionPct = -1.5 + (speed - 100) * 0.30;
+    correctionPct = -4.0 + (speed - 100) * 0.80;
   }
   return raw * (1 + correctionPct / 100);
 }
