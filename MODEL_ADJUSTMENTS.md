@@ -14,3 +14,12 @@ The previous quadratic speed formula did not match its own calibration comments.
 
 ## Important
 Distance itself is not penalized. A 300 km route at the same speed and conditions should have approximately the same kWh/100 km as a 100 km route; only total kWh scales with distance. Long routes can still consume more per 100 km when their route-specific weather, wind, rain/snow, elevation, speed or temperature justify it.
+
+
+## High-speed aerodynamic calibration (2026-08-28)
+
+- The common speed model is now continuous and uses a quadratic high-speed branch above ~80 km/h, reflecting that aerodynamic energy per distance scales approximately with airspeed².
+- The branch is calibrated against the owner's observed 77.7 km highway run (~105 km/h average, +25…29°C, HVAC OFF, calm wind, dashboard 21.4 kWh/100 km).
+- No factory Cd value is assumed because a verified Cd for this Vigo configuration is not available in the project data.
+- HUD, calculator and segmented route calculations all consume the same `interpolateVigoSpeedConsumption()` function.
+- The trip journal currently contains useful driving-style factors but no high-speed average-speed trips, so it is not used to invent a high-speed correction. New highway logs can be used for later empirical recalibration.

@@ -13,26 +13,33 @@ export const BENCHMARK_CONSUMPTION_KWH_100KM = 14.5;
 // the dominant road-load component for this crossover. The curve is calibrated conservatively
 // from observed highway behaviour and should be refined as more real trips are logged.
 export const VIGO_SPEED_CONSUMPTION_CURVE: Array<[number, number]> = [
-  [30, 11.2], [50, 12.0], [60, 12.8], [70, 13.5], [80, 14.2],
-  [90, 15.5], [100, 17.5], [110, 20.0], [120, 22.8], [130, 25.6],
-  [140, 28.5], [150, 31.5],
+  [30, 11.2], [50, 12.0], [60, 12.8], [70, 13.5],
 ];
+
+// Above ~80 km/h aerodynamic drag becomes a major part of road load. For a fixed road
+// distance, the aerodynamic contribution to energy/100 km scales approximately with v².
+// We therefore use a continuous quadratic high-speed branch instead of a linear lookup.
+// The branch is anchored to the existing 80–90 km/h range and tuned against the owner's
+// observed highway run (77.7 km, ~105 km/h average, +25…29°C, HVAC OFF, calm wind,
+// dashboard 21.4 kWh/100 km). This is a calibration anchor, not a claimed factory Cd value.
+const VIGO_HIGH_SPEED_AERO_A = 6.857;
+const VIGO_HIGH_SPEED_AERO_B = 0.0011905;
 
 export function interpolateVigoSpeedConsumption(speedKmH: number): number {
   const speed = Math.max(15, Math.min(150, speedKmH));
   if (speed <= VIGO_SPEED_CONSUMPTION_CURVE[0][0]) return VIGO_SPEED_CONSUMPTION_CURVE[0][1];
-  const last = VIGO_SPEED_CONSUMPTION_CURVE[VIGO_SPEED_CONSUMPTION_CURVE.length - 1];
-  if (speed >= last[0]) return last[1];
 
-  for (let i = 1; i < VIGO_SPEED_CONSUMPTION_CURVE.length; i++) {
-    const [s1, c1] = VIGO_SPEED_CONSUMPTION_CURVE[i - 1];
-    const [s2, c2] = VIGO_SPEED_CONSUMPTION_CURVE[i];
-    if (speed <= s2) {
-      const t = (speed - s1) / (s2 - s1);
-      return c1 + (c2 - c1) * t;
-    }
+  // Preserve the measured/previous low-speed calibration, then transition smoothly into
+  // the aerodynamic branch from 70 to 80 km/h.
+  if (speed < 80) {
+    const s1 = 70, c1 = 13.5;
+    const s2 = 80, c2 = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s2 * s2;
+    const t = (speed - s1) / (s2 - s1);
+    return c1 + (c2 - c1) * t;
   }
-  return last[1];
+
+  // Energy per 100 km from aerodynamic drag is proportional to airspeed².
+  return VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * speed * speed;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
