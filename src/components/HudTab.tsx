@@ -38,6 +38,7 @@ import {
   estimateSegmentedRouteConsumption,
   calculateClimateImpact,
   calculatePrecipitationImpact,
+  computeFlatRoadConsumptionRate,
   ConsumptionForecast,
 } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
@@ -175,6 +176,19 @@ export const HudTab: React.FC<HudTabProps> = ({
   const elevationGainRef = useRef(0);
   const elevationLossRef = useRef(0);
 
+  // Live per-segment energy accumulation. Instead of applying the trip's average speed to the
+  // whole distance (which under-costs a route that mixes city and highway driving, since the
+  // speed→consumption curve is convex), every accepted GPS segment below adds its own distance
+  // × consumption-at-that-segment's-actual-speed to this running total. See computeFlatRoadConsumptionRate.
+  const segmentEnergyKwhRef = useRef(0);
+  const [liveSegmentEnergyKwh, setLiveSegmentEnergyKwh] = useState(0);
+
+  // Mirrors of render-scope values the geolocation watchPosition callback needs to read at
+  // call-time without forcing the GPS watch to be torn down and resubscribed on every change.
+  const weatherRef = useRef(weather);
+  const relativeWindAngleRef = useRef(0);
+  const styleFactorRef = useRef(1.0);
+
   const isDark = settings.theme !== 'light';
   const batteryCap = settings.batteryCapacityKwh || 51.87;
 
@@ -182,6 +196,12 @@ export const HudTab: React.FC<HudTabProps> = ({
   useEffect(() => {
     onTrackingChange?.(isTracking);
   }, [isTracking, onTrackingChange]);
+
+  // Keep weatherRef in sync so the geolocation callback (subscribed once per trip) always reads
+  // the latest fetched weather without needing to resubscribe watchPosition.
+  useEffect(() => {
+    weatherRef.current = weather;
+  }, [weather]);
 
   // Haversine distance formula between two GPS coordinates (in km)
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -427,6 +447,26 @@ export const HudTab: React.FC<HudTabProps> = ({
           distanceRef.current += deltaKm;
           setTripDistanceKm(Number(distanceRef.current.toFixed(2)));
 
+          // Per-segment energy: rate at THIS segment's own speed (not the trip average), so a
+          // short fast burst costs proportionally more than the same distance at a cruising
+          // pace, matching the convex (aero-drag) shape of the speed/consumption curve.
+          const segRate = computeFlatRoadConsumptionRate(
+            smoothedSpeed,
+            weatherRef.current.isLoaded ? weatherRef.current.temperature : undefined,
+            weatherRef.current.isLoaded ? weatherRef.current.windSpeed : undefined,
+            relativeWindAngleRef.current,
+            weatherRef.current.isLoaded ? weatherRef.current.weatherCode : undefined,
+            weatherRef.current.isLoaded ? weatherRef.current.precipitation : undefined
+          );
+          const segConsumptionPer100 =
+            segRate.baseSpeedConsumption *
+            segRate.tempMultiplier *
+            segRate.windMultiplier *
+            segRate.precipMultiplier *
+            styleFactorRef.current;
+          segmentEnergyKwhRef.current += (deltaKm / 100) * segConsumptionPer100;
+          setLiveSegmentEnergyKwh(Number(segmentEnergyKwhRef.current.toFixed(3)));
+
           if (smoothedSpeed > 0) {
             speedHistoryRef.current.push(smoothedSpeed);
           }
@@ -470,6 +510,11 @@ export const HudTab: React.FC<HudTabProps> = ({
   const windDir = weather.windDirection;
   const relativeWindAngle = ((windDir - currentHeading + 360) % 360);
   const windSpeedMs = Number((weather.windSpeed / 3.6).toFixed(1));
+
+  // Keep relativeWindAngleRef in sync for the geolocation callback's per-segment energy calc.
+  useEffect(() => {
+    relativeWindAngleRef.current = relativeWindAngle;
+  }, [relativeWindAngle]);
 
   // Dynamic arrow rotation: top of dial is vehicle heading (0°).
   // Headwind (windDir = heading, relAngle = 0°): Arrow points straight DOWN into car (0° rotation).
@@ -670,6 +715,11 @@ export const HudTab: React.FC<HudTabProps> = ({
     }
   }, [isTracking, tripDistanceKm, elapsedSeconds, maxSpeed, avgTripSpeedKmH, isDark, livePrecipitation]);
 
+  // Keep styleFactorRef in sync for the geolocation callback's per-segment energy calc.
+  useEffect(() => {
+    styleFactorRef.current = currentTripStyle.factor;
+  }, [currentTripStyle.factor]);
+
   // Energy consumption forecast combining live trip style + speed + temperature + climate + relative wind + precipitation + elevation
   const forecast: ConsumptionForecast = estimateTripConsumption(
     avgTripSpeedKmH,
@@ -688,9 +738,21 @@ export const HudTab: React.FC<HudTabProps> = ({
   );
 
   // === DYNAMIC SOC & RANGE CALCULATION DURING TRIP ===
-  // Energy spent so far during active trip (kWh)
+  // Energy spent so far during active trip (kWh).
+  // The speed/temperature/wind/precipitation/style portion is liveSegmentEnergyKwh, accumulated
+  // per-GPS-segment at each segment's own instantaneous speed (see geolocation handler above) —
+  // NOT the previous approach of applying the whole-trip average speed to the whole distance,
+  // which under-costs mixed city/highway trips because the speed→consumption curve is convex.
+  // Elevation and HVAC energy are physically additive regardless of driving order (elevation is
+  // pure m·g·h from total gain/loss; HVAC is power × elapsed time), so they're still taken from
+  // the aggregate forecast and added once for the whole trip.
+  const elevationEnergyKwh =
+    forecast.elevationDeltaKwh100 !== undefined
+      ? (tripDistanceKm / 100) * forecast.elevationDeltaKwh100
+      : 0;
+  const climateEnergyKwh = (tripDistanceKm / 100) * (forecast.climateDeltaKwh100 ?? 0);
   const energySpentKwh = isTracking
-    ? (tripDistanceKm / 100) * forecast.estimatedConsumption
+    ? Math.max(0, liveSegmentEnergyKwh + elevationEnergyKwh + climateEnergyKwh)
     : 0;
 
   // Percentage drop of battery based on energy spent and battery capacity
@@ -752,6 +814,8 @@ export const HudTab: React.FC<HudTabProps> = ({
     setElevationLossM(0);
     setAltitudeAvailable(false);
     setCompletedTripSummary(null);
+    segmentEnergyKwhRef.current = 0;
+    setLiveSegmentEnergyKwh(0);
   };
 
   // STOP tracking
@@ -768,7 +832,10 @@ export const HudTab: React.FC<HudTabProps> = ({
         ? Math.round(maxSpeed * 0.7)
         : currentSpeed;
 
-    const finalEnergyKwh = Number(((finalDistance / 100) * forecast.estimatedConsumption).toFixed(2));
+    // Use the live per-segment-accumulated energy total (energySpentKwh) rather than
+    // re-deriving it from the trip's average speed, for the same reason the live SoC display
+    // does: it already reflects each segment's own actual speed.
+    const finalEnergyKwh = Number(energySpentKwh.toFixed(2));
     const finalEndSoc = Math.max(0, Math.round(startTripSoc - (finalEnergyKwh / batteryCap) * 100));
 
     setCompletedTripSummary({
@@ -808,6 +875,8 @@ export const HudTab: React.FC<HudTabProps> = ({
     setElevationLossM(0);
     setAltitudeAvailable(false);
     setCompletedTripSummary(null);
+    segmentEnergyKwhRef.current = 0;
+    setLiveSegmentEnergyKwh(0);
   };
 
   // Save tracked trip directly to history
