@@ -109,6 +109,42 @@ export default function App() {
     setSessions((prev) => prev.filter((s) => s.id !== id));
   };
 
+  const handleUpdateSessionEndSoc = (id: string, endSoc: number) => {
+    setSessions((prev) => prev.map((session) => {
+      if (session.id !== id) return session;
+
+      const safeEndSoc = Math.max(0, Math.min(session.startSoc, Math.round(endSoc)));
+      const batteryCap = settings.batteryCapacityKwh || 51.87;
+      const socUsed = Math.max(0, session.startSoc - safeEndSoc);
+      const energyUsedKwh = (socUsed / 100) * batteryCap;
+      const safeDistance = Math.max(0.1, session.distanceKm);
+      const consumptionPer100Km = (energyUsedKwh / safeDistance) * 100;
+      const kmPerKwh = energyUsedKwh > 0 ? safeDistance / energyUsedKwh : 0;
+      const tariff = session.chargingType === 'free'
+        ? 0
+        : session.chargingType === 'custom'
+          ? (session.customTariff ?? 0)
+          : session.totalCost > 0 && session.energyUsedKwh > 0
+            ? session.totalCost / session.energyUsedKwh
+            : 0;
+      const totalCost = energyUsedKwh * tariff;
+      const gasCostEquivalent = (safeDistance / 100) * settings.gasEquivalentL100km * settings.gasPricePerLiter;
+      const moneySaved = Math.max(0, gasCostEquivalent - totalCost);
+
+      return {
+        ...session,
+        endSoc: safeEndSoc,
+        endSocAdjustedManually: true,
+        energyUsedKwh: Number(energyUsedKwh.toFixed(2)),
+        consumptionPer100Km: Number(consumptionPer100Km.toFixed(2)),
+        kmPerKwh: Number(kmPerKwh.toFixed(2)),
+        totalCost: Number(totalCost.toFixed(2)),
+        gasCostEquivalent: Number(gasCostEquivalent.toFixed(2)),
+        moneySaved: Number(moneySaved.toFixed(2)),
+      };
+    }));
+  };
+
   const handleResetData = () => {
     setSettings(DEFAULT_SETTINGS);
     setSessions(INITIAL_SESSIONS);
@@ -211,6 +247,7 @@ export default function App() {
                 sessions={sessions}
                 settings={settings}
                 onDeleteSession={handleDeleteSession}
+                onUpdateSessionEndSoc={handleUpdateSessionEndSoc}
                 onOpenAddModal={() => {
                   setAddTripInitialData(undefined);
                   setIsAddTripOpen(true);

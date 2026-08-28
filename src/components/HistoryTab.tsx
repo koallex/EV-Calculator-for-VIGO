@@ -22,6 +22,9 @@ import {
   Gauge,
   Activity,
   Award,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -41,6 +44,7 @@ interface HistoryTabProps {
   sessions: TripSession[];
   settings: UserSettings;
   onDeleteSession: (id: string) => void;
+  onUpdateSessionEndSoc: (id: string, endSoc: number) => void;
   onOpenAddModal: () => void;
   onImportBackup: (importedSessions: TripSession[], importedSettings?: UserSettings) => void;
 }
@@ -49,12 +53,15 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   sessions,
   settings,
   onDeleteSession,
+  onUpdateSessionEndSoc,
   onOpenAddModal,
   onImportBackup,
 }) => {
   const [filterRoad, setFilterRoad] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingSocId, setEditingSocId] = useState<string | null>(null);
+  const [editingSoc, setEditingSoc] = useState<number>(0);
 
   const isDark = settings.theme !== 'light';
 
@@ -840,6 +847,96 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                         «{trip.note}»
                       </p>
                     )}
+
+                    {/* Finish SOC correction */}
+                    <div className={`rounded-xl border p-2.5 ${
+                      isDark ? 'bg-slate-950/50 border-slate-800/70' : 'bg-slate-50 border-slate-200'
+                    }`}>
+                      {editingSocId === trip.id ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                              Корректировка SOC на финише
+                            </span>
+                            <span className={`font-mono text-sm font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                              {editingSoc}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={0}
+                            max={trip.startSoc}
+                            step={1}
+                            value={editingSoc}
+                            onChange={(e) => setEditingSoc(Number(e.target.value))}
+                            className="w-full accent-emerald-500"
+                          />
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setEditingSoc((v) => Math.max(0, v - 10))}
+                              className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold ${
+                                isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-700'
+                              }`}
+                            >−10</button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingSoc((v) => Math.min(trip.startSoc, v + 10))}
+                              className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold ${
+                                isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-700'
+                              }`}
+                            >+10</button>
+                            <div className="flex-1" />
+                            <button
+                              type="button"
+                              onClick={() => setEditingSocId(null)}
+                              className={`p-1.5 rounded-lg border ${
+                                isDark ? 'border-slate-700 text-slate-400' : 'border-slate-200 text-slate-500'
+                              }`}
+                              title="Отменить"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                triggerHaptic('success', settings.hapticFeedback);
+                                onUpdateSessionEndSoc(trip.id, editingSoc);
+                                setEditingSocId(null);
+                              }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold"
+                            >
+                              <Check className="w-3.5 h-3.5" /> Сохранить
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>SOC на финише</div>
+                            <div className={`text-xs mt-0.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                              {trip.endSoc}%
+                              {trip.endSocAdjustedManually && (
+                                <span className={`ml-1.5 text-[9px] ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>· изменено вручную</span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingSoc(trip.endSoc);
+                              setEditingSocId(trip.id);
+                            }}
+                            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg border text-xs font-semibold ${
+                              isDark ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-200 text-slate-600 hover:bg-white'
+                            }`}
+                          >
+                            <Pencil className="w-3.5 h-3.5" /> Изменить
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
                     {/* Delete action */}
                     <div className="flex justify-end pt-1">

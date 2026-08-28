@@ -63,6 +63,7 @@ export interface TripSession {
   title?: string;
   startSoc: number; // 0-100%
   endSoc: number; // 0-100%
+  endSocAdjustedManually?: boolean; // true when the user corrected the measured finish SOC in History
   distanceKm: number; // km
   odoStart?: number;
   odoEnd?: number;
