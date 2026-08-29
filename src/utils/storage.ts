@@ -648,7 +648,15 @@ export function computeFlatRoadConsumptionRate(
     // car still spends energy on rolling resistance, drivetrain/electrical loads and
     // auxiliaries, so a tailwind cannot make a higher road speed more economical than
     // a lower road speed simply because relative airspeed falls faster.
-    const aeroShare = Math.min(0.55, Math.max(0.28, 0.22 + effectiveSpeed * 0.0026));
+    //
+    // Calibration (owner feedback: wind impact felt overstated at city/moderate speeds):
+    // the previous curve had a hard 28% floor even at ~20 km/h, where real-world aero drag
+    // is a minor contributor next to rolling resistance and drivetrain/aux load. The share
+    // now starts near ~6% at low speed and ramps up to the 55% ceiling only around
+    // 140-150 km/h, where aerodynamics genuinely dominates the road-load. This roughly
+    // halves the wind sensitivity at typical city/highway speeds (60-100 km/h) while
+    // preserving a strong effect for genuine highway-speed storms.
+    const aeroShare = Math.min(0.55, Math.max(0.06, 0.06 + (effectiveSpeed - 15) * 0.0038));
     const aeroBase = baseSpeedConsumption * aeroShare;
     const nonAeroBase = baseSpeedConsumption - aeroBase;
     const aeroWindFactor = Math.pow(relativeAirSpeed / effectiveSpeed, 2);
