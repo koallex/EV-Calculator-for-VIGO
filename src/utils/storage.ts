@@ -618,8 +618,27 @@ export function computeFlatRoadConsumptionRate(
   const BATTERY_RESISTANCE_MAX_PENALTY = 0.30; // asymptotic ceiling: +30% at extreme cold
   const BATTERY_RESISTANCE_SATURATION_TAU = 48; // controls how quickly the curve approaches the ceiling
   const degreesBelowComfort = Math.max(0, 18 - temp);
-  const tempMultiplier =
+  const batteryResistanceMultiplier =
     1 + BATTERY_RESISTANCE_MAX_PENALTY * (1 - Math.exp(-degreesBelowComfort / BATTERY_RESISTANCE_SATURATION_TAU));
+
+  // 2B. LFP-specific reduced usable capacity in extreme cold. This is a physically distinct
+  // effect from the internal-resistance efficiency penalty above: it's not that driving costs
+  // more energy per km, it's that the pack's own low-voltage cutoff is reached earlier under
+  // load when cold, so less of the nominal capacity is actually reachable on a cold-soaked
+  // battery (LFP chemistry is known to derate more here than NMC/NCA). Modeled as an extra
+  // multiplier on effective consumption (equivalent to less usable capacity for the same
+  // distance), separate from and multiplicative with the resistance penalty above, so the two
+  // physically-distinct causes of owner-reported "range feels too optimistic in real winter
+  // cold" don't get conflated into one hand-tuned number. Starts below -5°C (LFP capacity is
+  // essentially unaffected in ordinary cold) and saturates by extreme cold rather than growing
+  // without bound. Owner calibration: "medium" of three proposed severities (12/18/25% ceiling).
+  const LFP_CAPACITY_DERATING_MAX_PENALTY = 0.18; // asymptotic ceiling: +18% effective consumption
+  const LFP_CAPACITY_DERATING_SATURATION_TAU = 22;
+  const degreesBelowLfpThreshold = Math.max(0, -5 - temp);
+  const lfpCapacityDeratingMultiplier =
+    1 + LFP_CAPACITY_DERATING_MAX_PENALTY * (1 - Math.exp(-degreesBelowLfpThreshold / LFP_CAPACITY_DERATING_SATURATION_TAU));
+
+  const tempMultiplier = batteryResistanceMultiplier * lfpCapacityDeratingMultiplier;
 
   // 3. Precipitation & Road Surface Resistance Impact (water displacement, slush, snow)
   const precipInfo = calculatePrecipitationImpact(weatherCode, precipitationMm);
