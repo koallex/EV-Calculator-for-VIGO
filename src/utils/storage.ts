@@ -638,7 +638,41 @@ export function computeFlatRoadConsumptionRate(
   const lfpCapacityDeratingMultiplier =
     1 + LFP_CAPACITY_DERATING_MAX_PENALTY * (1 - Math.exp(-degreesBelowLfpThreshold / LFP_CAPACITY_DERATING_SATURATION_TAU));
 
-  const tempMultiplier = batteryResistanceMultiplier * lfpCapacityDeratingMultiplier;
+  // 2C. Temporary severe-cold calibration.
+  // The existing battery-resistance + LFP derating model remains intact. This additional
+  // correction is intentionally limited to sub-zero temperatures and is a temporary
+  // conservative owner-calibration until real VIGO winter trips are available.
+  // Values are interpolated linearly between the calibration points below.
+  // 0°C → 0%, -5°C → +8%, -10°C → +14%, -15°C → +21%, -20°C → +30%,
+  // -25°C → +38%, -30°C → +46%. It is applied to the road/battery component only;
+  // HVAC remains modeled independently by calculateClimateImpact().
+  const coldCalibrationPoints: Array<[number, number]> = [
+    [0, 0.00],
+    [-5, 0.08],
+    [-10, 0.14],
+    [-15, 0.21],
+    [-20, 0.30],
+    [-25, 0.38],
+    [-30, 0.46],
+  ];
+
+  const interpolateColdCalibration = (t: number): number => {
+    if (t >= 0) return 0;
+    if (t <= -30) return 0.46;
+    for (let i = 1; i < coldCalibrationPoints.length; i++) {
+      const [t1, p1] = coldCalibrationPoints[i - 1];
+      const [t2, p2] = coldCalibrationPoints[i];
+      if (t <= t1 && t >= t2) {
+        const ratio = (t - t1) / (t2 - t1);
+        return p1 + (p2 - p1) * ratio;
+      }
+    }
+    return 0;
+  };
+
+  const coldCalibrationMultiplier = 1 + interpolateColdCalibration(temp);
+  const tempMultiplier =
+    batteryResistanceMultiplier * lfpCapacityDeratingMultiplier * coldCalibrationMultiplier;
 
   // 3. Precipitation & Road Surface Resistance Impact (water displacement, slush, snow)
   const precipInfo = calculatePrecipitationImpact(weatherCode, precipitationMm);
