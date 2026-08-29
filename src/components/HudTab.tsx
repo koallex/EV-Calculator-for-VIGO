@@ -176,6 +176,12 @@ export const HudTab: React.FC<HudTabProps> = ({
   const elevationGainRef = useRef(0);
   const elevationLossRef = useRef(0);
 
+  // Latest GPS state used by the low-frequency weather refresh while tracking.
+  const latestGpsPositionRef = useRef<{ lat: number; lon: number } | null>(null);
+  const latestGpsSpeedRef = useRef(0);
+  const weatherRefreshInFlightRef = useRef(false);
+  const lastWeatherFetchAtRef = useRef(0);
+
   // Live per-segment energy accumulation. Instead of applying the trip's average speed to the
   // whole distance (which under-costs a route that mixes city and highway driving, since the
   // speed→consumption curve is convex), every accepted GPS segment below adds its own distance
@@ -300,8 +306,11 @@ export const HudTab: React.FC<HudTabProps> = ({
     };
   }, [isTracking, tripStartTime]);
 
-  // Fetch real-time weather & wind & precipitation from Open-Meteo
+  // Fetch real-time weather & wind & precipitation from Open-Meteo.
+  // During tracking this is intentionally called at a low frequency (15 min), not per GPS tick.
   const fetchGpsWeather = async (lat: number, lon: number) => {
+    if (weatherRefreshInFlightRef.current) return false;
+    weatherRefreshInFlightRef.current = true;
     try {
       const res = await fetch(
         `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lon.toFixed(4)}&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation,rain,showers,snowfall`
@@ -320,11 +329,16 @@ export const HudTab: React.FC<HudTabProps> = ({
             windDirection: Math.round(data.current.wind_direction_10m ?? 0),
             isLoaded: true,
           });
+          lastWeatherFetchAtRef.current = Date.now();
+          return true;
         }
       }
     } catch {
-      // Keep existing state on transient network error
+      // Keep existing state on transient network error.
+    } finally {
+      weatherRefreshInFlightRef.current = false;
     }
+    return false;
   };
 
   // Geolocation watchPosition listener with glitch filters
@@ -338,12 +352,13 @@ export const HudTab: React.FC<HudTabProps> = ({
       setGpsError(null);
       const { latitude, longitude, speed, accuracy, heading } = pos.coords;
       const now = Date.now();
+      latestGpsPositionRef.current = { lat: latitude, lon: longitude };
 
       const accMeters = accuracy ? Math.round(accuracy) : null;
       setGpsAccuracy(accMeters);
 
-      // Fetch weather on first reliable GPS lock
-      if (!weather.isLoaded) {
+      // Fetch weather on the first reliable GPS lock.
+      if (!weatherRef.current.isLoaded) {
         fetchGpsWeather(latitude, longitude);
       }
 
@@ -385,6 +400,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       );
 
       setCurrentSpeed(smoothedSpeed);
+      latestGpsSpeedRef.current = smoothedSpeed;
 
       let vehicleHeading = heading;
       if (vehicleHeading !== null && !isNaN(vehicleHeading) && vehicleHeading >= 0) {
@@ -503,7 +519,33 @@ export const HudTab: React.FC<HudTabProps> = ({
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
     };
-  }, [isTracking, weather.isLoaded]);
+  }, [isTracking]);
+
+  // During active tracking, refresh current weather every 15 minutes, but only while the car is moving.
+  // This uses one lightweight Open-Meteo current-conditions request per interval and never calls
+  // Elevation API. All GPS/routing calculations remain local.
+  useEffect(() => {
+    if (!isTracking) return;
+
+    const WEATHER_REFRESH_MS = 15 * 60 * 1000;
+
+    const refreshWeatherIfNeeded = (force = false) => {
+      const position = latestGpsPositionRef.current;
+      const speed = latestGpsSpeedRef.current;
+      if (!position || speed < 3) return;
+
+      const elapsed = Date.now() - lastWeatherFetchAtRef.current;
+      if (!force && elapsed < WEATHER_REFRESH_MS) return;
+
+      fetchGpsWeather(position.lat, position.lon);
+    };
+
+    // Get a fresh weather sample as tracking starts (if GPS already has a moving fix).
+    // Subsequent refreshes are limited to once every 15 minutes.
+    refreshWeatherIfNeeded(true);
+    const interval = window.setInterval(refreshWeatherIfNeeded, WEATHER_REFRESH_MS);
+    return () => window.clearInterval(interval);
+  }, [isTracking]);
 
   // Dynamic relative wind angle calculation
   const currentHeading = gpsHeading ?? lastHeadingRef.current ?? 0;
