@@ -367,8 +367,12 @@ export function calculateClimateImpact(temperatureC: number | undefined, climate
     // PTC heater assists increasingly in colder weather. These are planning estimates,
     // not measured VIGO telemetry. The PTC share is intentionally moderate because cabin
     // heat demand falls after the initial warm-up on a long trip.
+    //
+    // The 10-19°C branch is anchored to power=0.40 kW exactly at temp=19 (matching the
+    // comfort-zone baseline above) and to power=0.82 kW at temp=10 (matching the next
+    // branch's own value there) so the curve has no jump at either seam.
     if (temp >= 10) {
-      powerKw = 0.55 + (19 - temp) * 0.030;
+      powerKw = 0.40 + (19 - temp) * 0.046667;
     } else if (temp >= 0) {
       powerKw = 0.82 + (10 - temp) * 0.048;
     } else if (temp >= -10) {
@@ -378,12 +382,14 @@ export function calculateClimateImpact(temperatureC: number | undefined, climate
     } else {
       powerKw = 2.70 + (Math.abs(temp) - 20) * 0.110;
     }
-    powerKw = Math.min(3.8, Math.max(0.55, powerKw));
+    powerKw = Math.min(3.8, Math.max(0.40, powerKw));
     label = `Тепловой насос + ТЭН (${powerKw.toFixed(1)} кВт)`;
     description = `Оценочная электрическая нагрузка теплового насоса с поддержкой ТЭН при ${temp}°C: ~${powerKw.toFixed(1)} кВт`;
   } else {
-    powerKw = 0.65 + (temp - 23) * 0.10;
-    powerKw = Math.min(2.6, Math.max(0.65, powerKw));
+    // Anchored to power=0.40 kW exactly at temp=23°C (matching the comfort-zone baseline)
+    // so there is no jump crossing out of the comfort zone on the hot side either.
+    powerKw = 0.40 + (temp - 23) * 0.10;
+    powerKw = Math.min(2.6, Math.max(0.40, powerKw));
     label = `A/C охлаждение (${powerKw.toFixed(1)} кВт)`;
     description = `Оценочная электрическая нагрузка охлаждения при ${temp}°C: ~${powerKw.toFixed(1)} кВт`;
   }
@@ -630,7 +636,11 @@ export function computeFlatRoadConsumptionRate(
   let windImpactPct = 0;
   let windStatusText: string | undefined;
 
-  if (windSpeedKmH && windSpeedKmH > 3 && relativeWindAngleDeg !== undefined && !isNaN(relativeWindAngleDeg)) {
+  // Wind is evaluated continuously from 0 km/h — no on/off gate. A hard "ignore below X km/h"
+  // threshold used to create a jump right at the cutoff (0% just below it, then a sudden step
+  // above it); the low-wind ramp below already sends the effect to ~0% smoothly as wind→0, so
+  // no separate gate is needed. `windSpeedKmH > 0` just avoids doing the trig for calm conditions.
+  if (windSpeedKmH && windSpeedKmH > 0 && relativeWindAngleDeg !== undefined && !isNaN(relativeWindAngleDeg)) {
     const rad = (relativeWindAngleDeg * Math.PI) / 180;
     // Open-Meteo wind direction is the direction the wind comes FROM. Angle 0° therefore
     // means headwind and 180° means tailwind. Resolve the wind vector into longitudinal
@@ -670,7 +680,21 @@ export function computeFlatRoadConsumptionRate(
       ? baseSpeedConsumption * 0.78
       : 0;
     const windAdjustedConsumption = Math.max(rawWindAdjustedConsumption, tailwindFloor);
-    windMultiplier = Math.max(0.78, Math.min(1.60, windAdjustedConsumption / baseSpeedConsumption));
+    const fullStrengthMultiplier = Math.max(0.78, Math.min(1.60, windAdjustedConsumption / baseSpeedConsumption));
+
+    // Low-wind ramp (owner feedback: effect still felt too strong at LOW wind speeds
+    // specifically, not just moderate ones). Ambient wind reported by a weather station
+    // is measured well above the road and is rarely a clean, steady flow right around the
+    // car at low absolute speeds — gustiness and the car's own boundary-layer turbulence
+    // dominate over the "textbook" relative-airspeed effect until the wind is genuinely
+    // blowing with some strength. A smoothstep ramp (zero slope at both ends, so it joins
+    // the "no effect" baseline and the full-strength model with no kink) fades the effect
+    // in from 0% at 0 km/h to 100% of the full-strength model by ~20 km/h true wind speed,
+    // rather than applying the full effect uniformly from the first breath of air.
+    const WIND_RAMP_FULL_STRENGTH_KMH = 20;
+    const rampT = Math.max(0, Math.min(1, windSpeedKmH / WIND_RAMP_FULL_STRENGTH_KMH));
+    const rampFactor = rampT * rampT * (3 - 2 * rampT); // smoothstep
+    windMultiplier = 1 + (fullStrengthMultiplier - 1) * rampFactor;
     windImpactPct = Math.round((windMultiplier - 1) * 100);
 
     const normAngle = ((relativeWindAngleDeg % 360) + 360) % 360;
