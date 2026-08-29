@@ -615,7 +615,7 @@ export function computeFlatRoadConsumptionRate(
   // cells get colder, but it approaches a physical ceiling rather than climbing forever — a real
   // pack doesn't lose 40%+ efficiency at -40°C just because -20°C already cost 20%.
   const temp = temperatureC ?? 20; // Default optimal 20°C if weather not loaded
-  const BATTERY_RESISTANCE_MAX_PENALTY = 0.30; // asymptotic ceiling: +30% at extreme cold
+  const BATTERY_RESISTANCE_MAX_PENALTY = 0.22; // temporary conservative calibration: reduced cold penalty pending real winter VIGO data
   const BATTERY_RESISTANCE_SATURATION_TAU = 48; // controls how quickly the curve approaches the ceiling
   const degreesBelowComfort = Math.max(0, 18 - temp);
   const batteryResistanceMultiplier =
@@ -632,47 +632,13 @@ export function computeFlatRoadConsumptionRate(
   // cold" don't get conflated into one hand-tuned number. Starts below -5°C (LFP capacity is
   // essentially unaffected in ordinary cold) and saturates by extreme cold rather than growing
   // without bound. Owner calibration: "medium" of three proposed severities (12/18/25% ceiling).
-  const LFP_CAPACITY_DERATING_MAX_PENALTY = 0.18; // asymptotic ceiling: +18% effective consumption
+  const LFP_CAPACITY_DERATING_MAX_PENALTY = 0.10; // temporary conservative calibration: reduced LFP cold derating pending real winter VIGO data
   const LFP_CAPACITY_DERATING_SATURATION_TAU = 22;
   const degreesBelowLfpThreshold = Math.max(0, -5 - temp);
   const lfpCapacityDeratingMultiplier =
     1 + LFP_CAPACITY_DERATING_MAX_PENALTY * (1 - Math.exp(-degreesBelowLfpThreshold / LFP_CAPACITY_DERATING_SATURATION_TAU));
 
-  // 2C. Temporary severe-cold calibration.
-  // The existing battery-resistance + LFP derating model remains intact. This additional
-  // correction is intentionally limited to sub-zero temperatures and is a temporary
-  // conservative owner-calibration until real VIGO winter trips are available.
-  // Values are interpolated linearly between the calibration points below.
-  // 0°C → 0%, -5°C → +8%, -10°C → +14%, -15°C → +21%, -20°C → +30%,
-  // -25°C → +38%, -30°C → +46%. It is applied to the road/battery component only;
-  // HVAC remains modeled independently by calculateClimateImpact().
-  const coldCalibrationPoints: Array<[number, number]> = [
-    [0, 0.00],
-    [-5, 0.08],
-    [-10, 0.14],
-    [-15, 0.21],
-    [-20, 0.30],
-    [-25, 0.38],
-    [-30, 0.46],
-  ];
-
-  const interpolateColdCalibration = (t: number): number => {
-    if (t >= 0) return 0;
-    if (t <= -30) return 0.46;
-    for (let i = 1; i < coldCalibrationPoints.length; i++) {
-      const [t1, p1] = coldCalibrationPoints[i - 1];
-      const [t2, p2] = coldCalibrationPoints[i];
-      if (t <= t1 && t >= t2) {
-        const ratio = (t - t1) / (t2 - t1);
-        return p1 + (p2 - p1) * ratio;
-      }
-    }
-    return 0;
-  };
-
-  const coldCalibrationMultiplier = 1 + interpolateColdCalibration(temp);
-  const tempMultiplier =
-    batteryResistanceMultiplier * lfpCapacityDeratingMultiplier * coldCalibrationMultiplier;
+  const tempMultiplier = batteryResistanceMultiplier * lfpCapacityDeratingMultiplier;
 
   // 3. Precipitation & Road Surface Resistance Impact (water displacement, slush, snow)
   const precipInfo = calculatePrecipitationImpact(weatherCode, precipitationMm);
