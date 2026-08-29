@@ -1,4 +1,4 @@
-# EV Calculator for VIGO
+# EV Calculator for VIGO/Nammi 06/Evolute i-joy
 
 Веб-приложение для расчёта и анализа расхода энергии электромобиля VIGO на маршруте.
 
