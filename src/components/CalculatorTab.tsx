@@ -12,6 +12,7 @@ import {
   Navigation,
   CloudSun,
   CloudRain,
+  CloudSnow,
   Sun,
   Wind,
   Thermometer,
@@ -74,11 +75,24 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [routeMapOpen, setRouteMapOpen] = useState(false);
   const [elevationOpen, setElevationOpen] = useState(false);
   const [consumptionOpen, setConsumptionOpen] = useState(false);
+  const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
 
   const weatherIcon = (code: number, className = 'w-4 h-4') => {
+    if ([71,73,75,77,85,86].includes(code)) return <CloudSnow className={className} />;
     if ([51,53,55,61,63,65,80,81,82].includes(code)) return <CloudRain className={className} />;
     if ([0,1].includes(code)) return <Sun className={className} />;
     return <CloudSun className={className} />;
+  };
+
+  // Same headwind/tailwind/crosswind classification used for the route-level wind badge and
+  // for storage.ts's windStatusText, applied per sample point using that point's own local
+  // road bearing rather than one A→B bearing for the whole route.
+  const sampleWindLabel = (windDirectionDeg: number, bearingDeg: number) => {
+    const rel = ((windDirectionDeg - bearingDeg + 360) % 360);
+    if (rel <= 45 || rel >= 315) return 'Встречный';
+    if (rel >= 135 && rel <= 225) return 'Попутный';
+    if (rel > 45 && rel < 135) return 'Боковой справа';
+    return 'Боковой слева';
   };
 
   useEffect(() => {
@@ -557,6 +571,46 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               );
             })()}
             <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-slate-950 text-slate-300' : 'bg-slate-50 text-slate-600'}`}><div className="flex justify-between"><span>Подъёмы</span><b>+{routeElevation.grossClimbEnergyKwh.toFixed(2)} кВт⋅ч</b></div><div className="flex justify-between mt-1"><span>Рекуперация</span><b className="text-emerald-500">−{routeElevation.recoveredEnergyKwh.toFixed(2)} кВт⋅ч</b></div><div className="flex justify-between mt-2 pt-2 border-t border-slate-500/20"><span>Скорректированный расход</span><b>{elevationAdjustedConsumption.toFixed(1)} кВт⋅ч/100 км</b></div></div>
+
+            {routeWeather && routeWeather.samples.length > 0 && (
+              <>
+                <button onClick={() => setWeatherPanelOpen(v => !v)} className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 text-sm font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                  <span className="inline-flex items-center gap-2"><CloudSun className="w-4 h-4 text-sky-500" />Погода по маршруту ({routeWeather.samples.length} точек)</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${weatherPanelOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {weatherPanelOpen && (() => {
+                  // etaMinutes/arrivalDate are for the final point; every sample carries its own
+                  // etaMinutes from the same departure instant, so departure = arrival − final ETA.
+                  const departureDate = new Date(routeWeather.arrivalDate.getTime() - routeWeather.etaMinutes * 60000);
+                  return (
+                    <div className={`mt-2 rounded-xl border divide-y overflow-hidden ${isDark ? 'bg-slate-950 border-slate-800 divide-slate-800' : 'bg-white border-slate-200 divide-slate-100'}`}>
+                      {routeWeather.samples.map((s, i) => {
+                        const sampleTime = new Date(departureDate.getTime() + s.etaMinutes * 60000);
+                        const relAngle = ((s.weather.windDirection - s.routeBearing + 360) % 360);
+                        return (
+                          <div key={i} className="flex items-center justify-between gap-3 px-3 py-2.5 text-xs">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {weatherIcon(s.weather.weatherCode, 'w-4 h-4 shrink-0 text-sky-500')}
+                              <div className="min-w-0">
+                                <div className="font-bold">{Math.round(s.distanceFromStartKm)} км · {sampleTime.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</div>
+                                <div className="text-[10px] text-slate-500">
+                                  {sampleWindLabel(s.weather.windDirection, s.routeBearing)} {Math.round(s.weather.windSpeed)} км/ч
+                                  {s.weather.precipitation > 0.1 ? ` · осадки ${s.weather.precipitation.toFixed(1)} мм/ч` : ''}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <ArrowDown className="w-3.5 h-3.5 text-slate-400" style={{ transform: `rotate(${relAngle}deg)` }} />
+                              <b className="font-mono">{s.weather.temperature >= 0 ? '+' : ''}{Math.round(s.weather.temperature)}°C</b>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </>
+            )}
           </>
         )}
       </section>
