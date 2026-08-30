@@ -1155,7 +1155,20 @@ export function estimateSegmentedRouteConsumption(
     const speedScale = rawHarmonic > 0 ? speed / rawHarmonic : 1;
     roadSpeeds = roadSpeeds.map((v) => Math.max(10, Math.min(140, v * speedScale)));
   }
-  const getSegmentSpeed = (index: number) => roadSpeeds[index] ?? speed;
+  // Use the speed at the middle of each sampled distance interval instead of assigning the
+  // whole interval the speed of its end point. This matters on long routes where a 1–2 km
+  // sampled interval can cross a transition into/out of a 100+ km/h road section: the old
+  // endpoint rule could charge the interval at the slower speed after leaving a fast section,
+  // systematically under-counting the energy of high-speed portions. A midpoint interpolation
+  // keeps the route profile smooth without adding UI data or extra API calls.
+  const getSegmentSpeed = (index: number) => {
+    const current = roadSpeeds[index];
+    const previous = roadSpeeds[index - 1];
+    if (Number.isFinite(current) && Number.isFinite(previous)) {
+      return Math.max(10, Math.min(requestedMaxSpeed ?? 140, (current + previous) / 2));
+    }
+    return current ?? previous ?? speed;
+  };
   const oneMonthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
   const recent = sessions.filter((s) => s.createdAt && s.createdAt >= oneMonthAgo && s.consumptionPer100Km > 8 && s.consumptionPer100Km < 35);
   let styleFactor = 1;
