@@ -32,6 +32,26 @@ import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSam
 import { RouteMap } from './RouteMap';
 import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts';
 
+// Manual "Планирование" precipitation presets: type × intensity → (mm/h, WMO weather code).
+// Values sit inside the intensity bands calculatePrecipitationImpact() already uses, so each
+// button maps to a genuinely different physical impact rather than just a different label.
+// Freezing rain / naledь at sub-zero planning temperatures is NOT a separate button here —
+// it falls out automatically from the temperature already entered above, since
+// calculatePrecipitationImpact blends "rain" smoothly into the icy-road formula as
+// manualTemperature approaches/drops below 0°C (see calcIceBlendFactor in storage.ts).
+const MANUAL_PRECIPITATION_PRESETS: Record<'rain' | 'snow', Record<'light' | 'medium' | 'heavy', { mm: number; code: number }>> = {
+  rain: {
+    light: { mm: 0.2, code: 61 },   // морось / слабый дождь
+    medium: { mm: 2.0, code: 63 },  // умеренный дождь
+    heavy: { mm: 6.0, code: 65 },   // ливень
+  },
+  snow: {
+    light: { mm: 0.2, code: 71 },   // слабый снег
+    medium: { mm: 1.0, code: 73 },  // умеренный снег
+    heavy: { mm: 3.5, code: 75 },   // сильный снегопад
+  },
+};
+
 interface CalculatorTabProps {
   settings: UserSettings;
   sessions: TripSession[];
@@ -57,6 +77,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [manualWindSpeed, setManualWindSpeed] = useState(0);
   const [manualWindDirection, setManualWindDirection] = useState(0);
   const [manualPrecipitationType, setManualPrecipitationType] = useState<'none' | 'rain' | 'snow'>('none');
+  const [manualPrecipitationIntensity, setManualPrecipitationIntensity] = useState<'light' | 'medium' | 'heavy'>('medium');
   const [chargingType, setChargingType] = useState<TripSession['chargingType']>('malanka_dc');
 
   // Planned route: current GPS point A -> selected destination B -> detailed elevation profile.
@@ -212,8 +233,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         // works in km/h — same unit Open-Meteo returns for the "current" weather mode. Convert
         // here so both weather modes feed the physics model consistently.
         avgWindSpeed = manualWindSpeed * 3.6;
-        avgPrecipitation = manualPrecipitationType === 'rain' ? 2 : manualPrecipitationType === 'snow' ? 1 : 0;
-        avgWeatherCode = manualPrecipitationType === 'rain' ? 63 : manualPrecipitationType === 'snow' ? 71 : 0;
+        if (manualPrecipitationType === 'none') {
+          avgPrecipitation = 0;
+          avgWeatherCode = 0;
+        } else {
+          const preset = MANUAL_PRECIPITATION_PRESETS[manualPrecipitationType][manualPrecipitationIntensity];
+          avgPrecipitation = preset.mm;
+          avgWeatherCode = preset.code;
+        }
         avgRelativeWindAngle = (manualWindDirection - routeBearing + 360) % 360;
       }
       const fallbackWeather = {
@@ -431,6 +458,26 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             </div>
             <div className="flex items-center gap-2"><Navigation className="w-4 h-4 text-slate-400" style={{transform:`rotate(${manualWindDirection}deg)`}} /><span className="text-xs text-slate-500">Направление ветра</span><DecimalInput value={manualWindDirection} onChange={(v) => setManualWindDirection(((Math.round(v)%360)+360)%360)} min={0} max={359} className="ml-auto w-20 text-right" /><span className="text-xs text-slate-500">°</span></div>
             <div><div className="text-[11px] text-slate-500 mb-1.5">Осадки</div><div className="grid grid-cols-3 gap-1">{([['none','Нет'],['rain','Дождь'],['snow','Снег']] as const).map(([v,label]) => <button key={v} onClick={() => setManualPrecipitationType(v)} className={`rounded-lg py-2 text-xs font-semibold border ${manualPrecipitationType===v ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : (isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600')}`}>{label}</button>)}</div></div>
+            {manualPrecipitationType !== 'none' && (
+              <div>
+                <div className="text-[11px] text-slate-500 mb-1.5">Интенсивность</div>
+                <div className="grid grid-cols-3 gap-1">
+                  {(['light','medium','heavy'] as const).map((v) => {
+                    const preset = MANUAL_PRECIPITATION_PRESETS[manualPrecipitationType][v];
+                    const label = v === 'light' ? 'Лёгкая' : v === 'medium' ? 'Умеренная' : 'Сильная';
+                    return (
+                      <button key={v} onClick={() => setManualPrecipitationIntensity(v)}
+                        className={`rounded-lg py-2 text-xs font-semibold border ${manualPrecipitationIntensity===v ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : (isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600')}`}>
+                        {label}<span className="block text-[9px] font-normal opacity-70">{preset.mm} мм/ч</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {manualPrecipitationType === 'rain' && manualTemperature <= 2 && (
+                  <p className="text-[10px] text-amber-500 mt-1.5">⚠️ При {manualTemperature}°C дождь автоматически учитывается как риск наледи на дороге (поправка выше, чем для обычного дождя).</p>
+                )}
+              </div>
+            )}
             <p className="text-[10px] text-slate-500">Ручные условия используются без погодных API — можно планировать поездку на любой сезон.</p>
           </div>
         )}

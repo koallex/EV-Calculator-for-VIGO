@@ -645,7 +645,8 @@ export const HudTab: React.FC<HudTabProps> = ({
   // Precipitation & Road Surface Impact calculation
   const livePrecipitation = calculatePrecipitationImpact(
     weather.isLoaded ? weather.weatherCode : undefined,
-    weather.isLoaded ? weather.precipitation : undefined
+    weather.isLoaded ? weather.precipitation : undefined,
+    outdoorTemp
   );
 
   // === REAL-TIME DRIVING STYLE SPECIFICALLY FOR THE CURRENT ACTIVE TRIP ===
