@@ -65,12 +65,15 @@ function interpolateVigoSpeedConsumptionRaw(speedKmH: number): number {
   if (speed <= 105) {
     return qA * speed * speed * speed + qB * speed * speed + qC * speed + qD;
   }
-  // Above the calibration anchor, continue the established aero relationship
-  // while preserving continuity at 105 km/h.
-  const baseAt105 = qA * s3 * s3 * s3 + qB * s3 * s3 + qC * s3 + qD;
-  const aeroAt105 = VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * s3 * s3;
-  const offset = baseAt105 - aeroAt105;
-  return VIGO_HIGH_SPEED_AERO_A + VIGO_HIGH_SPEED_AERO_B * speed * speed + offset;
+  // Above 105 km/h use a gently steeper high-speed branch. The new branch
+  // is continuous in value and slope at 105 km/h and is tuned through
+  // 120 and 150 km/h. This raises the cost of sustained high-speed driving
+  // without changing the already-calibrated <=105 km/h curve.
+  const hA = 0.000000811287477950617;
+  const hB = 0.000510582010583333;
+  const hC = 0.164825396825233;
+  const hD = -4.57499999999333;
+  return hA * speed * speed * speed + hB * speed * speed + hC * speed + hD;
 }
 
 export function interpolateVigoSpeedConsumption(speedKmH: number): number {
