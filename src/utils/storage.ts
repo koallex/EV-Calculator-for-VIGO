@@ -410,6 +410,41 @@ export interface PrecipitationImpact {
   description: string;
 }
 
+// Smooth 0..1 ease used for every temperature-driven precipitation transition below —
+// keeps blends continuous instead of a hard on/off switch at some threshold degree.
+function smoothstep01(t: number): number {
+  const c = Math.max(0, Math.min(1, t));
+  return c * c * (3 - 2 * c);
+}
+
+// Rain reported by the API doesn't stop being dangerous the instant air temperature
+// crosses 0°C — the road surface itself typically stays colder than the air above it,
+// so real black-ice risk starts a couple degrees above freezing and is essentially
+// total a few degrees below it. Returns 0 (plain wet road) .. 1 (fully icy).
+const ICE_BLEND_UPPER_TEMP_C = 2; // above this, treat rain as ordinary wet road
+const ICE_BLEND_LOWER_TEMP_C = -3; // at/below this, treat rain as fully icy/naledь
+function calcIceBlendFactor(temperatureC: number): number {
+  if (temperatureC >= ICE_BLEND_UPPER_TEMP_C) return 0;
+  if (temperatureC <= ICE_BLEND_LOWER_TEMP_C) return 1;
+  const t = (ICE_BLEND_UPPER_TEMP_C - temperatureC) / (ICE_BLEND_UPPER_TEMP_C - ICE_BLEND_LOWER_TEMP_C);
+  return smoothstep01(t);
+}
+
+// Snow resistance isn't constant across temperature either: wet, near-freezing snow packs
+// into slush and gives the worst rolling resistance / traction loss, while deep-cold snow
+// is dry powder that a tire displaces far more easily. Returns a 0.78..1.0 multiplier on
+// the intensity-based snow impact — 1.0 at the wet-snow worst case, easing down toward dry
+// powder as it gets colder, saturating rather than dropping without bound.
+const SNOW_WET_PEAK_TEMP_C = -1; // at/above this (but still snowing), worst-case wet/packed snow
+const SNOW_DRY_FLOOR_TEMP_C = -18; // at/below this, dry powder — resistance eases off and saturates
+const SNOW_COLD_MAX_EASE = 0.22; // up to 22% less resistance than wet snow, in deep cold
+function calcSnowTempFactor(temperatureC: number): number {
+  if (temperatureC >= SNOW_WET_PEAK_TEMP_C) return 1;
+  if (temperatureC <= SNOW_DRY_FLOOR_TEMP_C) return 1 - SNOW_COLD_MAX_EASE;
+  const t = (SNOW_WET_PEAK_TEMP_C - temperatureC) / (SNOW_WET_PEAK_TEMP_C - SNOW_DRY_FLOOR_TEMP_C);
+  return 1 - smoothstep01(t) * SNOW_COLD_MAX_EASE;
+}
+
 /**
  * Calculates rolling resistance and hydrodynamic drag coefficient from precipitation and road surface condition.
  * EV Physics:
@@ -417,28 +452,41 @@ export interface PrecipitationImpact {
  * - Damp / Mist / Fog: +2% to +4%
  * - Moderate Rain (water displacement by tires): +8%
  * - Heavy Rain / Puddles (hydrodynamic drag & spray): +12%
- * - Snow / Slush / Packed snow (compression and friction loss): +14% to +22%
+ * - Snow / Slush / Packed snow (compression and friction loss): +14% to +22%, eased down in
+ *   deep cold where snow is dry powder rather than wet/packed (see calcSnowTempFactor)
+ * - Rain at/near freezing air temperature is blended smoothly into an icy-road penalty
+ *   (see calcIceBlendFactor), since real black ice risk doesn't wait for a hard 0°C cutoff
  */
 export function calculatePrecipitationImpact(
   weatherCode?: number,
-  precipitationMm?: number
+  precipitationMm?: number,
+  temperatureC?: number
 ): PrecipitationImpact {
   const code = weatherCode ?? 0;
   const precip = Math.max(0, precipitationMm ?? 0);
 
   // Snow: intensity matters. A light snowfall is not equivalent to slush/deep snow.
   if ([71, 73, 75, 77, 85, 86].includes(code) || (code >= 70 && code < 80)) {
-    const impactPct = (code === 75 || code === 86 || precip >= 3.0) ? 22
+    let impactPct = (code === 75 || code === 86 || precip >= 3.0) ? 22
       : precip >= 1.0 ? 18
       : precip >= 0.3 ? 14
       : 8;
+    let tempNote = '';
+    if (temperatureC !== undefined) {
+      const snowFactor = calcSnowTempFactor(temperatureC);
+      if (snowFactor < 1) {
+        const before = impactPct;
+        impactPct = Math.round(impactPct * snowFactor);
+        tempNote = ` Сухой морозный снег при ${temperatureC.toFixed(0)}°C снижает сопротивление: ${before}%→${impactPct}%.`;
+      }
+    }
     const heavy = impactPct >= 20;
     return {
       impactPct, factor: 1 + impactPct / 100,
       type: heavy ? 'heavy_snow' : 'snow',
-      label: `Снег (${impactPct >= 20 ? 'сильный' : 'умеренный'}, +${impactPct}%)`,
+      label: `Снег (${heavy ? 'сильный' : 'умеренный'}, +${impactPct}%)`,
       roadState: heavy ? 'Снежная каша / накат' : 'Заснеженный асфальт',
-      description: `Поправка зависит от интенсивности снега: ${impactPct}%`,
+      description: `Поправка зависит от интенсивности снега: ${impactPct}%.${tempNote}`,
     };
   }
 
@@ -455,25 +503,40 @@ export function calculatePrecipitationImpact(
   // Long-range seasonal data are converted to a daily-average hourly equivalent.
   const rainCodes = [51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99];
   if (rainCodes.includes(code) || precip > 0) {
-    let impactPct: number;
-    if (precip <= 0.1) impactPct = 2;
-    else if (precip <= 0.3) impactPct = 3;
-    else if (precip <= 0.7) impactPct = 5;
-    else if (precip <= 1.5) impactPct = 7;
-    else if (precip <= 3.0) impactPct = 9;
-    else if (precip <= 6.0) impactPct = 11;
-    else impactPct = 12;
+    let wetImpactPct: number;
+    if (precip <= 0.1) wetImpactPct = 2;
+    else if (precip <= 0.3) wetImpactPct = 3;
+    else if (precip <= 0.7) wetImpactPct = 5;
+    else if (precip <= 1.5) wetImpactPct = 7;
+    else if (precip <= 3.0) wetImpactPct = 9;
+    else if (precip <= 6.0) wetImpactPct = 11;
+    else wetImpactPct = 12;
 
     // WMO heavy-rain codes retain a conservative minimum even when the API's
     // instantaneous precipitation value happens to be small.
-    if ([65, 81, 82, 95, 96, 99].includes(code)) impactPct = Math.max(impactPct, 10);
-    const heavy = impactPct >= 10;
+    if ([65, 81, 82, 95, 96, 99].includes(code)) wetImpactPct = Math.max(wetImpactPct, 10);
+
+    // Below-freezing rain is physically freezing rain / black ice, not "wet asphalt" — traction
+    // and rolling-resistance losses are far higher. Blend smoothly into the icy-road formula as
+    // air temperature approaches and drops below 0°C, rather than only trusting explicit
+    // freezing-rain weather codes (56/57/66/67) that the API doesn't always report correctly,
+    // especially on long-range/seasonal forecasts used for trip planning.
+    const iceImpactPct = precip <= 0.3 ? 15 : precip <= 1.0 ? 18 : precip <= 3.0 ? 21 : 24;
+    const iceBlend = temperatureC !== undefined ? calcIceBlendFactor(temperatureC) : 0;
+    const impactPct = Math.round(wetImpactPct + (iceImpactPct - wetImpactPct) * iceBlend);
+
+    const isIcy = iceBlend >= 0.5;
+    const heavy = !isIcy && impactPct >= 10;
     return {
       impactPct, factor: 1 + impactPct / 100,
-      type: heavy ? 'heavy_rain' : impactPct <= 3 ? 'damp' : 'rain',
-      label: `${impactPct >= 10 ? 'Ливень' : impactPct <= 3 ? 'Морось' : 'Дождь'} (+${impactPct}%)`,
-      roadState: impactPct >= 10 ? 'Глубокие лужи / вода' : 'Мокрый асфальт',
-      description: `Интенсивность осадков ~${precip.toFixed(1)} мм/ч → поправка +${impactPct}%`,
+      type: isIcy ? 'heavy_snow' : heavy ? 'heavy_rain' : impactPct <= 3 ? 'damp' : 'rain',
+      label: isIcy
+        ? `Гололёд / ледяной дождь (+${impactPct}%)`
+        : `${heavy ? 'Ливень' : impactPct <= 3 ? 'Морось' : 'Дождь'} (+${impactPct}%)`,
+      roadState: isIcy ? 'Гололедица / накат' : heavy ? 'Глубокие лужи / вода' : 'Мокрый асфальт',
+      description: isIcy
+        ? `Дождь при ~${temperatureC?.toFixed(0)}°C — риск наледи на дороге, поправка +${impactPct}%`
+        : `Интенсивность осадков ~${precip.toFixed(1)} мм/ч → поправка +${impactPct}%`,
     };
   }
 
@@ -625,7 +688,7 @@ export function computeFlatRoadConsumptionRate(
   // cells get colder, but it approaches a physical ceiling rather than climbing forever — a real
   // pack doesn't lose 40%+ efficiency at -40°C just because -20°C already cost 20%.
   const temp = temperatureC ?? 20; // Default optimal 20°C if weather not loaded
-  const BATTERY_RESISTANCE_MAX_PENALTY = 0.30; // asymptotic ceiling: +30% at extreme cold
+  const BATTERY_RESISTANCE_MAX_PENALTY = 0.22; // temporary conservative calibration: reduced cold penalty pending real winter VIGO data
   const BATTERY_RESISTANCE_SATURATION_TAU = 48; // controls how quickly the curve approaches the ceiling
   const degreesBelowComfort = Math.max(0, 18 - temp);
   const batteryResistanceMultiplier =
@@ -642,50 +705,18 @@ export function computeFlatRoadConsumptionRate(
   // cold" don't get conflated into one hand-tuned number. Starts below -5°C (LFP capacity is
   // essentially unaffected in ordinary cold) and saturates by extreme cold rather than growing
   // without bound. Owner calibration: "medium" of three proposed severities (12/18/25% ceiling).
-  const LFP_CAPACITY_DERATING_MAX_PENALTY = 0.18; // asymptotic ceiling: +18% effective consumption
+  const LFP_CAPACITY_DERATING_MAX_PENALTY = 0.10; // temporary conservative calibration: reduced LFP cold derating pending real winter VIGO data
   const LFP_CAPACITY_DERATING_SATURATION_TAU = 22;
   const degreesBelowLfpThreshold = Math.max(0, -5 - temp);
   const lfpCapacityDeratingMultiplier =
     1 + LFP_CAPACITY_DERATING_MAX_PENALTY * (1 - Math.exp(-degreesBelowLfpThreshold / LFP_CAPACITY_DERATING_SATURATION_TAU));
 
-  // 2C. Temporary severe-cold calibration.
-  // The existing battery-resistance + LFP derating model remains intact. This additional
-  // correction is intentionally limited to sub-zero temperatures and is a temporary
-  // conservative owner-calibration until real VIGO winter trips are available.
-  // Values are interpolated linearly between the calibration points below.
-  // 0°C → 0%, -5°C → +8%, -10°C → +14%, -15°C → +21%, -20°C → +30%,
-  // -25°C → +38%, -30°C → +46%. It is applied to the road/battery component only;
-  // HVAC remains modeled independently by calculateClimateImpact().
-  const coldCalibrationPoints: Array<[number, number]> = [
-    [0, 0.00],
-    [-5, 0.08],
-    [-10, 0.14],
-    [-15, 0.21],
-    [-20, 0.30],
-    [-25, 0.38],
-    [-30, 0.46],
-  ];
+  const tempMultiplier = batteryResistanceMultiplier * lfpCapacityDeratingMultiplier;
 
-  const interpolateColdCalibration = (t: number): number => {
-    if (t >= 0) return 0;
-    if (t <= -30) return 0.46;
-    for (let i = 1; i < coldCalibrationPoints.length; i++) {
-      const [t1, p1] = coldCalibrationPoints[i - 1];
-      const [t2, p2] = coldCalibrationPoints[i];
-      if (t <= t1 && t >= t2) {
-        const ratio = (t - t1) / (t2 - t1);
-        return p1 + (p2 - p1) * ratio;
-      }
-    }
-    return 0;
-  };
-
-  const coldCalibrationMultiplier = 1 + interpolateColdCalibration(temp);
-  const tempMultiplier =
-    batteryResistanceMultiplier * lfpCapacityDeratingMultiplier * coldCalibrationMultiplier;
-
-  // 3. Precipitation & Road Surface Resistance Impact (water displacement, slush, snow)
-  const precipInfo = calculatePrecipitationImpact(weatherCode, precipitationMm);
+  // 3. Precipitation & Road Surface Resistance Impact (water displacement, slush, snow).
+  // `temp` (already resolved above, defaults to 20°C) lets this react to icing/dry-powder
+  // conditions instead of only intensity — see calcIceBlendFactor/calcSnowTempFactor.
+  const precipInfo = calculatePrecipitationImpact(weatherCode, precipitationMm, temp);
   const precipMultiplier = precipInfo.factor;
 
   // 4. Aerodynamic Wind Impact (Relative to Vehicle Heading)
@@ -841,7 +872,7 @@ export function estimateTripConsumption(
 
   // Re-derive the precipitation descriptive fields (label/description/roadState) for the
   // return payload below; precipMultiplier itself already came from computeFlatRoadConsumptionRate.
-  const precipInfo = calculatePrecipitationImpact(weatherCode, precipitationMm);
+  const precipInfo = calculatePrecipitationImpact(weatherCode, precipitationMm, temperatureC ?? 20);
 
   // 2B. Cabin HVAC load. It is power in kW; when trip duration is known, actual energy is power × hours.
   const temp = temperatureC ?? 20; // Default optimal 20°C if weather not loaded
@@ -1116,23 +1147,24 @@ export function estimateSegmentedRouteConsumption(
     const elevationGain = Math.max(0, (b.elevationM ?? 0) - (a.elevationM ?? 0));
     const elevationLoss = Math.max(0, (a.elevationM ?? 0) - (b.elevationM ?? 0));
     const climatePower = calculateClimateImpact(weather.temperature, climateOn).powerKw;
-    // Cabin warm-up curve: heating/cooling a cold cabin from ambient to comfort draws noticeably
-    // more power than just maintaining it afterwards (defrost, heated surfaces, bigger delta-T
-    // for the heat pump to work against). We ramp from a peak multiplier at trip start down to
-    // the steady maintenance level (1.0x — calculateClimateImpact's powerKw already represents
-    // that steady-state load) over the first ~25 minutes, then hold flat.
+    // Cabin warm-up curve: calculateClimateImpact's powerKw is the power needed to bring a
+    // cold-soaked cabin up to comfort temperature (worst case — defrost, cold surfaces, full
+    // delta-T for the heat pump/PTC to fight). That load is real but temporary: once the cabin
+    // and its thermal mass (seats, dash, glass) reach target temperature, the system only has to
+    // offset ongoing heat loss through the shell, which takes meaningfully less power. We hold
+    // the full (peak) power for the first ~15 minutes, then ease down to a maintenance fraction
+    // of it for the rest of the trip, instead of charging every trip at peak power the whole way
+    // through — which is very likely the single biggest source of winter over-estimation for
+    // anything but short city hops.
     // Uses cumulative elapsed trip time (durationHours before this segment, at its midpoint) —
-    // NOT this segment's own tiny duration, which is what made the old warm-up logic a no-op
-    // (individual route segments are seconds to minutes long, so "segDuration - 1 hour" was
-    // always negative and the multiplier never moved off 1).
-    const WARMUP_PEAK_MULTIPLIER = 1.4; // +40% power while the cabin is still cold
-    const WARMUP_DURATION_HOURS = 25 / 60; // ramps down to baseline over ~25 minutes
+    // NOT this segment's own tiny duration, since individual route segments are only seconds to
+    // minutes long and would never move the ramp off its starting value on their own.
+    const HVAC_WARMUP_DURATION_HOURS = 15 / 60; // ~15 minutes to bring a cold-soaked cabin to comfort temp
+    const HVAC_MAINTENANCE_FRACTION = 0.6; // steady-state power afterwards, as a fraction of peak warm-up power
     const elapsedAtSegmentMidpoint = durationHours + segDuration / 2;
+    const warmupProgress = Math.min(1, elapsedAtSegmentMidpoint / HVAC_WARMUP_DURATION_HOURS);
     const warmFactor = climateOn
-      ? elapsedAtSegmentMidpoint >= WARMUP_DURATION_HOURS
-        ? 1
-        : WARMUP_PEAK_MULTIPLIER -
-          (WARMUP_PEAK_MULTIPLIER - 1) * (elapsedAtSegmentMidpoint / WARMUP_DURATION_HOURS)
+      ? 1 - (1 - HVAC_MAINTENANCE_FRACTION) * smoothstep01(warmupProgress)
       : 1;
     const effectiveClimatePower = climatePower * warmFactor;
     const f = estimateTripConsumption(
