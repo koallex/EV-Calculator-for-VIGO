@@ -775,7 +775,9 @@ export const HudTab: React.FC<HudTabProps> = ({
     weather.isLoaded ? weather.precipitation : undefined,
     isTracking && tripDistanceKm > 0.3
       ? { gainM: elevationGainM, lossM: elevationLossM, distanceKm: tripDistanceKm }
-      : undefined
+      : undefined,
+    undefined,
+    passengers
   );
 
   // === DYNAMIC SOC & RANGE CALCULATION DURING TRIP ===
@@ -1046,7 +1048,7 @@ export const HudTab: React.FC<HudTabProps> = ({
           destinationSpeedKmH, calcTemperature, sessions, settings.batteryCapacityKwh, climateOn,
           calcWindSpeed, calcRelativeWindAngle, isTracking ? currentTripStyle.factor : undefined,
           calcWeatherCode, calcPrecipitation, { gainM: projectedGainM, lossM: projectedLossM, distanceKm },
-          etaMinutes ? etaMinutes / 60 : distanceKm / Math.max(5, destinationSpeedKmH), segmented.climatePowerKw
+          etaMinutes ? etaMinutes / 60 : distanceKm / Math.max(5, destinationSpeedKmH), segmented.climatePowerKw, passengers
         );
 
         const energyNeededKwh = segmented.energyKwh;
@@ -1125,7 +1127,7 @@ export const HudTab: React.FC<HudTabProps> = ({
         { temperature: calcTemperature ?? 20, weatherCode: calcWeatherCode ?? 0, precipitation: calcPrecipitation ?? 0, windSpeed: calcWindSpeed ?? 0, windDirection: forecastWeather?.windDirection ?? 0 },
         destinationSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, isTracking ? currentTripStyle.factor : undefined
       );
-      const destForecast = estimateTripConsumption(destinationSpeedKmH, calcTemperature, sessions, settings.batteryCapacityKwh, climateOn, segmented.avgWindSpeed, calcRelativeWindAngle, isTracking ? currentTripStyle.factor : undefined, calcWeatherCode, segmented.avgPrecipitation, { gainM, lossM, distanceKm: route.distanceKm }, segmented.durationHours, segmented.climatePowerKw);
+      const destForecast = estimateTripConsumption(destinationSpeedKmH, calcTemperature, sessions, settings.batteryCapacityKwh, climateOn, segmented.avgWindSpeed, calcRelativeWindAngle, isTracking ? currentTripStyle.factor : undefined, calcWeatherCode, segmented.avgPrecipitation, { gainM, lossM, distanceKm: route.distanceKm }, segmented.durationHours, segmented.climatePowerKw, passengers);
       const energyNeededKwh = segmented.energyKwh;
       const predictedSoc = Math.max(0, Number((liveDynamicSoc - (energyNeededKwh / batteryCap) * 100).toFixed(1)));
 

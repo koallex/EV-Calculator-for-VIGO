@@ -808,7 +808,8 @@ export function estimateTripConsumption(
   precipitationMm?: number,
   elevation?: { gainM: number; lossM: number; distanceKm: number },
   tripDurationHours?: number,
-  climatePowerOverrideKw?: number
+  climatePowerOverrideKw?: number,
+  passengers = 1
 ): ConsumptionForecast {
   // 1-4. Speed curve + cold-battery penalty + precipitation + relative-wind impact, shared
   // with the per-segment live calculation in HudTab (see computeFlatRoadConsumptionRate above).
