@@ -425,7 +425,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                 <span>Ср. расход: <b className={`font-mono ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>{driverStyle.avgConsumption.toFixed(1)} кВт⋅ч/100км</b></span>
                 <span>•</span>
                 <span>
-                  К эталону (14.5):{' '}
+                  Отклонение стиля:{' '}
                   <b className={`font-mono ${
                     driverStyle.diffPct < 0 ? 'text-emerald-500' : driverStyle.diffPct > 0 ? 'text-amber-500' : isDark ? 'text-slate-200' : 'text-slate-800'
                   }`}>

@@ -650,7 +650,8 @@ export const HudTab: React.FC<HudTabProps> = ({
   );
 
   // === REAL-TIME DRIVING STYLE SPECIFICALLY FOR THE CURRENT ACTIVE TRIP ===
-  // Dynamic speed kinetics, acceleration stability, and road condition awareness
+  // Dynamic speed kinetics, speed stability and high-speed intensity only.
+  // Weather/temperature/precipitation are deliberately excluded from driving style.
   const currentTripStyle = useMemo(() => {
     // When tracking is inactive or in early calibration
     if (!isTracking || tripDistanceKm < 0.05 || elapsedSeconds < 6 || speedHistoryRef.current.length < 4) {
@@ -754,7 +755,7 @@ export const HudTab: React.FC<HudTabProps> = ({
         badgeBg: isDark ? 'bg-rose-950/70 border-rose-800 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-800',
       };
     }
-  }, [isTracking, tripDistanceKm, elapsedSeconds, maxSpeed, avgTripSpeedKmH, isDark, livePrecipitation]);
+  }, [isTracking, tripDistanceKm, elapsedSeconds, maxSpeed, avgTripSpeedKmH, isDark]);
 
   // Keep styleFactorRef in sync for the geolocation callback's per-segment energy calc.
   useEffect(() => {

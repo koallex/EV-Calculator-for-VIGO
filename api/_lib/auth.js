@@ -133,13 +133,3 @@ export async function deleteUser(login) {
   await saveUsers(users);
   return true;
 }
-
-
-export async function clearSessionCookie(req, res) {
-  const raw = req.headers.cookie || '';
-  const match = raw.match(/(?:^|;\s*)vigo_session=([^;]+)/);
-  if (match) {
-    try { await redis.del(`${SESS_PREFIX}${match[1]}`); } catch {}
-  }
-  res.setHeader('Set-Cookie', `vigo_session=; ${cookieOptions(0)}`);
-}

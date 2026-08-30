@@ -633,6 +633,21 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         </div>
       </section>
 
+      {/* Occupants — directly after starting SoC */}
+      <section className={`rounded-2xl border p-4 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-sm">Людей в салоне</h2>
+            <p className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Включая водителя · +75 кг на каждого дополнительного человека</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-10 h-10 rounded-xl font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−</button>
+            <span className={`min-w-8 text-xl text-center font-bold font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{passengers}</span>
+            <button type="button" onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-10 h-10 rounded-xl font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+</button>
+          </div>
+        </div>
+      </section>
+
       {/* Top Banner: Battery Gauge & Glance Summary */}
       <div
         className={`border rounded-2xl p-4 transition-colors ${
@@ -817,18 +832,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             />
             <span className={`text-[10px] font-medium ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>{Math.max(0, startSoc - 1)}%</span>
           </div>
-          </div>
-        </div>
-
-        {/* Occupants */}
-        <div className={`p-3 rounded-xl border transition-colors ${isDark ? 'bg-slate-950/60 border-slate-800/80' : 'bg-slate-50/80 border-slate-200'}`}>
-          <div className="flex items-center justify-between gap-3">
-            <div><span className={`text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Людей в салоне</span><p className="text-[10px] text-slate-500 mt-0.5">Включая водителя · +75 кг на каждого пассажира</p></div>
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-9 h-9 rounded-lg font-bold border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−</button>
-              <span className={`min-w-8 text-center text-lg font-bold font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{passengers}</span>
-              <button type="button" onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-9 h-9 rounded-lg font-bold border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+</button>
-            </div>
           </div>
         </div>
 

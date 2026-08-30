@@ -497,47 +497,57 @@ export function calculateHistoricalDriverStyle(sessions: TripSession[]): {
   validTripsCount: number;
 } {
   const benchmarkConsumption = BENCHMARK_CONSUMPTION_KWH_100KM;
-  const validSessions = sessions.filter((s) => s.consumptionPer100Km > 6 && s.consumptionPer100Km < 40);
 
-  if (validSessions.length === 0) {
+  // IMPORTANT: driving style must be independent of weather, temperature, wind,
+  // precipitation, terrain and HVAC. Prefer the structured factor recorded by HUD.
+  // For older trips without that field, derive a conservative style factor only
+  // from average/max speed. Do not infer style from energy consumption.
+  const styleSessions = sessions.filter((s) => {
+    const hasStoredFactor = Number.isFinite(s.drivingStyleFactor);
+    const hasSpeedData = Number.isFinite(s.avgSpeedKmH) && Number.isFinite(s.maxSpeedKmH)
+      && (s.avgSpeedKmH ?? 0) > 5 && (s.maxSpeedKmH ?? 0) >= (s.avgSpeedKmH ?? 0);
+    return hasStoredFactor || hasSpeedData;
+  });
+
+  if (styleSessions.length === 0) {
     return {
       factor: 1.0,
-      label: 'Стандартный',
-      subLabel: 'Нет сохраненных поездок для анализа',
+      label: 'Сбалансированный',
+      subLabel: 'Нет сохранённых данных о стиле вождения',
       diffPct: 0,
-      avgConsumption: benchmarkConsumption,
+      avgConsumption: 0,
       benchmarkConsumption,
       validTripsCount: 0,
     };
   }
 
-  const totalKm = validSessions.reduce((acc, s) => acc + s.distanceKm, 0);
-  const totalKwh = validSessions.reduce((acc, s) => acc + s.energyUsedKwh, 0);
-  const avgConsumption = totalKm > 0 ? (totalKwh / totalKm) * 100 : validSessions.reduce((acc, s) => acc + s.consumptionPer100Km, 0) / validSessions.length;
+  const totalKm = sessions.reduce((acc, s) => acc + Math.max(0, s.distanceKm || 0), 0);
+  const totalKwh = sessions.reduce((acc, s) => acc + Math.max(0, s.energyUsedKwh || 0), 0);
+  const avgConsumption = totalKm > 0 ? (totalKwh / totalKm) * 100 : 0;
 
-  const rawFactor = avgConsumption / benchmarkConsumption;
-  const factor = Number(Math.max(0.70, Math.min(1.50, rawFactor)).toFixed(2));
-  const diffPct = Math.round((factor - 1) * 100);
-
-  let label = 'Сбалансированный';
-  let subLabel = 'Умеренный стандартный темп';
-
-  if (factor < 0.90) {
-    label = 'Супер-Эко';
-    subLabel = `Экономия энергии на ${Math.abs(diffPct)}% выше эталона`;
-  } else if (factor < 0.97) {
-    label = 'Экономный (Эко-стиль)';
-    subLabel = `Плавное ускорение, расход ниже эталона на ${Math.abs(diffPct)}%`;
-  } else if (factor <= 1.05) {
-    label = 'Сбалансированный';
-    subLabel = 'Оптимальное соотношение скорости и расхода энергии';
-  } else if (factor <= 1.15) {
-    label = 'Динамичный';
-    subLabel = `Активные ускорения, расход выше эталона на +${diffPct}%`;
-  } else {
-    label = 'Агрессивный / Спортивный';
-    subLabel = `Высокие скорости и резкие обгоны (+${diffPct}% к расходу)`;
+  // Distance-weight the style factors so a 3 km calibration trip does not have
+  // the same influence as a 100 km trip.
+  let weightedFactorSum = 0;
+  let weightedKm = 0;
+  for (const s of styleSessions) {
+    const factor = Number.isFinite(s.drivingStyleFactor)
+      ? Number(s.drivingStyleFactor)
+      : deriveDrivingStyleFactor(s.avgSpeedKmH, s.maxSpeedKmH);
+    const km = Math.max(1, Number(s.distanceKm) || 1);
+    if (!Number.isFinite(factor)) continue;
+    weightedFactorSum += factor * km;
+    weightedKm += km;
   }
+
+  const factor = Number(Math.max(0.75, Math.min(1.35, weightedKm > 0 ? weightedFactorSum / weightedKm : 1)).toFixed(2));
+  const diffPct = Math.round((factor - 1) * 100);
+  const label = getDrivingStyleLabel(factor);
+
+  let subLabel = 'Штатный темп и плавность движения';
+  if (factor < 0.95) subLabel = `Плавный стиль, коэффициент ${factor.toFixed(2)}`;
+  else if (factor <= 1.05) subLabel = `Сбалансированный стиль, коэффициент ${factor.toFixed(2)}`;
+  else if (factor <= 1.15) subLabel = `Повышенная динамика, коэффициент ${factor.toFixed(2)}`;
+  else subLabel = `Высокая динамика, коэффициент ${factor.toFixed(2)}`;
 
   return {
     factor,
@@ -546,7 +556,7 @@ export function calculateHistoricalDriverStyle(sessions: TripSession[]): {
     diffPct,
     avgConsumption: Number(avgConsumption.toFixed(1)),
     benchmarkConsumption,
-    validTripsCount: validSessions.length,
+    validTripsCount: styleSessions.length,
   };
 }
 
@@ -1128,7 +1138,7 @@ export function estimateSegmentedRouteConsumption(
     const f = estimateTripConsumption(
       segmentSpeed, weather.temperature, sessions, batteryCapacityKwh, climateOn,
       weather.windSpeed, relativeWindAngle, styleFactor, weather.weatherCode, weather.precipitation,
-      { gainM: elevationGain, lossM: elevationLoss, distanceKm: segmentDistance }, segDuration, effectiveClimatePower, passengers
+      { gainM: elevationGain, lossM: elevationLoss, distanceKm: segmentDistance }, segDuration, effectiveClimatePower
     );
     const segEnergy = segmentDistance / 100 * f.estimatedConsumption;
     // Keep the breakdown additive while preserving the exact segmented total produced by the
@@ -1137,8 +1147,7 @@ export function estimateSegmentedRouteConsumption(
     const tempDelta = speedBase * (f.temperatureImpactPct / 100);
     const windDelta = speedBase * (f.windImpactPct ?? 0) / 100;
     const precipDelta = speedBase * (f.precipitationImpactPct ?? 0) / 100;
-    const routeMassKg = 1600 + (Math.max(1, Math.min(5, Math.round(passengers))) - 1) * 75;
-    const elevationNet = (routeMassKg * 9.80665 * elevationGain / 3.6e6 / 0.90) - (routeMassKg * 9.80665 * elevationLoss / 3.6e6 * 0.65);
+    const elevationNet = (1600 * 9.80665 * elevationGain / 3.6e6 / 0.90) - (1600 * 9.80665 * elevationLoss / 3.6e6 * 0.65);
     const climateEnergy = effectiveClimatePower * segDuration;
     const driverDelta = speedBase * (styleFactor - 1);
     const explained = speedBase + tempDelta + windDelta + precipDelta + driverDelta + elevationNet + climateEnergy;
@@ -1153,7 +1162,7 @@ export function estimateSegmentedRouteConsumption(
     precipitationDeltaKwh += precipDelta;
     driverDeltaKwh += driverDelta + residual;
     elevationDeltaKwh += elevationNet;
-    regenEnergyKwh += (routeMassKg * 9.80665 * elevationLoss / 3.6e6 * 0.65);
+    regenEnergyKwh += (1600 * 9.80665 * elevationLoss / 3.6e6 * 0.65);
     climateEnergyKwh += climateEnergy;
     tempWeighted += weather.temperature * segmentDistance;
     windWeighted += weather.windSpeed * segmentDistance;
