@@ -1088,7 +1088,8 @@ export function estimateSegmentedRouteConsumption(
   batteryCapacityKwh = 51.87,
   climateOn = true,
   customDriverStyleFactor?: number,
-  passengers = 1
+  passengers = 1,
+  maxSpeedKmH?: number
 ): SegmentedRouteBreakdown {
   if (points.length < 2) {
     return {
@@ -1101,21 +1102,57 @@ export function estimateSegmentedRouteConsumption(
   }
 
   const speed = Math.max(5, avgSpeedKmH);
-  // Preserve the user's planned average, but use OSRM's relative road-speed profile
-  // so city/slow and highway sections are not all calculated at one flat speed.
-  const roadSpeeds = points.map((p) => Number.isFinite(p.roadSpeedKmH) && (p.roadSpeedKmH ?? 0) > 0
+  // Preserve the user's planned average while using OSRM's road profile. When a planned
+  // maximum speed is supplied, high-speed road sections are stretched/compressed toward that
+  // maximum before the profile is normalized back to the requested average. This lets the user
+  // tell the model, for example, "79 km/h average, up to 120 km/h on permitted sections" —
+  // something OSRM alone cannot know from the route geometry.
+  const requestedMaxSpeed = Number.isFinite(maxSpeedKmH) ? Math.max(speed, Math.min(150, maxSpeedKmH!)) : undefined;
+  const rawRoadSpeeds = points.map((p) => Number.isFinite(p.roadSpeedKmH) && (p.roadSpeedKmH ?? 0) > 0
     ? Math.max(10, Math.min(140, p.roadSpeedKmH!)) : speed);
-  let rawTime = 0, rawDistance = 0;
-  for (let i = 1; i < points.length; i++) {
-    const d = Math.max(0, points[i].distanceFromStartKm - points[i - 1].distanceFromStartKm);
-    if (d > 0.001) { rawDistance += d; rawTime += d / roadSpeeds[i]; }
+  let roadSpeeds = rawRoadSpeeds.slice();
+  if (requestedMaxSpeed !== undefined) {
+    const FAST_ROAD_THRESHOLD = 80;
+    const roadMax = Math.max(...rawRoadSpeeds);
+    if (roadMax > FAST_ROAD_THRESHOLD) {
+      roadSpeeds = rawRoadSpeeds.map((roadSpeed) => {
+        if (roadSpeed <= FAST_ROAD_THRESHOLD) return roadSpeed;
+        const t = (roadSpeed - FAST_ROAD_THRESHOLD) / Math.max(0.001, roadMax - FAST_ROAD_THRESHOLD);
+        return FAST_ROAD_THRESHOLD + t * (requestedMaxSpeed - FAST_ROAD_THRESHOLD);
+      });
+    }
+
+    // Find the scale factor whose harmonic mean equals the requested average while never
+    // exceeding the driver's stated maximum. A short bisection is stable for mixed city/highway
+    // profiles and avoids the old one-shot scale that could erase the intended max speed.
+    const harmonicMeanForScale = (scale: number) => {
+      let dSum = 0, timeSum = 0;
+      for (let i = 1; i < points.length; i++) {
+        const d = Math.max(0, points[i].distanceFromStartKm - points[i - 1].distanceFromStartKm);
+        if (d <= 0.001) continue;
+        const v = Math.max(10, Math.min(requestedMaxSpeed!, roadSpeeds[i] * scale));
+        dSum += d; timeSum += d / v;
+      }
+      return timeSum > 0 ? dSum / timeSum : speed;
+    };
+    let lo = 0.1, hi = 3;
+    for (let i = 0; i < 32; i++) {
+      const mid = (lo + hi) / 2;
+      if (harmonicMeanForScale(mid) < speed) lo = mid; else hi = mid;
+    }
+    const scale = (lo + hi) / 2;
+    roadSpeeds = roadSpeeds.map((v) => Math.max(10, Math.min(requestedMaxSpeed!, v * scale)));
+  } else {
+    let rawTime = 0, rawDistance = 0;
+    for (let i = 1; i < points.length; i++) {
+      const d = Math.max(0, points[i].distanceFromStartKm - points[i - 1].distanceFromStartKm);
+      if (d > 0.001) { rawDistance += d; rawTime += d / roadSpeeds[i]; }
+    }
+    const rawHarmonic = rawTime > 0 ? rawDistance / rawTime : speed;
+    const speedScale = rawHarmonic > 0 ? speed / rawHarmonic : 1;
+    roadSpeeds = roadSpeeds.map((v) => Math.max(10, Math.min(140, v * speedScale)));
   }
-  const rawHarmonic = rawTime > 0 ? rawDistance / rawTime : speed;
-  const speedScale = rawHarmonic > 0 ? speed / rawHarmonic : 1;
-  const getSegmentSpeed = (index: number) => {
-    if (!Number.isFinite(points[index].roadSpeedKmH) || (points[index].roadSpeedKmH ?? 0) <= 0) return speed;
-    return Math.max(10, Math.min(140, (points[index].roadSpeedKmH ?? speed) * speedScale));
-  };
+  const getSegmentSpeed = (index: number) => roadSpeeds[index] ?? speed;
   const oneMonthAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
   const recent = sessions.filter((s) => s.createdAt && s.createdAt >= oneMonthAgo && s.consumptionPer100Km > 8 && s.consumptionPer100Km < 35);
   let styleFactor = 1;

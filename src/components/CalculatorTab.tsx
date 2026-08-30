@@ -93,6 +93,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState('');
   const [plannedSpeedKmH, setPlannedSpeedKmH] = useState(70);
+  const [plannedMaxSpeedKmH, setPlannedMaxSpeedKmH] = useState(120);
   const [routeWeather, setRouteWeather] = useState<{ temperature:number; windSpeed:number; windDirection:number; weatherCode:number; precipitation:number; routeBearing:number; etaMinutes:number; arrivalDate: Date; samples: RouteWeatherSample[] } | null>(null);
   const [routeForecast, setRouteForecast] = useState<{ consumption:number; energyKwh:number; arrivalSoc:number; windLabel:string; weatherLabel:string; precipitationLabel:string; relativeWindAngle:number; driverStyleFactor:number; driverStyleSource:string; climateLabel:string; climateImpactPct:number; climateDeltaKwh100:number; speedImpactPct:number; breakdown?: any } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<'searching' | 'ok' | 'error'>('searching');
@@ -254,7 +255,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       const segmented = estimateSegmentedRouteConsumption(
         data.points,
         samples.map(s => ({ distanceFromStartKm: s.distanceFromStartKm, weather: s.weather, routeBearing: s.routeBearing })),
-        fallbackWeather, plannedSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, undefined, passengers
+        fallbackWeather, plannedSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, undefined, passengers, plannedMaxSpeedKmH
       );
       const energyKwh = segmented.energyKwh;
       const arrivalSoc = Math.max(0, Number((startSoc - (energyKwh/(settings.batteryCapacityKwh||51.87))*100).toFixed(1)));
@@ -290,7 +291,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       speed,
       sessions,
       settings.batteryCapacityKwh,
-      climateOn, undefined, passengers
+      climateOn, undefined, passengers, Math.max(plannedMaxSpeedKmH, speed)
     );
     const energyKwh = breakdown.energyKwh;
     const arrivalSoc = Math.max(0, Number((startSoc - (energyKwh / (settings.batteryCapacityKwh || 51.87)) * 100).toFixed(1)));
@@ -521,7 +522,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         </div>
 
         {routeLoading && <div className="text-xs text-emerald-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />{routeStatus || 'Подготавливаем расчёт…'}</div>}
-        <div className={`rounded-xl p-3 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="flex items-center justify-between gap-3"><div><div className="text-xs font-semibold">Планируемая средняя скорость</div><div className="text-[10px] text-slate-500">Для ETA и прогноза погоды к моменту прибытия</div></div><div className="flex items-center gap-1"><DecimalInput value={plannedSpeedKmH} onChange={setPlannedSpeedKmH} min={20} max={140} className="w-20 text-right" /><span className="text-xs text-slate-500 whitespace-nowrap">км/ч</span></div></div></div>
+        <div className={`rounded-xl p-3 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="flex items-center justify-between gap-3"><div><div className="text-xs font-semibold">Планируемая средняя скорость</div><div className="text-[10px] text-slate-500">Для ETA и прогноза погоды к моменту прибытия</div></div><div className="flex items-center gap-1"><DecimalInput value={plannedSpeedKmH} onChange={(v) => { setPlannedSpeedKmH(v); setPlannedMaxSpeedKmH((prev) => Math.max(prev, v)); }} min={20} max={140} className="w-20 text-right" /><span className="text-xs text-slate-500 whitespace-nowrap">км/ч</span></div></div></div>
+        <div className={`rounded-xl p-3 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="flex items-center justify-between gap-3"><div><div className="text-xs font-semibold">Предполагаемая максимальная скорость</div><div className="text-[10px] text-slate-500">Используется для быстрых участков маршрута, где можно ехать быстрее средней</div></div><div className="flex items-center gap-1"><DecimalInput value={plannedMaxSpeedKmH} onChange={(v) => setPlannedMaxSpeedKmH(Math.max(plannedSpeedKmH, Math.min(150, v)))} min={20} max={150} className="w-20 text-right" /><span className="text-xs text-slate-500 whitespace-nowrap">км/ч</span></div></div></div>
         {routeError && <div className="text-xs text-rose-500">{routeError}</div>}
         {routeElevation && !routeElevation.elevationAvailable && routeElevation.elevationNote && (
           <div className={`text-xs rounded-lg px-3 py-2 ${isDark ? 'bg-amber-950/40 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>⚠ {routeElevation.elevationNote}</div>
