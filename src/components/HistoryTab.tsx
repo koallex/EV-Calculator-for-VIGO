@@ -37,7 +37,7 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { TripSession, UserSettings, RoadType } from '../types';
-import { exportBackupJSON, exportSessionsCSV, calculateHistoricalDriverStyle } from '../utils/storage';
+import { exportBackupJSON, exportSessionsCSV, calculateHistoricalDriverStyle, deriveDrivingStyleFactor, getDrivingStyleLabel } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
 
 interface HistoryTabProps {
@@ -798,16 +798,17 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                     {/* Meta Tags */}
                     <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                       {/* Trip specific style factor relative to baseline */}
-                      {trip.consumptionPer100Km > 0 && (
-                        <span className={`px-2 py-0.5 rounded-md border font-mono font-semibold ${
-                          trip.consumptionPer100Km < 14
-                            ? isDark ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : trip.consumptionPer100Km <= 16
-                            ? isDark ? 'bg-teal-950/70 text-teal-300 border-teal-800' : 'bg-teal-50 text-teal-700 border-teal-200'
-                            : isDark ? 'bg-amber-950/70 text-amber-300 border-amber-800' : 'bg-amber-50 text-amber-700 border-amber-200'
-                        }`}>
-                          🎯 Стиль: x{(trip.consumptionPer100Km / 14.5).toFixed(2)}
-                        </span>
+                      {(trip.drivingStyleFactor !== undefined || trip.avgSpeedKmH !== undefined) && (() => {
+                        const factor = trip.drivingStyleFactor ?? deriveDrivingStyleFactor(trip.avgSpeedKmH, trip.maxSpeedKmH);
+                        return <span className={`px-2 py-0.5 rounded-md border font-semibold ${
+                          factor < 0.95 ? isDark ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800' : 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                          factor <= 1.05 ? isDark ? 'bg-slate-900 text-slate-300 border-slate-700' : 'bg-slate-50 text-slate-700 border-slate-200' :
+                          factor <= 1.15 ? isDark ? 'bg-amber-950/70 text-amber-300 border-amber-800' : 'bg-amber-50 text-amber-700 border-amber-200' :
+                          isDark ? 'bg-rose-950/70 text-rose-300 border-rose-800' : 'bg-rose-50 text-rose-700 border-rose-200'
+                        }`}>🎯 {getDrivingStyleLabel(factor)} · x{factor.toFixed(2)}</span>;
+                      })()}
+                      {trip.passengers !== undefined && (
+                        <span className={`px-2 py-0.5 rounded-md border ${isDark ? 'bg-slate-900 text-slate-300 border-slate-700' : 'bg-slate-50 text-slate-700 border-slate-200'}`}>👥 {trip.passengers} чел.</span>
                       )}
                       {trip.avgSpeedKmH && trip.avgSpeedKmH > 0 && (
                         <span className={`px-2 py-0.5 rounded-md border font-mono font-semibold ${

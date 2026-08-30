@@ -94,6 +94,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   // User sets initial SoC at start of trip (e.g. 80%), and it dynamically decreases during the trip
   const [startTripSoc, setStartTripSoc] = useState<number>(80);
   const [climateOn, setClimateOn] = useState(true);
+  const [passengers, setPassengers] = useState(1);
   const [wakeLockActive, setWakeLockActive] = useState(false);
 
   // Live elevation gain/loss accumulated during the current tracked trip (meters)
@@ -645,8 +646,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   // Precipitation & Road Surface Impact calculation
   const livePrecipitation = calculatePrecipitationImpact(
     weather.isLoaded ? weather.weatherCode : undefined,
-    weather.isLoaded ? weather.precipitation : undefined,
-    outdoorTemp
+    weather.isLoaded ? weather.precipitation : undefined
   );
 
   // === REAL-TIME DRIVING STYLE SPECIFICALLY FOR THE CURRENT ACTIVE TRIP ===
@@ -713,14 +713,12 @@ export const HudTab: React.FC<HudTabProps> = ({
     const clamped = Number(Math.max(0.75, Math.min(1.35, factor)).toFixed(2));
     const diffPct = Math.round((clamped - 1) * 100);
 
-    const roadSuffix = livePrecipitation.impactPct > 0 ? ` • ${livePrecipitation.label}` : '';
-
     if (clamped < 0.95) {
       return {
         factor: clamped,
         label: 'Эко-плавный',
-        subLabel: `Плавный темп (${diffPct > 0 ? `+${diffPct}` : diffPct}%)${roadSuffix}`,
-        details: `Плавный разгон, минимум рывков${roadSuffix}`,
+        subLabel: `Плавный темп (${diffPct > 0 ? `+${diffPct}` : diffPct}%)`,
+        details: `Плавный разгон, минимум рывков`,
         diffPct,
         color: 'text-emerald-500',
         badgeBg: isDark ? 'bg-emerald-950/70 border-emerald-800 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800',
@@ -729,8 +727,8 @@ export const HudTab: React.FC<HudTabProps> = ({
       return {
         factor: clamped,
         label: 'Сбалансированный',
-        subLabel: `Штатный темп (${diffPct >= 0 ? `+${diffPct}` : diffPct}%)${roadSuffix}`,
-        details: `Оптимальный баланс динамики${roadSuffix}`,
+        subLabel: `Штатный темп (${diffPct >= 0 ? `+${diffPct}` : diffPct}%)`,
+        details: `Оптимальный баланс динамики`,
         diffPct,
         color: isDark ? 'text-slate-200' : 'text-slate-800',
         badgeBg: isDark ? 'bg-slate-800/80 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700',
@@ -739,8 +737,8 @@ export const HudTab: React.FC<HudTabProps> = ({
       return {
         factor: clamped,
         label: 'Динамичный',
-        subLabel: `Ускорения (+${diffPct}%)${roadSuffix}`,
-        details: `Активные обгоны и перестроения${roadSuffix}`,
+        subLabel: `Ускорения (+${diffPct}%)`,
+        details: `Активные обгоны и перестроения`,
         diffPct,
         color: 'text-amber-500',
         badgeBg: isDark ? 'bg-amber-950/70 border-amber-800 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-800',
@@ -749,8 +747,8 @@ export const HudTab: React.FC<HudTabProps> = ({
       return {
         factor: clamped,
         label: 'Агрессивный',
-        subLabel: `Резкие рывки (+${diffPct}%)${roadSuffix}`,
-        details: `Резкие ускорения и торможения${roadSuffix}`,
+        subLabel: `Резкие рывки (+${diffPct}%)`,
+        details: `Резкие ускорения и торможения`,
         diffPct,
         color: 'text-rose-500',
         badgeBg: isDark ? 'bg-rose-950/70 border-rose-800 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-800',
@@ -960,6 +958,8 @@ export const HudTab: React.FC<HudTabProps> = ({
       temperature: completedTripSummary.temp,
       avgSpeedKmH: completedTripSummary.avgSpeedKmH,
       maxSpeedKmH: completedTripSummary.maxSpeedKmH,
+      drivingStyleFactor: completedTripSummary.styleFactor,
+      passengers,
       note: `GPS HUD: ${completedTripSummary.durationMinutes} мин, ${completedTripSummary.avgSpeedKmH} км/ч, стиль поездки: x${completedTripSummary.styleFactor || 1.0} (${completedTripSummary.styleLabel || 'Сбалансированный'}), t=${completedTripSummary.temp}°C${
         completedTripSummary.windStatus ? `, ветер: ${completedTripSummary.windStatus}` : ''
       }`,
@@ -1376,6 +1376,17 @@ export const HudTab: React.FC<HudTabProps> = ({
                   : `❄️ A/C (+${liveClimate.impactPct}%)`
                 : '🍃 Климат ЭКО (0%)'}
             </button>
+          </div>
+        </div>
+
+        <div className={`w-full max-w-lg rounded-2xl p-3 border text-left transition-colors ${isDark ? 'bg-slate-900/90 border-slate-800/90' : 'bg-slate-50 border-slate-200 shadow-xs'}`}>
+          <div className="flex items-center justify-between">
+            <div><span className={`text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Людей в салоне</span><span className="block text-[10px] text-slate-500">Включая водителя</span></div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-9 h-9 rounded-lg border font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−</button>
+              <span className={`min-w-7 text-center font-mono font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{passengers}</span>
+              <button onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-9 h-9 rounded-lg border font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+</button>
+            </div>
           </div>
         </div>
 

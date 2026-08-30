@@ -37,6 +37,7 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
     initialData?.chargingType || 'malanka_dc'
   );
   const [note, setNote] = useState<string>(initialData?.note || '');
+  const [passengers, setPassengers] = useState<number>(initialData?.passengers ?? 1);
 
   if (!isOpen) return null;
 
@@ -70,6 +71,7 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
       moneySaved: Number(moneySaved.toFixed(2)),
       roadType,
       climateOn,
+      passengers,
       note: note.trim() || undefined,
     });
     onClose();
@@ -155,6 +157,15 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
               <span className={`text-[10px] block font-semibold ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
                 Экономия: +{moneySaved.toFixed(2)} {settings.currency}
               </span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-700/60 bg-slate-950/30">
+            <div><span className="font-semibold">Людей в салоне</span><span className="block text-[10px] text-slate-500">Включая водителя</span></div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setPassengers(p => Math.max(1, p - 1))} className="w-8 h-8 rounded-lg border border-slate-700 font-bold">−</button>
+              <span className="min-w-6 text-center font-mono font-bold">{passengers}</span>
+              <button type="button" onClick={() => setPassengers(p => Math.min(5, p + 1))} className="w-8 h-8 rounded-lg border border-slate-700 font-bold">+</button>
             </div>
           </div>
 

@@ -69,6 +69,8 @@ export interface TripSession {
   odoEnd?: number;
   avgSpeedKmH?: number; // Real average speed recorded during trip or HUD tracking
   maxSpeedKmH?: number; // Max speed recorded
+  drivingStyleFactor?: number; // Structured driving-style coefficient from HUD; independent of weather
+  passengers?: number; // Total people in the vehicle, including the driver (default 1)
   energyUsedKwh: number; // calculated: (startSoc - endSoc)/100 * batteryCapacity
   consumptionPer100Km: number; // kWh/100km
   kmPerKwh: number;
