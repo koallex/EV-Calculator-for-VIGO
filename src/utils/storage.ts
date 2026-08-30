@@ -1124,23 +1124,25 @@ export function estimateSegmentedRouteConsumption(
     const elevationGain = Math.max(0, (b.elevationM ?? 0) - (a.elevationM ?? 0));
     const elevationLoss = Math.max(0, (a.elevationM ?? 0) - (b.elevationM ?? 0));
     const climatePower = calculateClimateImpact(weather.temperature, climateOn).powerKw;
-    // Cabin warm-up curve: heating/cooling a cold cabin from ambient to comfort draws noticeably
-    // more power than just maintaining it afterwards (defrost, heated surfaces, bigger delta-T
-    // for the heat pump to work against). We ramp from a peak multiplier at trip start down to
-    // the steady maintenance level (1.0x — calculateClimateImpact's powerKw already represents
-    // that steady-state load) over the first ~25 minutes, then hold flat.
+    // Cabin warm-up curve: calculateClimateImpact's powerKw is the power needed to bring a
+    // cold-soaked cabin up to comfort temperature (worst case — defrost, cold surfaces, full
+    // delta-T for the heat pump/PTC to fight). That load is real but temporary: once the cabin
+    // and its thermal mass (seats, dash, glass) reach target temperature, the system only has to
+    // offset ongoing heat loss through the shell, which takes meaningfully less power. We hold
+    // the full (peak) power for the first ~15 minutes, then ease down to a maintenance fraction
+    // of it for the rest of the trip, instead of charging every trip at peak power the whole way
+    // through — which is very likely the single biggest source of winter over-estimation for
+    // anything but short city hops (see calibration discussion 2026-08-30, pending real winter
+    // VIGO telemetry to replace this physics-based guess with a measured one).
     // Uses cumulative elapsed trip time (durationHours before this segment, at its midpoint) —
-    // NOT this segment's own tiny duration, which is what made the old warm-up logic a no-op
-    // (individual route segments are seconds to minutes long, so "segDuration - 1 hour" was
-    // always negative and the multiplier never moved off 1).
-    const WARMUP_PEAK_MULTIPLIER = 1.4; // +40% power while the cabin is still cold
-    const WARMUP_DURATION_HOURS = 25 / 60; // ramps down to baseline over ~25 minutes
+    // NOT this segment's own tiny duration, since individual route segments are only seconds to
+    // minutes long and would never move the ramp off its starting value on their own.
+    const HVAC_WARMUP_DURATION_HOURS = 15 / 60; // ~15 minutes to bring a cold-soaked cabin to comfort temp
+    const HVAC_MAINTENANCE_FRACTION = 0.6; // steady-state power afterwards, as a fraction of peak warm-up power
     const elapsedAtSegmentMidpoint = durationHours + segDuration / 2;
+    const warmupProgress = Math.min(1, elapsedAtSegmentMidpoint / HVAC_WARMUP_DURATION_HOURS);
     const warmFactor = climateOn
-      ? elapsedAtSegmentMidpoint >= WARMUP_DURATION_HOURS
-        ? 1
-        : WARMUP_PEAK_MULTIPLIER -
-          (WARMUP_PEAK_MULTIPLIER - 1) * (elapsedAtSegmentMidpoint / WARMUP_DURATION_HOURS)
+      ? 1 - (1 - HVAC_MAINTENANCE_FRACTION) * smoothstep01(warmupProgress)
       : 1;
     const effectiveClimatePower = climatePower * warmFactor;
     const f = estimateTripConsumption(
