@@ -1128,7 +1128,7 @@ export function estimateSegmentedRouteConsumption(
     const f = estimateTripConsumption(
       segmentSpeed, weather.temperature, sessions, batteryCapacityKwh, climateOn,
       weather.windSpeed, relativeWindAngle, styleFactor, weather.weatherCode, weather.precipitation,
-      { gainM: elevationGain, lossM: elevationLoss, distanceKm: segmentDistance }, segDuration, effectiveClimatePower
+      { gainM: elevationGain, lossM: elevationLoss, distanceKm: segmentDistance }, segDuration, effectiveClimatePower, passengers
     );
     const segEnergy = segmentDistance / 100 * f.estimatedConsumption;
     // Keep the breakdown additive while preserving the exact segmented total produced by the
@@ -1137,7 +1137,8 @@ export function estimateSegmentedRouteConsumption(
     const tempDelta = speedBase * (f.temperatureImpactPct / 100);
     const windDelta = speedBase * (f.windImpactPct ?? 0) / 100;
     const precipDelta = speedBase * (f.precipitationImpactPct ?? 0) / 100;
-    const elevationNet = (1600 * 9.80665 * elevationGain / 3.6e6 / 0.90) - (1600 * 9.80665 * elevationLoss / 3.6e6 * 0.65);
+    const routeMassKg = 1600 + (Math.max(1, Math.min(5, Math.round(passengers))) - 1) * 75;
+    const elevationNet = (routeMassKg * 9.80665 * elevationGain / 3.6e6 / 0.90) - (routeMassKg * 9.80665 * elevationLoss / 3.6e6 * 0.65);
     const climateEnergy = effectiveClimatePower * segDuration;
     const driverDelta = speedBase * (styleFactor - 1);
     const explained = speedBase + tempDelta + windDelta + precipDelta + driverDelta + elevationNet + climateEnergy;
@@ -1152,7 +1153,7 @@ export function estimateSegmentedRouteConsumption(
     precipitationDeltaKwh += precipDelta;
     driverDeltaKwh += driverDelta + residual;
     elevationDeltaKwh += elevationNet;
-    regenEnergyKwh += (1600 * 9.80665 * elevationLoss / 3.6e6 * 0.65);
+    regenEnergyKwh += (routeMassKg * 9.80665 * elevationLoss / 3.6e6 * 0.65);
     climateEnergyKwh += climateEnergy;
     tempWeighted += weather.temperature * segmentDistance;
     windWeighted += weather.windSpeed * segmentDistance;
