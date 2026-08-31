@@ -1122,7 +1122,7 @@ export function estimateSegmentedRouteConsumption(
   // a 10 km straight, even though only the latter is a road a driver could realistically stretch
   // toward their stated maximum on. 2 km is picked as "long enough that a driver could plausibly
   // be at a settled cruising speed for a meaningful stretch of it".
-  const LENGTH_CONFIDENCE_KM = 2;
+  const LENGTH_CONFIDENCE_KM = 0.75;
   const lengthWeights = points.map((p) =>
     Math.max(0, Math.min(1, (p.roadSegmentLengthKm ?? LENGTH_CONFIDENCE_KM) / LENGTH_CONFIDENCE_KM))
   );
@@ -1158,7 +1158,7 @@ export function estimateSegmentedRouteConsumption(
     // the peak through). Physically, a low trip average next to a high stated max means the
     // driver held near that max on the open sections and was slower everywhere else (traffic,
     // villages, turns) — not uniformly slower everywhere including the open stretch.
-    const FAST_CONFIDENT_LENGTH_WEIGHT = 0.6;
+    const FAST_CONFIDENT_LENGTH_WEIGHT = 0.35;
     const isFastConfident = rawRoadSpeeds.map(
       (v, i) => v > FAST_ROAD_THRESHOLD && lengthWeights[i] > FAST_CONFIDENT_LENGTH_WEIGHT
     );
@@ -1208,7 +1208,15 @@ export function estimateSegmentedRouteConsumption(
     const current = roadSpeeds[index];
     const previous = roadSpeeds[index - 1];
     if (Number.isFinite(current) && Number.isFinite(previous)) {
-      return Math.max(10, Math.min(requestedMaxSpeed ?? 140, (current + previous) / 2));
+      const avg = (current + previous) / 2;
+      const endpointMax = Math.max(current, previous);
+      // Do not smooth away a deliberately supplied high-speed cruising section. If either
+      // endpoint belongs to the stretched fast-road profile, keep the faster endpoint for the
+      // segment. Otherwise midpoint smoothing is useful at ordinary speed transitions.
+      const fastEndpoint = requestedMaxSpeed !== undefined
+        && endpointMax >= Math.max(90, requestedMaxSpeed * 0.9);
+      const chosen = fastEndpoint ? endpointMax : avg;
+      return Math.max(10, Math.min(requestedMaxSpeed ?? 140, chosen));
     }
     return current ?? previous ?? speed;
   };
@@ -1228,7 +1236,10 @@ export function estimateSegmentedRouteConsumption(
   // after road-class interpretation, length-confidence weighting and max-speed stretching.
   const speedProfile = points.map((p, i) => ({
     distanceKm: p.distanceFromStartKm,
-    speedKmH: Math.round(i === 0 ? roadSpeeds[0] ?? speed : getSegmentSpeed(i)),
+    // The chart should show the actual speed profile fed into the segment calculation, including
+    // the user's explicit maximum-speed scenario. Do not replace point speeds with midpoint
+    // averages here, otherwise a real 120 km/h fast section can visually collapse to ~90–100.
+    speedKmH: Math.round(Math.max(10, Math.min(requestedMaxSpeed ?? 140, roadSpeeds[i] ?? speed))),
   }));
 
   let distanceKm = 0, durationHours = 0, energyKwh = 0, baseEnergyKwh = 0;
