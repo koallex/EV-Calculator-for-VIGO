@@ -1143,6 +1143,27 @@ export function estimateSegmentedRouteConsumption(
       });
     }
 
+    // Which points represent genuine, high-confidence open-road driving where the stated
+    // maximum should actually show up — long (length-trusted) sections OSRM already tags as
+    // fast. These stay pinned near their stretched speed. The harmonic-mean fit below only
+    // scales the *other* (city/junction/short-step/low-confidence) points to bring the route
+    // average down to the requested value.
+    //
+    // Scaling every point uniformly (the previous approach) pulled the fast sections back down
+    // below the stated max whenever the requested average was well below the road's natural
+    // average — e.g. "79 km/h avg, up to 120 km/h" ended up never actually reaching 120
+    // anywhere on the route, because hitting a low average forced scale < 1, and that same
+    // factor also capped the fastest, most confident sections (observed: profile topped out
+    // ~105 km/h instead of 120; only entering an average close to the road's natural speed let
+    // the peak through). Physically, a low trip average next to a high stated max means the
+    // driver held near that max on the open sections and was slower everywhere else (traffic,
+    // villages, turns) — not uniformly slower everywhere including the open stretch.
+    const FAST_CONFIDENT_LENGTH_WEIGHT = 0.6;
+    const isFastConfident = rawRoadSpeeds.map(
+      (v, i) => v > FAST_ROAD_THRESHOLD && lengthWeights[i] > FAST_CONFIDENT_LENGTH_WEIGHT
+    );
+    const hasFlexiblePoints = isFastConfident.some((f) => !f);
+
     // Find the scale factor whose harmonic mean equals the requested average while never
     // exceeding the driver's stated maximum. A short bisection is stable for mixed city/highway
     // profiles and avoids the old one-shot scale that could erase the intended max speed.
@@ -1151,7 +1172,8 @@ export function estimateSegmentedRouteConsumption(
       for (let i = 1; i < points.length; i++) {
         const d = Math.max(0, points[i].distanceFromStartKm - points[i - 1].distanceFromStartKm);
         if (d <= 0.001) continue;
-        const v = Math.max(10, Math.min(requestedMaxSpeed!, roadSpeeds[i] * scale));
+        const base = hasFlexiblePoints && isFastConfident[i] ? roadSpeeds[i] : roadSpeeds[i] * scale;
+        const v = Math.max(10, Math.min(requestedMaxSpeed!, base));
         dSum += d; timeSum += d / v;
       }
       return timeSum > 0 ? dSum / timeSum : speed;
@@ -1162,7 +1184,10 @@ export function estimateSegmentedRouteConsumption(
       if (harmonicMeanForScale(mid) < speed) lo = mid; else hi = mid;
     }
     const scale = (lo + hi) / 2;
-    roadSpeeds = roadSpeeds.map((v) => Math.max(10, Math.min(requestedMaxSpeed!, v * scale)));
+    roadSpeeds = roadSpeeds.map((v, i) => {
+      const base = hasFlexiblePoints && isFastConfident[i] ? v : v * scale;
+      return Math.max(10, Math.min(requestedMaxSpeed!, base));
+    });
   } else {
     let rawTime = 0, rawDistance = 0;
     for (let i = 1; i < points.length; i++) {
