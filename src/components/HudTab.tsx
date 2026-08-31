@@ -194,7 +194,6 @@ export const HudTab: React.FC<HudTabProps> = ({
   // call-time without forcing the GPS watch to be torn down and resubscribed on every change.
   const weatherRef = useRef(weather);
   const relativeWindAngleRef = useRef(0);
-  const styleFactorRef = useRef(1.0);
 
   const isDark = settings.theme !== 'light';
   const batteryCap = settings.batteryCapacityKwh || 51.87;
@@ -467,6 +466,18 @@ export const HudTab: React.FC<HudTabProps> = ({
           // Per-segment energy: rate at THIS segment's own speed (not the trip average), so a
           // short fast burst costs proportionally more than the same distance at a cruising
           // pace, matching the convex (aero-drag) shape of the speed/consumption curve.
+          //
+          // NOTE: styleFactorRef is intentionally NOT applied here. currentTripStyle's burst
+          // (max/avg speed) and high-speed-time-share terms react to exactly the same signal
+          // that this per-segment evaluation already prices in physically (e.g. a single
+          // 100->110 km/h overtake costs more only for the distance/time actually spent at
+          // that speed, via the convex part of the curve). Multiplying the *whole trip's*
+          // accumulated energy by a factor derived from one short burst double-counts that
+          // burst and smears its cost across every km of the trip, not just the burst itself.
+          // The style factor is still computed, shown in the UI badge, and saved on the
+          // session — it's the right (and only) correction for estimateTripConsumption's
+          // single-average-speed evaluation (Calculator tab, SoC-at-destination forecast),
+          // which has no per-segment data and would otherwise miss burst driving entirely.
           const segRate = computeFlatRoadConsumptionRate(
             smoothedSpeed,
             weatherRef.current.isLoaded ? weatherRef.current.temperature : undefined,
@@ -479,8 +490,7 @@ export const HudTab: React.FC<HudTabProps> = ({
             segRate.baseSpeedConsumption *
             segRate.tempMultiplier *
             segRate.windMultiplier *
-            segRate.precipMultiplier *
-            styleFactorRef.current;
+            segRate.precipMultiplier;
           segmentEnergyKwhRef.current += (deltaKm / 100) * segConsumptionPer100;
           setLiveSegmentEnergyKwh(Number(segmentEnergyKwhRef.current.toFixed(3)));
 
@@ -757,11 +767,6 @@ export const HudTab: React.FC<HudTabProps> = ({
       };
     }
   }, [isTracking, tripDistanceKm, elapsedSeconds, maxSpeed, avgTripSpeedKmH, isDark]);
-
-  // Keep styleFactorRef in sync for the geolocation callback's per-segment energy calc.
-  useEffect(() => {
-    styleFactorRef.current = currentTripStyle.factor;
-  }, [currentTripStyle.factor]);
 
   // Energy consumption forecast combining live trip style + speed + temperature + climate + relative wind + precipitation + elevation
   const forecast: ConsumptionForecast = estimateTripConsumption(
