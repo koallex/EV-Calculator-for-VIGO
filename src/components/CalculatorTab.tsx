@@ -17,7 +17,6 @@ import {
   Wind,
   Thermometer,
   Power,
-  ChevronDown,
   Map,
   ChartNoAxesCombined,
   LocateFixed,
@@ -31,6 +30,7 @@ import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress 
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
 import { RouteMap } from './RouteMap';
 import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts';
+import { CollapsibleDetails, SecondaryStatRow, ChipRow } from './ui/CollapsibleDetails';
 
 // Manual "Планирование" precipitation presets: type × intensity → (mm/h, WMO weather code).
 // Values sit inside the intensity bands calculatePrecipitationImpact() already uses, so each
@@ -98,10 +98,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [routeForecast, setRouteForecast] = useState<{ consumption:number; energyKwh:number; arrivalSoc:number; windLabel:string; weatherLabel:string; precipitationLabel:string; relativeWindAngle:number; driverStyleFactor:number; driverStyleSource:string; climateLabel:string; climateImpactPct:number; climateDeltaKwh100:number; speedImpactPct:number; breakdown?: any } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<'searching' | 'ok' | 'error'>('searching');
   const [quickWeather, setQuickWeather] = useState<{ temperature:number; weatherCode:number; windSpeed:number } | null>(null);
-  const [routeMapOpen, setRouteMapOpen] = useState(false);
+  const [routeMapOpen, setRouteMapOpen] = useState(true);
   const [elevationOpen, setElevationOpen] = useState(false);
   const [consumptionOpen, setConsumptionOpen] = useState(false);
-  const [speedProfileOpen, setSpeedProfileOpen] = useState(false);
+  const [speedProfileOpen, setSpeedProfileOpen] = useState(true);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
 
   const weatherIcon = (code: number, className = 'w-4 h-4') => {
@@ -541,21 +541,60 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 </div>
                 <div className={`mt-4 h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}><div className="h-full rounded-full bg-emerald-500 transition-all duration-300" style={{ width: `${Math.min(100, Math.max(0, routeForecast.arrivalSoc))}%` }} /></div>
                 <div className="mt-2 flex justify-between text-[10px] text-slate-500"><span>0%</span><span>Старт {startSoc}%</span><span>100%</span></div>
-                <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-                  <div><span className="text-slate-500">Расход</span><b className="block">{routeForecast.consumption.toFixed(1)} кВт⋅ч/100</b></div><div><span className="text-slate-500">Энергия</span><b className="block">{routeForecast.energyKwh.toFixed(2)} кВт⋅ч</b></div>
-                  {routeWeather && <><div><span className="text-slate-500 inline-flex items-center gap-1"><CloudSun className="w-3.5 h-3.5" />Погода по маршруту</span><b className="block">{routeForecast.weatherLabel}</b><span className="text-[10px] text-slate-500">{weatherMode === 'planning' ? 'Ручные условия' : `${routeWeather.samples.length} точек · сейчас`} → {routeWeather.arrivalDate.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</span></div><div><span className="text-slate-500 inline-flex items-center gap-1"><Wind className="w-3.5 h-3.5" />Ветер</span><b className="flex items-center gap-1"><ArrowDown className="w-4 h-4 shrink-0" style={{ transform: `rotate(${routeForecast.relativeWindAngle}deg)` }} />{routeForecast.windLabel}</b></div></>}
-                </div>
+                <SecondaryStatRow
+                  isDark={isDark}
+                  className="mt-4"
+                  items={[
+                    { label: 'кВт⋅ч/100 км', value: routeForecast.consumption.toFixed(1) },
+                    { label: 'кВт⋅ч всего', value: routeForecast.energyKwh.toFixed(2) },
+                  ]}
+                />
+                {routeWeather && (
+                  <ChipRow
+                    isDark={isDark}
+                    className="mt-2 justify-center"
+                    items={[
+                      {
+                        label: (
+                          <span className="inline-flex items-center gap-1"><CloudSun className="w-3 h-3" />Погода</span>
+                        ),
+                        value: (
+                          <>
+                            {routeForecast.weatherLabel}
+                            <span className="font-normal opacity-70">
+                              {' · '}{weatherMode === 'planning' ? 'ручные условия' : `к ${routeWeather.arrivalDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`}
+                            </span>
+                          </>
+                        ),
+                      },
+                      {
+                        label: (
+                          <span className="inline-flex items-center gap-1">
+                            <ArrowDown className="w-3 h-3 shrink-0" style={{ transform: `rotate(${routeForecast.relativeWindAngle}deg)` }} />
+                            Ветер
+                          </span>
+                        ),
+                        value: routeForecast.windLabel,
+                      },
+                    ]}
+                  />
+                )}
               </div>
             )}
 
             {routeForecast?.breakdown && (
-              <button onClick={() => setConsumptionOpen(v => !v)} className={`mt-3 w-full rounded-xl border p-3 text-left ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                <div className="flex items-center justify-between"><span className="text-xs font-bold">Факторы расхода</span><ChevronDown className={`w-4 h-4 transition-transform ${consumptionOpen ? 'rotate-180' : ''}`} /></div>
-                {consumptionOpen && <div className="mt-3 space-y-2 text-xs">
+              <CollapsibleDetails
+                isDark={isDark}
+                label="Что повлияло на расход"
+                open={consumptionOpen}
+                onToggle={() => setConsumptionOpen(v => !v)}
+                className="mt-3"
+              >
+                <div className={`rounded-xl border p-3 space-y-2 text-xs ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                   {[['Базовое движение',routeForecast.breakdown.baseEnergyKwh],['Температура',routeForecast.breakdown.temperatureDeltaKwh],['Ветер',routeForecast.breakdown.windDeltaKwh],['Осадки / дорога',routeForecast.breakdown.precipitationDeltaKwh],['Стиль',routeForecast.breakdown.driverDeltaKwh],['Рельеф',routeForecast.breakdown.elevationDeltaKwh],['Климат',routeForecast.breakdown.climateEnergyKwh]].map(([label,value]) => <div key={String(label)} className="flex justify-between gap-3"><span>{label}</span><b>{Number(value)>=0?'+':''}{Number(value).toFixed(2)} кВт⋅ч</b></div>)}
                   <div className="pt-2 border-t border-slate-700/30 flex justify-between font-bold"><span>Сегментов</span><span>{routeForecast.breakdown.segments}</span></div>
-                </div>}
-              </button>
+                </div>
+              </CollapsibleDetails>
             )}
 
             {optimalSpeedScenario && (
@@ -594,14 +633,27 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               <div className="mt-2 text-[10px] text-slate-500">Нажмите вариант — скорость и прогноз SOC обновятся без повторного запроса маршрута.</div>
             </div>
 
-            <button onClick={() => setRouteMapOpen(v => !v)} className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 text-sm font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}><span className="inline-flex items-center gap-2"><Map className="w-4 h-4 text-emerald-500" />Интерактивная карта маршрута</span><ChevronDown className={`w-4 h-4 transition-transform ${routeMapOpen ? 'rotate-180' : ''}`} /></button>
-            {routeMapOpen && <RouteMap points={routeElevation.points} isDark={isDark} />}
+            <CollapsibleDetails
+              isDark={isDark}
+              label="Карта маршрута"
+              icon={<Map className="w-4 h-4 text-emerald-500" />}
+              open={routeMapOpen}
+              onToggle={() => setRouteMapOpen(v => !v)}
+            >
+              <RouteMap points={routeElevation.points} isDark={isDark} />
+            </CollapsibleDetails>
 
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-center">
               <div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold">{routeElevation.distanceKm}</div><div className="text-[10px] text-slate-500">км маршрута</div></div><div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold text-amber-500">▲ {routeElevation.elevationGainM} м</div><div className="text-[10px] text-slate-500">набор</div></div><div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold text-cyan-500">▼ {routeElevation.elevationLossM} м</div><div className="text-[10px] text-slate-500">спуск</div></div><div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold">{routeElevation.netElevationEnergyKwh > 0 ? '+' : ''}{routeElevation.netElevationEnergyKwh.toFixed(2)}</div><div className="text-[10px] text-slate-500">кВт⋅ч нетто</div></div>
             </div>
-            <button onClick={() => setElevationOpen(v => !v)} className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 text-sm font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}><span className="inline-flex items-center gap-2"><ChartNoAxesCombined className="w-4 h-4 text-cyan-500" />Профиль высот</span><ChevronDown className={`w-4 h-4 transition-transform ${elevationOpen ? 'rotate-180' : ''}`} /></button>
-            {elevationOpen && (() => {
+            <CollapsibleDetails
+              isDark={isDark}
+              label="Профиль высот"
+              icon={<ChartNoAxesCombined className="w-4 h-4 text-cyan-500" />}
+              open={elevationOpen}
+              onToggle={() => setElevationOpen(v => !v)}
+            >
+              {(() => {
               const profilePoints = routeElevation.points
                 .map((p: any, i: number) => ({
                   distance: Number(p?.distanceFromStartKm ?? (i * routeElevation.distanceKm / Math.max(1, routeElevation.points.length - 1))),
@@ -625,43 +677,46 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 </div>
               );
             })()}
+            </CollapsibleDetails>
             <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-slate-950 text-slate-300' : 'bg-slate-50 text-slate-600'}`}><div className="flex justify-between"><span>Подъёмы</span><b>+{routeElevation.grossClimbEnergyKwh.toFixed(2)} кВт⋅ч</b></div><div className="flex justify-between mt-1"><span>Рекуперация</span><b className="text-emerald-500">−{routeElevation.recoveredEnergyKwh.toFixed(2)} кВт⋅ч</b></div><div className="flex justify-between mt-2 pt-2 border-t border-slate-500/20"><span>Скорректированный расход</span><b>{elevationAdjustedConsumption.toFixed(1)} кВт⋅ч/100 км</b></div></div>
 
             {routeForecast?.breakdown?.speedProfile && routeForecast.breakdown.speedProfile.length >= 2 && (
-              <>
-                <button onClick={() => setSpeedProfileOpen(v => !v)} className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 text-sm font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
-                  <span className="inline-flex items-center gap-2"><Gauge className="w-4 h-4 text-amber-500" />Профиль скорости по маршруту</span>
-                  <ChevronDown className={`w-4 h-4 transition-transform ${speedProfileOpen ? 'rotate-180' : ''}`} />
-                </button>
-                {speedProfileOpen && (
-                  <div className={`mt-2 h-56 min-h-56 rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={routeForecast.breakdown.speedProfile.map((p) => ({ distance: p.distanceKm, speed: Math.round(p.speedKmH) }))} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
-                        <XAxis dataKey="distance" type="number" domain={[0, 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v} км`} interval="preserveStartEnd" />
-                        <Tooltip formatter={(v: number) => [`${v} км/ч`, 'Скорость']} labelFormatter={(v) => `${v} км от старта`} />
-                        <Area type="stepAfter" dataKey="speed" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.18} strokeWidth={2} isAnimationActive />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                    <p className={`mt-1 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                      Скорость, заложенная в расчёт по каждому участку маршрута — не факт, а модельное предположение (тип дороги + ваши план/максимум).
-                    </p>
-                  </div>
-                )}
-              </>
+              <CollapsibleDetails
+                isDark={isDark}
+                label="Профиль скорости по маршруту"
+                icon={<Gauge className="w-4 h-4 text-amber-500" />}
+                open={speedProfileOpen}
+                onToggle={() => setSpeedProfileOpen(v => !v)}
+              >
+                <div className={`h-56 min-h-56 rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={routeForecast.breakdown.speedProfile.map((p) => ({ distance: p.distanceKm, speed: Math.round(p.speedKmH) }))} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
+                      <XAxis dataKey="distance" type="number" domain={[0, 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v} км`} interval="preserveStartEnd" />
+                      <Tooltip formatter={(v: number) => [`${v} км/ч`, 'Скорость']} labelFormatter={(v) => `${v} км от старта`} />
+                      <Area type="stepAfter" dataKey="speed" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.18} strokeWidth={2} isAnimationActive />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                  <p className={`mt-1 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    Скорость, заложенная в расчёт по каждому участку маршрута — не факт, а модельное предположение (тип дороги + ваши план/максимум).
+                  </p>
+                </div>
+              </CollapsibleDetails>
             )}
 
             {routeWeather && routeWeather.samples.length > 0 && (
-              <>
-                <button onClick={() => setWeatherPanelOpen(v => !v)} className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 text-sm font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
-                  <span className="inline-flex items-center gap-2"><CloudSun className="w-4 h-4 text-sky-500" />Погода по маршруту ({routeWeather.samples.length} точек)</span>
-                  <ChevronDown className={`w-4 h-4 transition-transform ${weatherPanelOpen ? 'rotate-180' : ''}`} />
-                </button>
-                {weatherPanelOpen && (() => {
+              <CollapsibleDetails
+                isDark={isDark}
+                label={`Погода по маршруту (${routeWeather.samples.length} точек)`}
+                icon={<CloudSun className="w-4 h-4 text-sky-500" />}
+                open={weatherPanelOpen}
+                onToggle={() => setWeatherPanelOpen(v => !v)}
+              >
+                {(() => {
                   // etaMinutes/arrivalDate are for the final point; every sample carries its own
                   // etaMinutes from the same departure instant, so departure = arrival − final ETA.
                   const departureDate = new Date(routeWeather.arrivalDate.getTime() - routeWeather.etaMinutes * 60000);
                   return (
-                    <div className={`mt-2 rounded-xl border divide-y overflow-hidden ${isDark ? 'bg-slate-950 border-slate-800 divide-slate-800' : 'bg-white border-slate-200 divide-slate-100'}`}>
+                    <div className={`rounded-xl border divide-y overflow-hidden ${isDark ? 'bg-slate-950 border-slate-800 divide-slate-800' : 'bg-white border-slate-200 divide-slate-100'}`}>
                       {routeWeather.samples.map((s, i) => {
                         const sampleTime = new Date(departureDate.getTime() + s.etaMinutes * 60000);
                         const relAngle = ((s.weather.windDirection - s.routeBearing + 360) % 360);
@@ -687,7 +742,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     </div>
                   );
                 })()}
-              </>
+              </CollapsibleDetails>
             )}
           </>
         )}
