@@ -1,4 +1,4 @@
-export interface RoutePoint { lat:number; lon:number; elevationM:number; distanceFromStartKm:number; roadSpeedKmH?:number; }
+export interface RoutePoint { lat:number; lon:number; elevationM:number; distanceFromStartKm:number; roadSpeedKmH?:number; roadSegmentLengthKm?:number; }
 export interface RouteElevationData { name:string; distanceKm:number; points:RoutePoint[]; startElevationM:number; endElevationM:number; elevationGainM:number; elevationLossM:number; grossClimbEnergyKwh:number; recoveredEnergyKwh:number; netElevationEnergyKwh:number; elevationAvailable:boolean; elevationNote?:string; }
 export interface RouteProgress { stage:'geocoding'|'routing'|'sampling'|'elevation'|'calculating'; message:string; completed?:number; total?:number; }
 const EARTH_RADIUS_M=6371000, DEFAULT_MASS_KG=1600, GRAVITY=9.80665, DRIVETRAIN_EFFICIENCY=.90, REGEN_EFFICIENCY=.65, NOISE_THRESHOLD_M=3;
@@ -111,11 +111,17 @@ export const calculateElevationEnergy=(gain:number,loss:number,massKg=DEFAULT_MA
 
 const ELEVATION_UNAVAILABLE_NOTE='Рельеф временно недоступен — расчёт выполнен без его влияния';
 
-const speedAtDistance=(distanceKm:number,segments:{startKm:number;endKm:number;speedKmH:number}[],fallback=60)=>{
-  if(!segments.length)return fallback;
+// Returns both the OSRM step's speed AND its length. The length matters just as much as the
+// speed: a short step (a few hundred metres) is almost always a junction, roundabout or village
+// pass-through, no matter what speed OSRM's duration/distance ratio implies for it — a driver
+// physically can't spend meaningful time at a "fast" assigned speed over such a short stretch.
+// A long step (several km with no turns) is a much more trustworthy signal of genuine open road.
+const speedAtDistance=(distanceKm:number,segments:{startKm:number;endKm:number;speedKmH:number}[],fallback=60):{speedKmH:number;lengthKm:number}=>{
+  if(!segments.length)return{speedKmH:fallback,lengthKm:0};
   const hit=segments.find(s=>distanceKm>=s.startKm-0.01&&distanceKm<=s.endKm+0.01);
-  if(hit)return hit.speedKmH;
-  return distanceKm<segments[0].startKm?segments[0].speedKmH:segments[segments.length-1].speedKmH;
+  if(hit)return{speedKmH:hit.speedKmH,lengthKm:Math.max(0,hit.endKm-hit.startKm)};
+  const edge=distanceKm<segments[0].startKm?segments[0]:segments[segments.length-1];
+  return{speedKmH:edge.speedKmH,lengthKm:Math.max(0,edge.endKm-edge.startKm)};
 };
 
 export const buildRouteElevation=async(aLat:number,aLon:number,bLat:number,bLon:number,name='Маршрут',onProgress?:(p:RouteProgress)=>void):Promise<RouteElevationData>=>{
@@ -160,7 +166,8 @@ export const buildRouteElevation=async(aLat:number,aLon:number,bLat:number,bLon:
   const points=profile.coords.map((c,i)=>{
     if(i>0)cum+=haversineM(profile.coords[i-1],c);
     const distanceFromStartKm=Number((cum/1000).toFixed(2));
-    return{lon:c[0],lat:c[1],elevationM:profile.elevations[i],distanceFromStartKm,roadSpeedKmH:speedAtDistance(distanceFromStartKm,route.speedSegments)};
+    const road=speedAtDistance(distanceFromStartKm,route.speedSegments);
+    return{lon:c[0],lat:c[1],elevationM:profile.elevations[i],distanceFromStartKm,roadSpeedKmH:road.speedKmH,roadSegmentLengthKm:road.lengthKm};
   });
   const{gainM,lossM}=computeElevationGainLoss(profile.elevations),energy=calculateElevationEnergy(gainM,lossM);
   return{name,distanceKm:Number(route.distanceKm.toFixed(1)),points,startElevationM:profile.elevations[0],endElevationM:profile.elevations.at(-1)!,elevationGainM:gainM,elevationLossM:lossM,...energy,elevationAvailable,elevationNote};

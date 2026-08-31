@@ -1003,6 +1003,7 @@ export interface SegmentedRoutePoint {
   distanceFromStartKm: number;
   elevationM?: number;
   roadSpeedKmH?: number;
+  roadSegmentLengthKm?: number; // length of the OSRM step this speed came from — short = junction/village, long = open road
 }
 
 export interface SegmentedWeatherSample {
@@ -1036,6 +1037,7 @@ export interface SegmentedRouteBreakdown {
   windImpactPct: number;
   precipitationImpactPct: number;
   climatePowerKw: number;
+  speedProfile: { distanceKm: number; speedKmH: number }[]; // the actual per-point speed used for the calc, for the (optional, collapsed) speed-vs-distance chart
 }
 
 const bearingBetween = (a: SegmentedRoutePoint, b: SegmentedRoutePoint) => {
@@ -1101,6 +1103,7 @@ export function estimateSegmentedRouteConsumption(
       climateEnergyKwh: 0, regenEnergyKwh: 0, avgTemperature: fallbackWeather.temperature,
       avgWindSpeed: fallbackWeather.windSpeed, avgPrecipitation: fallbackWeather.precipitation,
       segments: 0, windImpactPct: 0, precipitationImpactPct: 0, climatePowerKw: 0,
+      speedProfile: [],
     };
   }
 
@@ -1113,15 +1116,30 @@ export function estimateSegmentedRouteConsumption(
   const requestedMaxSpeed = Number.isFinite(maxSpeedKmH) ? Math.max(speed, Math.min(150, maxSpeedKmH!)) : undefined;
   const rawRoadSpeeds = points.map((p) => Number.isFinite(p.roadSpeedKmH) && (p.roadSpeedKmH ?? 0) > 0
     ? Math.max(10, Math.min(140, p.roadSpeedKmH!)) : speed);
+  // How much we trust a point's OSRM-assigned speed as "genuine open road" rather than noise from
+  // a short step (junction, roundabout, village pass-through). OSRM reports a speed for every
+  // named step regardless of length — a 150 m slip road can get the same "speedKmH" treatment as
+  // a 10 km straight, even though only the latter is a road a driver could realistically stretch
+  // toward their stated maximum on. 2 km is picked as "long enough that a driver could plausibly
+  // be at a settled cruising speed for a meaningful stretch of it".
+  const LENGTH_CONFIDENCE_KM = 2;
+  const lengthWeights = points.map((p) =>
+    Math.max(0, Math.min(1, (p.roadSegmentLengthKm ?? LENGTH_CONFIDENCE_KM) / LENGTH_CONFIDENCE_KM))
+  );
   let roadSpeeds = rawRoadSpeeds.slice();
   if (requestedMaxSpeed !== undefined) {
     const FAST_ROAD_THRESHOLD = 80;
     const roadMax = Math.max(...rawRoadSpeeds);
     if (roadMax > FAST_ROAD_THRESHOLD) {
-      roadSpeeds = rawRoadSpeeds.map((roadSpeed) => {
+      roadSpeeds = rawRoadSpeeds.map((roadSpeed, i) => {
         if (roadSpeed <= FAST_ROAD_THRESHOLD) return roadSpeed;
         const t = (roadSpeed - FAST_ROAD_THRESHOLD) / Math.max(0.001, roadMax - FAST_ROAD_THRESHOLD);
-        return FAST_ROAD_THRESHOLD + t * (requestedMaxSpeed - FAST_ROAD_THRESHOLD);
+        const stretchedSpeed = FAST_ROAD_THRESHOLD + t * (requestedMaxSpeed - FAST_ROAD_THRESHOLD);
+        // Blend between "leave it alone" (short/low-confidence step) and "fully stretch toward
+        // the driver's stated max" (long, trustworthy step) — a short step that happened to get
+        // tagged with a high OSRM speed no longer gets pulled all the way up to 120 just because
+        // it's technically above the 80 km/h threshold.
+        return roadSpeed + (stretchedSpeed - roadSpeed) * lengthWeights[i];
       });
     }
 
@@ -1180,6 +1198,13 @@ export function estimateSegmentedRouteConsumption(
     if (factors.length) styleFactor = factors.reduce((a, b) => a + b, 0) / factors.length;
   }
   styleFactor = Math.max(0.75, Math.min(1.35, styleFactor));
+
+  // Speed profile for the (optional) chart — the actual per-point speed the calculation used,
+  // after road-class interpretation, length-confidence weighting and max-speed stretching.
+  const speedProfile = points.map((p, i) => ({
+    distanceKm: p.distanceFromStartKm,
+    speedKmH: Math.round(i === 0 ? roadSpeeds[0] ?? speed : getSegmentSpeed(i)),
+  }));
 
   let distanceKm = 0, durationHours = 0, energyKwh = 0, baseEnergyKwh = 0;
   let temperatureDeltaKwh = 0, windDeltaKwh = 0, precipitationDeltaKwh = 0, driverDeltaKwh = 0;
@@ -1270,6 +1295,7 @@ export function estimateSegmentedRouteConsumption(
     windImpactPct: Math.round((windWeightedBase ? windDeltaKwh / windWeightedBase : 0) * 100),
     precipitationImpactPct: Math.round((precipWeightedBase ? precipitationDeltaKwh / precipWeightedBase : 0) * 100),
     climatePowerKw: Number((climatePowerWeighted / Math.max(0.001, durationHours)).toFixed(2)),
+    speedProfile,
   };
 }
 export function calculateTripData(

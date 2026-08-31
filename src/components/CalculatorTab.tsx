@@ -101,6 +101,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [routeMapOpen, setRouteMapOpen] = useState(false);
   const [elevationOpen, setElevationOpen] = useState(false);
   const [consumptionOpen, setConsumptionOpen] = useState(false);
+  const [speedProfileOpen, setSpeedProfileOpen] = useState(false);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
 
   const weatherIcon = (code: number, className = 'w-4 h-4') => {
@@ -625,6 +626,29 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               );
             })()}
             <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-slate-950 text-slate-300' : 'bg-slate-50 text-slate-600'}`}><div className="flex justify-between"><span>Подъёмы</span><b>+{routeElevation.grossClimbEnergyKwh.toFixed(2)} кВт⋅ч</b></div><div className="flex justify-between mt-1"><span>Рекуперация</span><b className="text-emerald-500">−{routeElevation.recoveredEnergyKwh.toFixed(2)} кВт⋅ч</b></div><div className="flex justify-between mt-2 pt-2 border-t border-slate-500/20"><span>Скорректированный расход</span><b>{elevationAdjustedConsumption.toFixed(1)} кВт⋅ч/100 км</b></div></div>
+
+            {routeForecast?.breakdown?.speedProfile && routeForecast.breakdown.speedProfile.length >= 2 && (
+              <>
+                <button onClick={() => setSpeedProfileOpen(v => !v)} className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 text-sm font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                  <span className="inline-flex items-center gap-2"><Gauge className="w-4 h-4 text-amber-500" />Профиль скорости по маршруту</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${speedProfileOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {speedProfileOpen && (
+                  <div className={`mt-2 h-56 min-h-56 rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={routeForecast.breakdown.speedProfile.map((p) => ({ distance: p.distanceKm, speed: Math.round(p.speedKmH) }))} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
+                        <XAxis dataKey="distance" type="number" domain={[0, 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v} км`} interval="preserveStartEnd" />
+                        <Tooltip formatter={(v: number) => [`${v} км/ч`, 'Скорость']} labelFormatter={(v) => `${v} км от старта`} />
+                        <Area type="stepAfter" dataKey="speed" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.18} strokeWidth={2} isAnimationActive />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                    <p className={`mt-1 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      Скорость, заложенная в расчёт по каждому участку маршрута — не факт, а модельное предположение (тип дороги + ваши план/максимум).
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
 
             {routeWeather && routeWeather.samples.length > 0 && (
               <>
