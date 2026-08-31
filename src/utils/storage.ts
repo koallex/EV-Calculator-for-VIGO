@@ -77,7 +77,22 @@ function interpolateVigoSpeedConsumptionRaw(speedKmH: number): number {
 }
 
 export function interpolateVigoSpeedConsumption(speedKmH: number): number {
-  return interpolateVigoSpeedConsumptionRaw(speedKmH) * VIGO_SPEED_CURVE_CALIBRATION_SCALE;
+  const speed = Math.max(15, Math.min(150, speedKmH));
+  // High-speed calibration is intentionally separate from the driver-style factor.
+  // The style coefficient now represents acceleration/braking behaviour only, while
+  // sustained 90+ km/h energy is carried by the physical speed curve itself.
+  let highSpeedFactor = 1.0;
+  if (speed > 80) {
+    // Gradually restore the ~4–9% correction that used to be supplied indirectly by
+    // a high driving-style factor on fast highway trips.  No change below 80 km/h.
+    const t = Math.min(1, (speed - 80) / 40);
+    highSpeedFactor = 1 + 0.09 * t;
+  }
+  if (speed > 120) {
+    const t = Math.min(1, (speed - 120) / 30);
+    highSpeedFactor = 1.09 + 0.01 * t;
+  }
+  return interpolateVigoSpeedConsumptionRaw(speed) * VIGO_SPEED_CURVE_CALIBRATION_SCALE * highSpeedFactor;
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -605,7 +620,7 @@ export function calculateHistoricalDriverStyle(sessions: TripSession[]): {
     weightedKm += km;
   }
 
-  const factor = Number(Math.max(0.75, Math.min(1.35, weightedKm > 0 ? weightedFactorSum / weightedKm : 1)).toFixed(2));
+  const factor = Number(Math.max(0.97, Math.min(1.10, weightedKm > 0 ? weightedFactorSum / weightedKm : 1)).toFixed(2));
   const diffPct = Math.round((factor - 1) * 100);
   const label = getDrivingStyleLabel(factor);
 
@@ -819,16 +834,17 @@ export function computeFlatRoadConsumptionRate(
 
 export function deriveDrivingStyleFactor(avgSpeedKmH?: number, maxSpeedKmH?: number): number {
   if (!Number.isFinite(avgSpeedKmH) || !Number.isFinite(maxSpeedKmH) || (avgSpeedKmH ?? 0) <= 0) return 1.0;
+  // Legacy fallback only: without the HUD's second-by-second speed history we cannot
+  // measure acceleration/braking directly. Do NOT treat high average speed as a style penalty;
+  // sustained high speed is already represented by the speed-consumption curve.
   const avg = avgSpeedKmH as number;
   const max = Math.max(avg, maxSpeedKmH as number);
-  let factor = 1.0;
   const burstRatio = max / Math.max(30, avg);
-  if (burstRatio > 1.8) factor += 0.08;
-  else if (burstRatio > 1.6) factor += 0.04;
-  if (avg >= 85) factor += 0.06;
-  else if (avg >= 70) factor += 0.03;
-  else if (avg <= 40 && burstRatio < 1.35) factor -= 0.03;
-  return Number(Math.max(0.75, Math.min(1.35, factor)).toFixed(2));
+  let factor = 1.0;
+  if (burstRatio > 1.9) factor += 0.06;
+  else if (burstRatio > 1.6) factor += 0.03;
+  else if (avg <= 40 && burstRatio < 1.35) factor -= 0.02;
+  return Number(Math.max(0.97, Math.min(1.10, factor)).toFixed(2));
 }
 
 export function getDrivingStyleLabel(factor?: number): string {
@@ -937,7 +953,7 @@ export function estimateTripConsumption(
       .map((s) => Number.isFinite(s.drivingStyleFactor) ? s.drivingStyleFactor! : deriveDrivingStyleFactor(s.avgSpeedKmH, s.maxSpeedKmH))
       .filter((x) => Number.isFinite(x) && x >= 0.75 && x <= 1.35);
     if (styleFactors.length >= 1) {
-      driverStyleFactor = Math.max(0.75, Math.min(1.35, styleFactors.reduce((acc, x) => acc + x, 0) / styleFactors.length));
+      driverStyleFactor = Math.max(0.97, Math.min(1.10, styleFactors.reduce((acc, x) => acc + x, 0) / styleFactors.length));
     }
   } else if (sessions.length >= 2) {
     dataSource = 'all_history';
@@ -1230,7 +1246,7 @@ export function estimateSegmentedRouteConsumption(
       .filter((x) => Number.isFinite(x) && x >= 0.75 && x <= 1.35);
     if (factors.length) styleFactor = factors.reduce((a, b) => a + b, 0) / factors.length;
   }
-  styleFactor = Math.max(0.75, Math.min(1.35, styleFactor));
+  styleFactor = Math.max(0.97, Math.min(1.10, styleFactor));
 
   // Speed profile for the (optional) chart — the actual per-point speed the calculation used,
   // after road-class interpretation, length-confidence weighting and max-speed stretching.
