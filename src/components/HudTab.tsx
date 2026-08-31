@@ -664,67 +664,41 @@ export const HudTab: React.FC<HudTabProps> = ({
   // Dynamic speed kinetics, speed stability and high-speed intensity only.
   // Weather/temperature/precipitation are deliberately excluded from driving style.
   const currentTripStyle = useMemo(() => {
-    // When tracking is inactive or in early calibration
     if (!isTracking || tripDistanceKm < 0.05 || elapsedSeconds < 6 || speedHistoryRef.current.length < 4) {
       return {
-        factor: 1.0,
-        label: 'Калибровка',
-        subLabel: 'Анализ темпа в пути...',
-        details: 'Определение стиля вождения',
-        diffPct: 0,
+        factor: 1.0, label: 'Калибровка', subLabel: 'Анализ темпа в пути...',
+        details: 'Определение стиля вождения', diffPct: 0,
         color: isDark ? 'text-slate-300' : 'text-slate-700',
         badgeBg: isDark ? 'bg-slate-800/80 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700',
       };
     }
-
     const movingSpeeds = speedHistoryRef.current.filter((s) => s >= 5);
     if (movingSpeeds.length < 4) {
       return {
-        factor: 1.0,
-        label: 'Сбалансированный',
-        subLabel: 'Штатный темп',
-        details: 'Штатный темп',
-        diffPct: 0,
+        factor: 1.0, label: 'Сбалансированный', subLabel: 'Штатный темп', details: 'Штатный темп', diffPct: 0,
         color: isDark ? 'text-slate-200' : 'text-slate-800',
         badgeBg: isDark ? 'bg-slate-800/80 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700',
       };
     }
 
-    // 1. Speed stability & standard deviation
+    // Driving style is now about kinetics, not speed itself. A steady 120 km/h cruise
+    // is expensive because of aerodynamics, but it is not automatically an aggressive style.
     const mean = movingSpeeds.reduce((a, b) => a + b, 0) / movingSpeeds.length;
     const variance = movingSpeeds.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / movingSpeeds.length;
     const stdDev = Math.sqrt(variance);
+    const deltas = movingSpeeds.slice(1).map((v, i) => Math.abs(v - movingSpeeds[i]));
+    const meanDelta = deltas.length ? deltas.reduce((a, b) => a + b, 0) / deltas.length : 0;
+    const sharpChangeRatio = deltas.length ? deltas.filter((d) => d >= 6).length / deltas.length : 0;
 
     let factor = 1.0;
+    if (stdDev < 8 && meanDelta < 2.5) factor -= 0.03;
+    else if (stdDev < 14 && meanDelta < 4) factor -= 0.01;
+    else if (stdDev > 30 || sharpChangeRatio > 0.20) factor += 0.07;
+    else if (stdDev > 23 || sharpChangeRatio > 0.10) factor += 0.04;
+    else if (meanDelta > 5) factor += 0.03;
 
-    // Smooth cruise vs stop-and-go jerks
-    if (stdDev < 10 && movingSpeeds.length > 8) {
-      factor -= 0.08; // High cruising stability bonus
-    } else if (stdDev < 16) {
-      factor -= 0.03; // Smooth driving
-    } else if (stdDev > 26) {
-      factor += 0.08; // Volatile bursts & hard brakes
-    }
-
-    // 2. Max speed vs Average speed burstiness
-    if (maxSpeed > 80 && avgTripSpeedKmH > 0) {
-      const burstRatio = maxSpeed / Math.max(30, avgTripSpeedKmH);
-      if (burstRatio > 1.6) {
-        factor += 0.06;
-      }
-    }
-
-    // 3. High speed intensity
-    const highSpeedRatio = movingSpeeds.filter((s) => s > 105).length / movingSpeeds.length;
-    if (highSpeedRatio > 0.35) {
-      factor += 0.08;
-    } else if (highSpeedRatio > 0.15) {
-      factor += 0.04;
-    }
-
-    const clamped = Number(Math.max(0.75, Math.min(1.35, factor)).toFixed(2));
+    const clamped = Number(Math.max(0.97, Math.min(1.10, factor)).toFixed(2));
     const diffPct = Math.round((clamped - 1) * 100);
-
     if (clamped < 0.95) {
       return {
         factor: clamped,
@@ -766,7 +740,7 @@ export const HudTab: React.FC<HudTabProps> = ({
         badgeBg: isDark ? 'bg-rose-950/70 border-rose-800 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-800',
       };
     }
-  }, [isTracking, tripDistanceKm, elapsedSeconds, maxSpeed, avgTripSpeedKmH, isDark]);
+  }, [isTracking, tripDistanceKm, elapsedSeconds, isDark]);
 
   // Energy consumption forecast combining live trip style + speed + temperature + climate + relative wind + precipitation + elevation
   const forecast: ConsumptionForecast = estimateTripConsumption(
