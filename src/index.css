@@ -1,0 +1,167 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+}
+
+/* Theme-specific custom styles */
+html.light {
+  color-scheme: light;
+}
+
+html.light body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+html.dark body {
+  background-color: #020617;
+  color: #f8fafc;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Range input styling */
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: #334155;
+  border-radius: 9999px;
+}
+
+.light input[type=range] {
+  background: #cbd5e1;
+}
+
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #10b981;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+  border: 2px solid #ffffff;
+}
+
+input[type=range]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #10b981;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+  border: 2px solid #ffffff;
+}
+
+
+/* Compact interactive route map */
+.route-map {
+  position: relative;
+  height: 220px;
+}
+.route-map .leaflet-container {
+  height: 100%;
+  width: 100%;
+  background: #e2e8f0;
+}
+.route-map .leaflet-control-attribution { display: none; }
+.route-map-legend {
+  position: absolute;
+  z-index: 500;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9999px;
+  background: rgba(15,23,42,.82);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+}
+.route-map-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.route-dot { width: 7px; height: 7px; border-radius: 9999px; display: inline-block; }
+.route-dot-start { background: #10b981; }
+.route-dot-end { background: #ef4444; }
+
+/* Minimal mobile-first information hierarchy. The functionality stays intact; only the visual
+   order and density are changed. Calculator: inputs first, then route/result, then secondary
+   conditions. HUD: destination/range first, then live speed and secondary telemetry. */
+.calculator-minimal-shell > .calculator-status { order: 0; }
+.calculator-minimal-shell > .calculator-start-soc { order: 1; }
+.calculator-minimal-shell > .calculator-passengers { order: 2; }
+.calculator-minimal-shell > .calculator-route { order: 3; }
+.calculator-minimal-shell > .calculator-climate { order: 4; }
+.calculator-minimal-shell > .calculator-weather { order: 5; }
+.calculator-minimal-shell > div:nth-of-type(1) { order: 6; }
+.calculator-minimal-shell > div:nth-of-type(2) { order: 7; }
+.calculator-minimal-shell > div:nth-of-type(3) { order: 8; }
+.calculator-minimal-shell > section:not(.calculator-status):not(.calculator-start-soc):not(.calculator-passengers):not(.calculator-route):not(.calculator-climate):not(.calculator-weather) { order: 9; }
+
+.calculator-minimal-shell > section {
+  margin: 0;
+  box-shadow: none;
+}
+.calculator-minimal-shell > section.calculator-status {
+  background: transparent;
+  border-color: transparent;
+}
+@media (max-width: 640px) {
+  .calculator-minimal-shell { gap: .5rem; }
+  .calculator-minimal-shell > section { border-radius: 1rem; }
+  .calculator-minimal-shell .text-5xl { font-size: 2.75rem; line-height: 1; }
+  .calculator-minimal-shell .route-map { height: 180px; }
+}
+
+/* HUD hierarchy */
+.hud-minimal-shell > .hud-topbar { order: 0; }
+.hud-minimal-shell > .hud-range-block { order: 1; }
+.hud-minimal-shell > .hud-speed-block { order: 2; }
+.hud-minimal-shell > .hud-wind-block { order: 3; }
+.hud-minimal-shell > .hud-passengers-block { order: 4; }
+.hud-minimal-shell > .hud-factors-block { order: 5; }
+.hud-minimal-shell > .hud-trip-stats { order: 6; }
+
+.hud-minimal-shell { justify-content: flex-start !important; }
+.hud-range-block { margin-top: .15rem; }
+.hud-range-block .uppercase { letter-spacing: .08em; }
+.hud-factors-block { opacity: .9; }
+@media (max-width: 640px) {
+  .hud-minimal-shell { min-height: calc(100dvh - 1rem); padding: .75rem; }
+  .hud-minimal-shell .hud-range-block { padding: .65rem; }
+  .hud-minimal-shell .hud-range-block > div:first-child { margin-bottom: .35rem; }
+  .hud-minimal-shell .hud-range-block .text-4xl { font-size: 2.15rem; line-height: 1; }
+  .hud-minimal-shell .hud-speed-block { padding-top: .25rem; padding-bottom: .25rem; }
+  .hud-minimal-shell .hud-speed-block .text-8xl { font-size: 5.25rem; line-height: .9; }
+  .hud-minimal-shell .hud-factors-block { padding: .65rem; }
+}
+.calculator-minimal-shell > .calculator-battery { order: 6; }
+.calculator-minimal-shell > .calculator-metrics { order: 7; }
+.calculator-minimal-shell > .calculator-controls { order: 8; }
+.calculator-minimal-shell > div:not(.calculator-battery):not(.calculator-metrics):not(.calculator-controls) { order: 9; }
