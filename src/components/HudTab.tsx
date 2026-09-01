@@ -45,6 +45,45 @@ import { triggerHaptic } from '../utils/haptics';
 import { geocodeAddress, buildRouteElevation } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute } from '../services/weatherForecast';
 
+
+interface CollapsibleDetailsProps {
+  isDark: boolean;
+  open: boolean;
+  onToggle: () => void;
+  className?: string;
+  label: React.ReactNode;
+  children: React.ReactNode;
+}
+
+const CollapsibleDetails: React.FC<CollapsibleDetailsProps> = ({
+  isDark,
+  open,
+  onToggle,
+  className = '',
+  label,
+  children,
+}) => (
+  <div className={className}>
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`w-full flex items-center justify-between gap-2 rounded-xl border px-2.5 py-1.5 text-left ${
+        isDark ? 'bg-slate-900/70 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
+      }`}
+    >
+      <span className="min-w-0">{label}</span>
+      <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+    </button>
+    {open && (
+      <div className={`mt-1 rounded-xl border px-2.5 py-2 ${
+        isDark ? 'bg-slate-950/80 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-500'
+      }`}>
+        {children}
+      </div>
+    )}
+  </div>
+);
+
 interface HudTabProps {
   settings: UserSettings;
   sessions: TripSession[];
@@ -109,6 +148,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   const [destinationBusy, setDestinationBusy] = useState(false);
   const [destinationError, setDestinationError] = useState<string | null>(null);
   const [destinationBreakdownOpen, setDestinationBreakdownOpen] = useState(false);
+  const [factorsOpen, setFactorsOpen] = useState(false);
   const [destinationResult, setDestinationResult] = useState<{
     name: string;
     distanceKm: number;
@@ -164,6 +204,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     styleFactor?: number;
     styleLabel?: string;
   } | null>(null);
+  const [trackingStopMessage, setTrackingStopMessage] = useState('');
 
   const watchIdRef = useRef<number | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -1181,6 +1222,21 @@ export const HudTab: React.FC<HudTabProps> = ({
       setDestinationError(msg || 'Ошибка сети при расчете маршрута. Проверьте соединение.');
     } finally {
       setDestinationBusy(false);
+    }
+  };
+
+
+  // Start tracking first so GPS can establish the current position. If a destination was
+  // entered, the live destination forecast can then be calculated from that GPS position.
+  const handleStartWithLiveForecast = async () => {
+    handleStartTracking();
+    if (destinationQuery.trim()) {
+      // Give the geolocation watcher a moment to receive the first valid position.
+      window.setTimeout(() => {
+        if (prevPositionRef.current) {
+          void handleCalculateDestination();
+        }
+      }, 1200);
     }
   };
 
