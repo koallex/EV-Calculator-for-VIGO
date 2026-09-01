@@ -109,6 +109,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   const [destinationQuery, setDestinationQuery] = useState('');
   const [destinationBusy, setDestinationBusy] = useState(false);
   const [destinationError, setDestinationError] = useState<string | null>(null);
+  const [trackingStopMessage, setTrackingStopMessage] = useState<string | null>(null);
   const [destinationBreakdownOpen, setDestinationBreakdownOpen] = useState(false);
   const [destinationResult, setDestinationResult] = useState<{
     name: string;
@@ -840,6 +841,7 @@ export const HudTab: React.FC<HudTabProps> = ({
 
   // START tracking
   const handleStartTracking = () => {
+    setTrackingStopMessage(null);
     triggerHaptic('success', settings.hapticFeedback);
     requestWakeLock();
     setIsTracking(true);
@@ -866,6 +868,10 @@ export const HudTab: React.FC<HudTabProps> = ({
   const handleStopTracking = () => {
     triggerHaptic('medium', settings.hapticFeedback);
     setIsTracking(false);
+    setDestinationResult(null);
+    setDestinationError(null);
+    setDestinationBreakdownOpen(false);
+    setTrackingStopMessage('Расчёт остановлен');
 
     const finalDistance = Number(distanceRef.current.toFixed(1));
     const finalMinutes = Math.max(1, Math.round(elapsedSeconds / 60));
@@ -902,6 +908,7 @@ export const HudTab: React.FC<HudTabProps> = ({
 
   // RESET tracking
   const handleResetTracking = () => {
+    setTrackingStopMessage(null);
     triggerHaptic('light', settings.hapticFeedback);
     setIsTracking(false);
     setTripStartTime(null);
@@ -1354,15 +1361,6 @@ export const HudTab: React.FC<HudTabProps> = ({
             />
           </div>
         )}
-        {isTracking && (
-          <div className={`flex items-baseline justify-between gap-3 mt-2 pt-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-            <span className={`text-[11px] font-extrabold tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>СКОРОСТЬ</span>
-            <span className={`font-mono font-black text-2xl sm:text-3xl leading-none ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
-              {currentSpeed} <span className="text-sm sm:text-base font-bold">км/ч</span>
-            </span>
-          </div>
-        )}
-
         <div className={`w-full h-2 rounded-full overflow-hidden mt-2 ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-200 border border-slate-300'}`}>
           <div
             className={`h-full rounded-full transition-all duration-300 ${liveDynamicSoc < 20 ? 'bg-rose-500' : liveDynamicSoc < 40 ? 'bg-amber-500' : 'bg-emerald-500'}`}
@@ -1380,6 +1378,14 @@ export const HudTab: React.FC<HudTabProps> = ({
           <button onClick={handleResetTracking} className={`py-3 px-3 rounded-xl font-bold text-xs border active:scale-[0.98] transition-all flex items-center justify-center gap-2 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'}`}>
             <RotateCcw className="w-4 h-4" /><span>СБРОС</span>
           </button>
+        </div>
+      )}
+
+      {trackingStopMessage && !isTracking && (
+        <div className={`mb-2 rounded-xl border px-3 py-2 text-center text-xs font-semibold ${
+          isDark ? 'bg-slate-900/80 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'
+        }`}>
+          {trackingStopMessage}
         </div>
       )}
 
@@ -2090,25 +2096,6 @@ export const HudTab: React.FC<HudTabProps> = ({
                 {tripDistanceKm.toFixed(1)}
               </span>
               <span className={`text-[9px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>км</span>
-            </div>
-          </div>
-
-          {/* Average Speed */}
-          <div className={`rounded-xl p-2 text-center border transition-colors ${
-            isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-50 border-slate-200 shadow-2xs'
-          }`}>
-            <span className={`text-[9px] uppercase font-bold tracking-wider block ${
-              isDark ? 'text-slate-400' : 'text-slate-500'
-            }`}>
-              Ср. скорость
-            </span>
-            <div className="flex items-baseline justify-center gap-0.5 mt-0.5">
-              <span className={`text-xl sm:text-2xl font-black font-mono ${
-                isDark ? 'text-emerald-400' : 'text-emerald-600'
-              }`}>
-                {avgTripSpeedKmH}
-              </span>
-              <span className={`text-[9px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>км/ч</span>
             </div>
           </div>
 
