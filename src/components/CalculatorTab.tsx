@@ -53,11 +53,19 @@ const MANUAL_PRECIPITATION_PRESETS: Record<'rain' | 'snow', Record<'light' | 'mo
   },
 };
 
+export type HudRoutePlan = {
+  destination: string;
+  startSoc: number;
+  plannedSpeedKmH?: number;
+};
+
 interface CalculatorTabProps {
   settings: UserSettings;
   sessions: TripSession[];
   onSaveToHistory: (tripData: Omit<TripSession, 'id' | 'createdAt'>) => void;
   onOpenAddModalWithData: (initialData: Partial<TripSession>) => void;
+  /** Transfer planned route into HUD tracking tab */
+  onSendToHud?: (plan: HudRoutePlan) => void;
 }
 
 export const CalculatorTab: React.FC<CalculatorTabProps> = ({
@@ -65,6 +73,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   sessions,
   onSaveToHistory,
   onOpenAddModalWithData,
+  onSendToHud,
 }) => {
   // Input states
   const [startSoc, setStartSoc] = useState<number>(100);
@@ -324,6 +333,56 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     setEndSoc(scenario.arrivalSoc);
   };
 
+  /** Compare current route with HVAC on vs off without rebuilding the route. */
+  const getClimateScenario = (withClimate: boolean) => {
+    if (!routeElevation || !routeWeather) return null;
+    const samples = routeWeather.samples ?? [];
+    const fallbackWeather = {
+      temperature: routeWeather.temperature,
+      weatherCode: routeWeather.weatherCode,
+      precipitation: routeWeather.precipitation,
+      windSpeed: routeWeather.windSpeed,
+      windDirection: routeWeather.windDirection,
+    };
+    const breakdown = estimateSegmentedRouteConsumption(
+      routeElevation.points,
+      samples.map(s => ({ distanceFromStartKm: s.distanceFromStartKm, weather: s.weather, routeBearing: s.routeBearing })),
+      fallbackWeather,
+      plannedSpeedKmH,
+      sessions,
+      settings.batteryCapacityKwh,
+      withClimate,
+      undefined,
+      passengers,
+      plannedMaxSpeedKmH
+    );
+    const energyKwh = breakdown.energyKwh;
+    const arrivalSoc = Math.max(0, Number((startSoc - (energyKwh / (settings.batteryCapacityKwh || 51.87)) * 100).toFixed(1)));
+    return {
+      withClimate,
+      consumption: Number((energyKwh / routeElevation.distanceKm * 100).toFixed(2)),
+      energyKwh: Number(energyKwh.toFixed(2)),
+      arrivalSoc,
+      breakdown,
+    };
+  };
+
+  const applyClimateScenario = (withClimate: boolean) => {
+    const scenario = getClimateScenario(withClimate);
+    if (!scenario || !routeForecast) return;
+    setClimateOn(withClimate);
+    setRouteForecast({
+      ...routeForecast,
+      consumption: scenario.consumption,
+      energyKwh: scenario.energyKwh,
+      arrivalSoc: scenario.arrivalSoc,
+      breakdown: scenario.breakdown,
+      climateLabel: withClimate ? routeForecast.climateLabel : 'Климат выкл',
+      climateImpactPct: withClimate ? routeForecast.climateImpactPct : 0,
+    });
+    setEndSoc(scenario.arrivalSoc);
+  };
+
   // Finds the speed that minimizes total route energy for the currently loaded route,
   // weather, elevation, HVAC setting and battery state. This is a local calculation —
   // it does not trigger any additional route/weather API requests.
@@ -547,6 +606,27 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               </div>
             </div>
           </div>
+          {onSendToHud && destinationAddress.trim() && (
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('success', settings.hapticFeedback);
+                onSendToHud({
+                  destination: destinationAddress.trim(),
+                  startSoc,
+                  plannedSpeedKmH,
+                });
+              }}
+              className={`mt-2.5 w-full rounded-xl py-2 text-xs font-bold flex items-center justify-center gap-1.5 border ${
+                isDark
+                  ? 'bg-sky-950/40 border-sky-700/50 text-sky-300'
+                  : 'bg-white border-sky-300 text-sky-800'
+              }`}
+            >
+              <Navigation className="w-3.5 h-3.5" />
+              Вести в HUD
+            </button>
+          )}
         </section>
       )}
 
@@ -791,20 +871,98 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             <div className={`rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-bold inline-flex items-center gap-2"><Gauge className="w-4 h-4 text-emerald-500" />А что если?</span>
-                <span className="text-[10px] text-slate-500">Изменить скорость</span>
+                <span className="text-[10px] text-slate-500">Без пересчёта маршрута</span>
               </div>
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                {[Math.max(20, plannedSpeedKmH - 10), plannedSpeedKmH, Math.min(140, plannedSpeedKmH + 10)].map((speed) => {
-                  const scenario = getWhatIfScenario(speed);
-                  const active = speed === plannedSpeedKmH;
-                  return <button key={speed} onClick={() => applyWhatIfSpeed(speed)} className={`rounded-lg border px-2 py-2 text-center transition-colors ${active ? 'border-emerald-500 bg-emerald-500/10' : isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-white'}`}>
-                    <div className="text-xs font-bold">{speed} км/ч</div>
-                    <div className={`mt-1 text-[11px] font-bold ${scenario && scenario.arrivalSoc >= 20 ? 'text-emerald-500' : scenario && scenario.arrivalSoc >= 10 ? 'text-amber-500' : 'text-rose-500'}`}>{scenario ? `${scenario.arrivalSoc}% SOC` : '—'}</div>
-                  </button>;
-                })}
+
+              {/* Climate on/off comparison */}
+              <div className="mt-3">
+                <div className={`text-[10px] font-semibold mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Климат</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {([true, false] as const).map((withClimate) => {
+                    const scenario = getClimateScenario(withClimate);
+                    const active = climateOn === withClimate;
+                    return (
+                      <button
+                        key={withClimate ? 'on' : 'off'}
+                        type="button"
+                        onClick={() => applyClimateScenario(withClimate)}
+                        className={`rounded-lg border px-2 py-2 text-left transition-colors ${
+                          active
+                            ? 'border-emerald-500 bg-emerald-500/10'
+                            : isDark
+                            ? 'border-slate-800 bg-slate-900'
+                            : 'border-slate-200 bg-white'
+                        }`}
+                      >
+                        <div className="text-xs font-bold">{withClimate ? 'С климатом' : 'Без климата'}</div>
+                        <div className={`mt-1 text-[11px] font-bold ${scenario && scenario.arrivalSoc >= 20 ? 'text-emerald-500' : scenario && scenario.arrivalSoc >= 10 ? 'text-amber-500' : 'text-rose-500'}`}>
+                          {scenario ? `${scenario.arrivalSoc}% SOC` : '—'}
+                        </div>
+                        {scenario && (
+                          <div className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                            {scenario.consumption.toFixed(1)} кВт⋅ч/100 · {scenario.energyKwh.toFixed(1)} кВт⋅ч
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="mt-2 text-[10px] text-slate-500">Нажмите вариант — скорость и прогноз SOC обновятся без повторного запроса маршрута.</div>
+
+              {/* Speed what-if */}
+              <div className="mt-3">
+                <div className={`text-[10px] font-semibold mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Скорость</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[Math.max(20, plannedSpeedKmH - 10), plannedSpeedKmH, Math.min(140, plannedSpeedKmH + 10)].map((speed) => {
+                    const scenario = getWhatIfScenario(speed);
+                    const active = speed === plannedSpeedKmH;
+                    return (
+                      <button
+                        key={speed}
+                        type="button"
+                        onClick={() => applyWhatIfSpeed(speed)}
+                        className={`rounded-lg border px-2 py-2 text-center transition-colors ${
+                          active
+                            ? 'border-emerald-500 bg-emerald-500/10'
+                            : isDark
+                            ? 'border-slate-800 bg-slate-900'
+                            : 'border-slate-200 bg-white'
+                        }`}
+                      >
+                        <div className="text-xs font-bold">{speed} км/ч</div>
+                        <div className={`mt-1 text-[11px] font-bold ${scenario && scenario.arrivalSoc >= 20 ? 'text-emerald-500' : scenario && scenario.arrivalSoc >= 10 ? 'text-amber-500' : 'text-rose-500'}`}>
+                          {scenario ? `${scenario.arrivalSoc}% SOC` : '—'}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="mt-2 text-[10px] text-slate-500">Нажмите вариант — прогноз SOC обновится сразу, без нового запроса маршрута.</div>
             </div>
+
+            {/* Send planned route to HUD for live tracking */}
+            {onSendToHud && destinationAddress.trim() && (
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('success', settings.hapticFeedback);
+                  onSendToHud({
+                    destination: destinationAddress.trim(),
+                    startSoc,
+                    plannedSpeedKmH,
+                  });
+                }}
+                className={`w-full rounded-xl py-3.5 text-sm font-bold flex items-center justify-center gap-2 border transition-all active:scale-[0.98] ${
+                  isDark
+                    ? 'bg-sky-950/50 border-sky-700/60 text-sky-300 hover:bg-sky-900/40'
+                    : 'bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100'
+                }`}
+              >
+                <Navigation className="w-5 h-5" />
+                Вести в HUD
+              </button>
+            )}
 
             <CollapsibleDetails
               isDark={isDark}

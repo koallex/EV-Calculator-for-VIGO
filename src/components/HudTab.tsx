@@ -84,12 +84,21 @@ const CollapsibleDetails: React.FC<CollapsibleDetailsProps> = ({
   </div>
 );
 
+export type HudRoutePlan = {
+  destination: string;
+  startSoc: number;
+  plannedSpeedKmH?: number;
+};
+
 interface HudTabProps {
   settings: UserSettings;
   sessions: TripSession[];
   onSaveToHistory: (tripData: Omit<TripSession, 'id' | 'createdAt'>) => void;
   onOpenAddModalWithData?: (data: Partial<TripSession>) => void;
   onTrackingChange?: (isTracking: boolean) => void;
+  /** Plan transferred from Calculator — prefill destination + start SoC */
+  hudPlan?: HudRoutePlan | null;
+  onHudPlanConsumed?: () => void;
 }
 
 interface GpsWeather {
@@ -112,6 +121,8 @@ export const HudTab: React.FC<HudTabProps> = ({
   sessions,
   onSaveToHistory,
   onTrackingChange,
+  hudPlan,
+  onHudPlanConsumed,
 }) => {
   // Tracking state
   const [isTracking, setIsTracking] = useState(false);
@@ -255,6 +266,22 @@ export const HudTab: React.FC<HudTabProps> = ({
   useEffect(() => {
     onTrackingChange?.(isTracking);
   }, [isTracking, onTrackingChange]);
+
+  // Apply plan transferred from Calculator (destination + start SoC + optional speed)
+  useEffect(() => {
+    if (!hudPlan) return;
+    if (hudPlan.destination?.trim()) {
+      setDestinationQuery(hudPlan.destination.trim());
+      cachedDestRef.current = null; // force re-geocode for the new address
+    }
+    if (typeof hudPlan.startSoc === 'number' && hudPlan.startSoc > 0) {
+      setStartTripSoc(Math.min(100, Math.max(1, Math.round(hudPlan.startSoc))));
+    }
+    if (typeof hudPlan.plannedSpeedKmH === 'number' && hudPlan.plannedSpeedKmH > 0) {
+      setManualAvgSpeedKmH(Math.min(150, Math.max(5, Math.round(hudPlan.plannedSpeedKmH))));
+    }
+    onHudPlanConsumed?.();
+  }, [hudPlan, onHudPlanConsumed]);
 
   // Keep weatherRef in sync so the geolocation callback (subscribed once per trip) always reads
   // the latest fetched weather without needing to resubscribe watchPosition.
