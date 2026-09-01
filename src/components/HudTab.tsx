@@ -44,7 +44,7 @@ import {
 import { triggerHaptic } from '../utils/haptics';
 import { geocodeAddress, buildRouteElevation } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute } from '../services/weatherForecast';
-import { CollapsibleDetails, ChipRow } from './ui/CollapsibleDetails';
+import { CollapsibleDetails } from './ui/CollapsibleDetails';
 
 interface HudTabProps {
   settings: UserSettings;
@@ -1326,6 +1326,11 @@ export const HudTab: React.FC<HudTabProps> = ({
                     </span>
                   )}
                 </div>
+                <span className={`text-[10px] block truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {forecast.windImpactPct !== undefined && forecast.windImpactPct !== 0
+                    ? `Аэродинамика: ${forecast.windImpactPct > 0 ? '+' : ''}${forecast.windImpactPct}% к расходу`
+                    : 'Штиль / минимальное влияние'}
+                </span>
               </div>
             </div>
 
@@ -1359,13 +1364,13 @@ export const HudTab: React.FC<HudTabProps> = ({
           </div>
         </div>
 
-        <div className={`hud-passengers-block w-full max-w-lg rounded-xl px-3 py-2 border text-left transition-colors ${isDark ? 'bg-slate-900/90 border-slate-800/90' : 'bg-slate-50 border-slate-200 shadow-xs'}`}>
+        <div className={`hud-passengers-block w-full max-w-lg rounded-2xl p-3 border text-left transition-colors ${isDark ? 'bg-slate-900/90 border-slate-800/90' : 'bg-slate-50 border-slate-200 shadow-xs'}`}>
           <div className="flex items-center justify-between">
-            <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Людей в салоне</span>
+            <div><span className={`text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Людей в салоне</span><span className="block text-[10px] text-slate-500">Включая водителя</span></div>
             <div className="flex items-center gap-2">
-              <button onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-7 h-7 rounded-lg border font-bold text-sm ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−</button>
-              <span className={`min-w-5 text-center font-mono font-bold text-sm ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{passengers}</span>
-              <button onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-7 h-7 rounded-lg border font-bold text-sm ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+</button>
+              <button onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-9 h-9 rounded-lg border font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−</button>
+              <span className={`min-w-7 text-center font-mono font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{passengers}</span>
+              <button onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-9 h-9 rounded-lg border font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+</button>
             </div>
           </div>
         </div>
@@ -1374,16 +1379,13 @@ export const HudTab: React.FC<HudTabProps> = ({
         <CollapsibleDetails
           isDark={isDark}
           open={factorsOpen}
-          onToggle={() => {
-            triggerHaptic('light', settings.hapticFeedback);
-            setFactorsOpen((v) => !v);
-          }}
-          icon={<Activity className={`w-3.5 h-3.5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />}
+          onToggle={() => setFactorsOpen(v => !v)}
           className="hud-factors-block w-full max-w-lg"
           label={
-            <span className="inline-flex items-center gap-2">
-              <span className="text-[11px] uppercase tracking-wider">Факторы расхода</span>
-              <span className={`text-xs font-mono font-extrabold px-2 py-0.5 rounded-lg border ${
+            <span className="inline-flex items-center gap-1.5">
+              <Activity className={`w-3.5 h-3.5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
+              <span className="normal-case font-bold">Факторы расхода</span>
+              <span className={`ml-1 text-xs font-mono font-extrabold px-2 py-0.5 rounded-lg border ${
                 totalConsumptionFactor > 1.15
                   ? isDark ? 'bg-rose-950/70 border-rose-800 text-rose-300' : 'bg-rose-50 border-rose-300 text-rose-800'
                   : totalConsumptionFactor < 0.95
@@ -1395,7 +1397,6 @@ export const HudTab: React.FC<HudTabProps> = ({
             </span>
           }
         >
-          <div className={`rounded-2xl p-3 border ${isDark ? 'bg-slate-900/90 border-slate-800/90 shadow-lg' : 'bg-slate-50 border-slate-200 shadow-xs'}`}>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1.5 text-[11px]">
             {/* Live Driving Style Factor (pure driving kinetics) */}
             <div className={`p-2 rounded-xl border ${
@@ -1526,7 +1527,6 @@ export const HudTab: React.FC<HudTabProps> = ({
                 </>
               )}
             </div>
-          </div>
           </div>
         </CollapsibleDetails>
 
