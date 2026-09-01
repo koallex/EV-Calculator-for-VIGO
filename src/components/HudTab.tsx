@@ -238,6 +238,11 @@ export const HudTab: React.FC<HudTabProps> = ({
   const segmentEnergyKwhRef = useRef(0);
   const [liveSegmentEnergyKwh, setLiveSegmentEnergyKwh] = useState(0);
 
+  // Monotonic floor for current SoC during a trip: once the displayed live SoC drops,
+  // it must never rise again until tracking is stopped. Prevents small upward jumps from
+  // regen recalculation, elevation profile updates, or climate forecast changes.
+  const minLiveSocRef = useRef<number | null>(null);
+
   // Mirrors of render-scope values the geolocation watchPosition callback needs to read at
   // call-time without forcing the GPS watch to be torn down and resubscribed on every change.
   const weatherRef = useRef(weather);
@@ -880,8 +885,21 @@ export const HudTab: React.FC<HudTabProps> = ({
   // Percentage drop of battery based on energy spent and battery capacity
   const socSpentPercent = (energySpentKwh / batteryCap) * 100;
 
-  // Live dynamic remaining SoC %
-  const liveDynamicSoc = Math.max(0, Number((startTripSoc - socSpentPercent).toFixed(1)));
+  // Raw live dynamic remaining SoC % (can theoretically rise slightly due to regen /
+  // elevation / climate recalculations). We enforce a monotonic floor below.
+  const rawLiveDynamicSoc = Math.max(0, Number((startTripSoc - socSpentPercent).toFixed(1)));
+
+  // Monotonic current SoC: never allow the displayed value to increase during one trip.
+  if (isTracking) {
+    if (minLiveSocRef.current === null) {
+      minLiveSocRef.current = rawLiveDynamicSoc;
+    } else {
+      minLiveSocRef.current = Math.min(minLiveSocRef.current, rawLiveDynamicSoc);
+    }
+  }
+  const liveDynamicSoc = isTracking && minLiveSocRef.current !== null
+    ? minLiveSocRef.current
+    : rawLiveDynamicSoc;
 
   // Live SoC-at-destination: always derived from the *current* liveDynamicSoc + last
   // calculated remaining energy. This makes the big "SOC на финише" number move in real time
@@ -947,6 +965,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     setTrackingStopMessage('');
     segmentEnergyKwhRef.current = 0;
     setLiveSegmentEnergyKwh(0);
+    minLiveSocRef.current = null; // reset monotonic SoC floor for the new trip
   };
 
   // STOP tracking
@@ -960,6 +979,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     lastDestRecalcAtRef.current = 0;
     lastDestRecalcDistanceRef.current = 0;
     destRecalcInFlightRef.current = false;
+    minLiveSocRef.current = null;
     setTrackingStopMessage('Расчёт остановлен');
 
     const finalDistance = Number(distanceRef.current.toFixed(1));
@@ -1017,6 +1037,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     setCompletedTripSummary(null);
     segmentEnergyKwhRef.current = 0;
     setLiveSegmentEnergyKwh(0);
+    minLiveSocRef.current = null;
   };
 
   // Save tracked trip directly to history
