@@ -1267,7 +1267,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   return (
     <div
       id="hud-tab-container"
-      className={`relative h-[calc(100vh-7.5rem)] min-h-[520px] max-h-[900px] overflow-hidden rounded-3xl p-2.5 flex flex-col gap-1.5 select-none transition-all duration-200 ${
+      className={`relative h-[calc(100vh-7.5rem)] min-h-[480px] max-h-[900px] overflow-hidden rounded-3xl p-2 flex flex-col gap-1.5 select-none transition-all duration-200 ${
         isMirrored ? 'scale-x-[-1]' : ''
       } ${
         isDark
@@ -1276,7 +1276,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       }`}
     >
       {/* 1. Status: GPS · weather · wind · live */}
-      <div className={`flex items-center justify-between gap-1.5 border-b pb-1.5 shrink-0 ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
+      <div className={`flex items-center justify-between gap-1.5 border-b pb-1 shrink-0 ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
         <div className="flex items-center gap-1 min-w-0 overflow-hidden">
           <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] border shrink-0 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${gpsAccuracy !== null && gpsAccuracy <= 15 ? 'bg-emerald-400 animate-pulse' : gpsAccuracy !== null ? 'bg-amber-400' : 'bg-rose-500'}`} />
@@ -1320,10 +1320,10 @@ export const HudTab: React.FC<HudTabProps> = ({
         </button>
       </div>
 
-      {/* 2. Speed — only large driving value */}
-      <div className="flex items-end justify-center gap-2 shrink-0 py-0.5 leading-none">
+      {/* 2. Speed */}
+      <div className="flex items-end justify-center gap-2 shrink-0 leading-none">
         <span
-          className={`text-6xl sm:text-7xl font-black font-mono tracking-tighter tabular-nums ${
+          className={`text-5xl sm:text-6xl font-black font-mono tracking-tighter tabular-nums ${
             isDark
               ? 'text-transparent bg-clip-text bg-gradient-to-b from-white via-slate-100 to-slate-300'
               : 'text-slate-900'
@@ -1331,8 +1331,8 @@ export const HudTab: React.FC<HudTabProps> = ({
         >
           {currentSpeed}
         </span>
-        <div className="flex flex-col items-start pb-1">
-          <span className={`text-sm font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>км/ч</span>
+        <div className="flex flex-col items-start pb-0.5">
+          <span className={`text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>км/ч</span>
           {gpsHeading !== null && (
             <span className={`text-[9px] font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
               {gpsHeading}°
@@ -1341,9 +1341,9 @@ export const HudTab: React.FC<HudTabProps> = ({
         </div>
       </div>
 
-      {/* 3. Start SOC — no range display */}
+      {/* 3. Start SOC — no range */}
       <div
-        className={`rounded-2xl border px-3 py-2 shrink-0 ${
+        className={`rounded-2xl border px-3 py-1.5 shrink-0 ${
           isDark ? 'bg-slate-900/95 border-slate-700/80' : 'bg-white border-slate-200 shadow-xs'
         }`}
       >
@@ -1353,7 +1353,7 @@ export const HudTab: React.FC<HudTabProps> = ({
               {isTracking ? 'SOC сейчас' : 'SOC на старте'}
             </span>
             <span
-              className={`font-mono font-black text-3xl leading-none tabular-nums ${
+              className={`font-mono font-black text-2xl leading-none tabular-nums ${
                 (isTracking ? liveDynamicSoc : startTripSoc) < 20
                   ? 'text-rose-500'
                   : (isTracking ? liveDynamicSoc : startTripSoc) < 40
@@ -1371,7 +1371,7 @@ export const HudTab: React.FC<HudTabProps> = ({
               <button
                 type="button"
                 onClick={() => setStartTripSoc((prev) => Math.max(1, prev - 5))}
-                className={`w-9 h-9 rounded-xl border text-base font-bold active:scale-95 ${
+                className={`w-8 h-8 rounded-xl border text-base font-bold active:scale-95 ${
                   isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
                 }`}
               >
@@ -1380,7 +1380,7 @@ export const HudTab: React.FC<HudTabProps> = ({
               <button
                 type="button"
                 onClick={() => setStartTripSoc((prev) => Math.min(100, prev + 5))}
-                className={`w-9 h-9 rounded-xl border text-base font-bold active:scale-95 ${
+                className={`w-8 h-8 rounded-xl border text-base font-bold active:scale-95 ${
                   isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
                 }`}
               >
@@ -1388,7 +1388,7 @@ export const HudTab: React.FC<HudTabProps> = ({
               </button>
             </div>
           ) : (
-            <div className={`w-24 h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-950' : 'bg-slate-200'}`}>
+            <div className={`w-20 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-950' : 'bg-slate-200'}`}>
               <div
                 className={`h-full transition-all duration-300 ${
                   liveDynamicSoc < 20 ? 'bg-rose-500' : liveDynamicSoc < 40 ? 'bg-amber-500' : 'bg-emerald-500'
@@ -1406,15 +1406,15 @@ export const HudTab: React.FC<HudTabProps> = ({
             step={1}
             value={startTripSoc}
             onChange={(e) => setStartTripSoc(Number(e.target.value))}
-            className="w-full h-1.5 mt-2 accent-emerald-500 cursor-pointer touch-pan-x"
+            className="w-full h-1.5 mt-1.5 accent-emerald-500 cursor-pointer touch-pan-x"
             aria-label="SOC на старте поездки"
           />
         )}
       </div>
 
-      {/* 4. Destination — address + live SOC on arrival (hero) */}
+      {/* 4. Destination + route weather */}
       <div
-        className={`rounded-2xl border px-3 py-2.5 shrink-0 ${
+        className={`rounded-2xl border px-3 py-2 shrink-0 ${
           isDark ? 'bg-slate-900/95 border-emerald-900/50' : 'bg-emerald-50/60 border-emerald-200'
         }`}
       >
@@ -1433,7 +1433,7 @@ export const HudTab: React.FC<HudTabProps> = ({
           {destinationResult ? (
             <div className="text-right shrink-0">
               <span
-                className={`font-mono font-black text-4xl leading-none tabular-nums ${
+                className={`font-mono font-black text-3xl leading-none tabular-nums ${
                   destinationResult.predictedSoc < 10
                     ? 'text-rose-500'
                     : destinationResult.predictedSoc < 20
@@ -1452,11 +1452,11 @@ export const HudTab: React.FC<HudTabProps> = ({
               )}
             </div>
           ) : (
-            <span className={`text-2xl font-bold tabular-nums ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>—</span>
+            <span className={`text-xl font-bold tabular-nums ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>—</span>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 mt-2">
+        <div className="flex items-center gap-1.5 mt-1.5">
           <div className="relative flex-1 min-w-0">
             <MapPin className={`absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
             <input
@@ -1468,7 +1468,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                 if (e.key === 'Enter') handleCalculateDestination();
               }}
               placeholder="Город, улица, дом…"
-              className={`w-full pl-7 pr-2.5 py-2 rounded-xl border text-[12px] ${
+              className={`w-full pl-7 pr-2.5 py-1.5 rounded-xl border text-[12px] ${
                 isDark
                   ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600'
                   : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'
@@ -1481,7 +1481,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                 type="button"
                 onClick={() => void handleCalculateDestination()}
                 disabled={destinationBusy || !destinationQuery.trim()}
-                className={`px-2.5 py-2 rounded-xl border text-[11px] font-bold disabled:opacity-50 ${
+                className={`px-2 py-1.5 rounded-xl border text-[11px] font-bold disabled:opacity-50 ${
                   isDark ? 'bg-slate-950 border-slate-700 text-slate-200' : 'bg-white border-slate-300 text-slate-700'
                 }`}
               >
@@ -1491,7 +1491,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                 type="button"
                 onClick={handleStartWithLiveForecast}
                 disabled={destinationBusy}
-                className="px-3 py-2 rounded-xl bg-emerald-600 active:bg-emerald-500 text-white text-[11px] font-black disabled:opacity-60"
+                className="px-2.5 py-1.5 rounded-xl bg-emerald-600 active:bg-emerald-500 text-white text-[11px] font-black disabled:opacity-60"
               >
                 СТАРТ
               </button>
@@ -1501,7 +1501,7 @@ export const HudTab: React.FC<HudTabProps> = ({
               type="button"
               onClick={() => void handleCalculateDestination()}
               disabled={destinationBusy || !destinationQuery.trim()}
-              className={`px-3 py-2 rounded-xl border text-[11px] font-bold shrink-0 disabled:opacity-50 ${
+              className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold shrink-0 disabled:opacity-50 ${
                 isDark ? 'bg-slate-950 border-emerald-800 text-emerald-300' : 'bg-white border-emerald-300 text-emerald-700'
               }`}
             >
@@ -1511,15 +1511,46 @@ export const HudTab: React.FC<HudTabProps> = ({
         </div>
 
         {destinationResult && (
-          <div className={`flex items-center justify-between gap-2 mt-1.5 text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+          <div className={`flex items-center justify-between gap-2 mt-1 text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
             <span>
               {destinationResult.distanceKm} км
-              {destinationResult.arrivalTimeLabel ? ` · ${destinationResult.arrivalTimeLabel}` : destinationResult.etaMinutes ? ` · ~${destinationResult.etaMinutes} мин` : ''}
+              {destinationResult.arrivalTimeLabel
+                ? ` · ${destinationResult.arrivalTimeLabel}`
+                : destinationResult.etaMinutes
+                ? ` · ~${destinationResult.etaMinutes} мин`
+                : ''}
             </span>
             <span className="font-mono">{destinationResult.energyNeededKwh.toFixed(1)} кВт⋅ч</span>
             <span className="font-mono">{destinationResult.predictedConsumption.toFixed(1)}/100</span>
           </div>
         )}
+
+        {/* Route weather from stored forecast API response */}
+        {destinationResult && (destinationResult.forecastUsed || destinationResult.forecastTemperature != null) && (
+          <div
+            className={`mt-1.5 flex items-center gap-2 rounded-xl border px-2 py-1 text-[10px] ${
+              isDark ? 'bg-slate-950/80 border-slate-800 text-slate-300' : 'bg-white/80 border-slate-200 text-slate-600'
+            }`}
+          >
+            <CloudRain className={`w-3.5 h-3.5 shrink-0 ${isDark ? 'text-sky-400' : 'text-sky-600'}`} />
+            <span className="font-semibold shrink-0">По маршруту</span>
+            <span className="font-mono tabular-nums">
+              {destinationResult.forecastTemperature != null
+                ? `${destinationResult.forecastTemperature > 0 ? '+' : ''}${Math.round(destinationResult.forecastTemperature)}°`
+                : '—'}
+            </span>
+            {destinationResult.forecastWindSpeed != null && (
+              <span className="font-mono tabular-nums flex items-center gap-0.5">
+                <Wind className="w-3 h-3" />
+                {(destinationResult.forecastWindSpeed / 3.6).toFixed(1)} м/с
+              </span>
+            )}
+            {destinationResult.forecastPrecipLabel && (
+              <span className="truncate">{destinationResult.forecastPrecipLabel}</span>
+            )}
+          </div>
+        )}
+
         {destinationError && (
           <div className="mt-1 text-[10px] text-amber-500 truncate">{destinationError}</div>
         )}
@@ -1527,46 +1558,46 @@ export const HudTab: React.FC<HudTabProps> = ({
 
       {/* 5. Passengers + climate + wind direction */}
       <div
-        className={`rounded-2xl border px-2.5 py-1.5 flex items-center gap-2 shrink-0 ${
+        className={`rounded-2xl border px-2 py-1 flex items-center gap-1.5 shrink-0 ${
           isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-slate-50 border-slate-200'
         }`}
       >
         <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden">
           <div
-            className={`w-7 h-7 rounded-full border flex items-center justify-center shrink-0 ${
+            className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 ${
               isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'
             }`}
           >
             <ArrowDown
-              className={`w-3.5 h-3.5 ${windInfo.color}`}
+              className={`w-3 h-3 ${windInfo.color}`}
               style={{ transform: `rotate(${windInfo.arrowRotation}deg)` }}
             />
           </div>
-          <span className={`text-[10px] font-bold truncate ${windInfo.badgeBg ? '' : ''} ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+          <span className={`text-[10px] font-bold truncate ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
             {weather.isLoaded ? windInfo.label : 'Ветер…'}
           </span>
         </div>
 
         <div
-          className={`flex items-center gap-0.5 shrink-0 rounded-xl border px-1 ${
+          className={`flex items-center gap-0.5 shrink-0 rounded-xl border px-0.5 ${
             isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'
           }`}
         >
           <button
             type="button"
             onClick={() => setPassengers((p) => Math.max(1, p - 1))}
-            className={`w-8 h-8 text-lg font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+            className={`w-7 h-7 text-base font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
             aria-label="Меньше пассажиров"
           >
             −
           </button>
-          <span className={`text-[12px] font-bold min-w-[2.25rem] text-center tabular-nums ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+          <span className={`text-[11px] font-bold min-w-[2rem] text-center tabular-nums ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
             👤{passengers}
           </span>
           <button
             type="button"
             onClick={() => setPassengers((p) => Math.min(5, p + 1))}
-            className={`w-8 h-8 text-lg font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+            className={`w-7 h-7 text-base font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
             aria-label="Больше пассажиров"
           >
             +
@@ -1576,7 +1607,7 @@ export const HudTab: React.FC<HudTabProps> = ({
         <button
           type="button"
           onClick={() => setClimateOn(!climateOn)}
-          className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold shrink-0 ${
+          className={`px-2 py-1 rounded-xl border text-[10px] font-bold shrink-0 ${
             climateOn
               ? outdoorTemp < 19
                 ? 'bg-amber-950/70 text-amber-300 border-amber-800'
@@ -1590,49 +1621,21 @@ export const HudTab: React.FC<HudTabProps> = ({
         </button>
       </div>
 
-      {/* 6. Trip telemetry — compact */}
-      <div
-        className={`rounded-xl border grid grid-cols-3 divide-x shrink-0 ${
-          isDark ? 'bg-slate-900/70 border-slate-800 divide-slate-800' : 'bg-slate-50 border-slate-200 divide-slate-200'
-        }`}
-      >
-        <div className="py-1.5 text-center">
-          <span className={`block text-[8px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Дистанция</span>
-          <b className={`font-mono text-base tabular-nums ${isDark ? 'text-cyan-300' : 'text-cyan-600'}`}>
-            {tripDistanceKm.toFixed(1)}
-            <small className="text-[8px]"> км</small>
-          </b>
-        </div>
-        <div className="py-1.5 text-center">
-          <span className={`block text-[8px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>В пути</span>
-          <b className={`font-mono text-base tabular-nums ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-            {formatTime(elapsedSeconds)}
-          </b>
-        </div>
-        <div className="py-1.5 text-center">
-          <span className={`block text-[8px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Средняя</span>
-          <b className={`font-mono text-base tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-            {avgTripSpeedKmH}
-            <small className="text-[8px]"> км/ч</small>
-          </b>
-        </div>
-      </div>
-
-      {/* 7. Controls */}
-      <div className="mt-auto grid grid-cols-2 gap-1.5 shrink-0 pt-0.5">
+      {/* 6. Controls — higher so always visible on iPhone */}
+      <div className="grid grid-cols-2 gap-1.5 shrink-0">
         {isTracking ? (
           <>
             <button
               type="button"
               onClick={handleStopTracking}
-              className="py-2.5 rounded-xl bg-rose-600 text-white font-black text-[11px] flex items-center justify-center gap-1.5 active:scale-[0.98]"
+              className="py-2 rounded-xl bg-rose-600 text-white font-black text-[11px] flex items-center justify-center gap-1.5 active:scale-[0.98]"
             >
               <Square className="w-3.5 h-3.5 fill-current" /> СТОП
             </button>
             <button
               type="button"
               onClick={handleResetTracking}
-              className={`py-2.5 rounded-xl border font-bold text-[11px] flex items-center justify-center gap-1.5 active:scale-[0.98] ${
+              className={`py-2 rounded-xl border font-bold text-[11px] flex items-center justify-center gap-1.5 active:scale-[0.98] ${
                 isDark
                   ? 'bg-slate-800 text-slate-200 border-slate-700'
                   : 'bg-slate-100 text-slate-700 border-slate-300'
@@ -1642,10 +1645,38 @@ export const HudTab: React.FC<HudTabProps> = ({
             </button>
           </>
         ) : (
-          <div className={`col-span-2 text-center py-1 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-            {trackingStopMessage || 'Введите адрес и SOC, затем СТАРТ'}
+          <div className={`col-span-2 text-center py-0.5 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+            {trackingStopMessage || 'Введите адрес и SOC → Расчёт / СТАРТ'}
           </div>
         )}
+      </div>
+
+      {/* 7. Trip telemetry — last, compact */}
+      <div
+        className={`rounded-xl border grid grid-cols-3 divide-x shrink-0 ${
+          isDark ? 'bg-slate-900/70 border-slate-800 divide-slate-800' : 'bg-slate-50 border-slate-200 divide-slate-200'
+        }`}
+      >
+        <div className="py-1 text-center">
+          <span className={`block text-[8px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Дистанция</span>
+          <b className={`font-mono text-sm tabular-nums ${isDark ? 'text-cyan-300' : 'text-cyan-600'}`}>
+            {tripDistanceKm.toFixed(1)}
+            <small className="text-[8px]"> км</small>
+          </b>
+        </div>
+        <div className="py-1 text-center">
+          <span className={`block text-[8px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>В пути</span>
+          <b className={`font-mono text-sm tabular-nums ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+            {formatTime(elapsedSeconds)}
+          </b>
+        </div>
+        <div className="py-1 text-center">
+          <span className={`block text-[8px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Средняя</span>
+          <b className={`font-mono text-sm tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+            {avgTripSpeedKmH}
+            <small className="text-[8px]"> км/ч</small>
+          </b>
+        </div>
       </div>
 
       {/* Completed Trip Summary Modal */}
