@@ -1352,6 +1352,203 @@ export const HudTab: React.FC<HudTabProps> = ({
         </div>
       </div>
 
+      {/* 5. SoC AT DESTINATION FORECAST (Цель поездки) */}
+      <div className={`order-1 w-full max-w-lg mx-auto rounded-2xl p-3 sm:p-4 border transition-colors ${
+        isDark
+          ? 'bg-slate-900/90 border-slate-800/90 shadow-lg'
+          : 'bg-slate-50 border-slate-200 shadow-xs'
+      }`}>
+        <div className="flex items-center gap-1.5 mb-2.5">
+          <div className={`p-1.5 rounded-lg border shrink-0 ${
+            isDark ? 'bg-slate-950 border-slate-800 text-violet-400' : 'bg-white border-slate-200 text-violet-600'
+          }`}>
+            <Flag className="w-4 h-4" />
+          </div>
+          <div className="text-left min-w-0">
+            <span className={`text-xs font-bold uppercase tracking-wider block ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+              SOC на финише
+            </span>
+            <span className={`text-[10px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              Живой прогноз заряда на финише по маршруту
+            </span>
+          </div>
+        </div>
+
+        {/* Destination — address only in Live Consumption mode */}
+        {/* Input + Submit */}
+        <div className="flex gap-1.5">
+          <input
+            type="text"
+            inputMode="text" 
+            value={destinationQuery}
+            onChange={(e) => setDestinationQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleCalculateDestination();
+            }}
+            placeholder="Город, улица, дом…"
+            className={`flex-1 min-w-0 px-3 py-2 rounded-xl border text-xs font-medium focus:outline-hidden focus:ring-1 focus:ring-emerald-500 ${
+              isDark
+                ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600'
+                : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'
+            }`}
+          />
+          <span className={`px-2.5 py-2 rounded-xl border text-[10px] font-semibold flex items-center gap-1 shrink-0 ${
+            isDark ? 'bg-slate-950 border-slate-800 text-slate-500' : 'bg-white border-slate-200 text-slate-500'
+          }`}>
+            <MapPin className="w-3.5 h-3.5" /> Цель
+          </span>
+        </div>
+
+        {/* Error */}
+        {destinationError && (
+          <div className={`mt-2 rounded-xl p-2 flex items-center gap-2 text-[11px] border ${
+            isDark ? 'bg-amber-950/60 border-amber-800/70 text-amber-200' : 'bg-amber-50 border-amber-200 text-amber-900'
+          }`}>
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+            <span>{destinationError}</span>
+          </div>
+        )}
+
+        {/* Result */}
+        {destinationResult && (
+          <div className={`mt-2.5 p-3 rounded-2xl border text-left ${
+            isDark ? 'bg-slate-950/90 border-slate-800/80' : 'bg-white border-slate-200'
+          }`}>
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <div className="min-w-0">
+                <span className={`text-[10px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {destinationResult.approximate ? 'Оценка по прямой (без учета дорог)' : 'До'}
+                </span>
+                <span className={`text-xs font-bold block truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                  {destinationResult.name}
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  setDestinationResult(null);
+    setDestinationBreakdownOpen(false);
+                  setDestinationQuery('');
+                }}
+                className={`shrink-0 text-[11px] ${isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-700'}`}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex items-baseline gap-2 mb-2 flex-wrap">
+              <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Ожидаемый SOC на финише:
+              </span>
+              <span className={`text-5xl font-black font-mono tracking-tight ${
+                destinationResult.predictedSoc < 10
+                  ? 'text-rose-500'
+                  : destinationResult.predictedSoc < 20
+                  ? 'text-amber-500'
+                  : isDark ? 'text-emerald-400' : 'text-emerald-600'
+              }`}>
+                {destinationResult.predictedSoc}%
+              </span>
+              {destinationResult.isLive && (
+                <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                  isDark ? 'bg-emerald-950/70 text-emerald-400' : 'bg-emerald-50 text-emerald-700'
+                }`}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  LIVE · SOC
+                </span>
+              )}
+            </div>
+
+            {destinationResult.predictedSoc <= 0 && (
+              <div className={`mb-2 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold border ${
+                isDark ? 'bg-rose-950/70 border-rose-800 text-rose-300' : 'bg-rose-50 border-rose-300 text-rose-800'
+              }`}>
+                ⚠️ Заряда не хватит — потребуется подзарядка в пути
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div>
+                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{destinationResult.isLive ? 'Осталось' : 'Дистанция'}</span>
+                <span className={`font-mono font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{destinationResult.distanceKm} км</span>
+              </div>
+              <div>
+                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Время в пути</span>
+                <span className={`font-mono font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                  {destinationResult.etaMinutes ? `~${destinationResult.etaMinutes} мин` : '—'}
+                  {destinationResult.arrivalTimeLabel && (
+                    <span className={`ml-1 font-normal ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      (к {destinationResult.arrivalTimeLabel})
+                    </span>
+                  )}
+                </span>
+              </div>
+              <div>
+                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Расход маршрута</span>
+                <span className={`font-mono font-bold ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+                  {destinationResult.predictedConsumption.toFixed(1)} кВт⋅ч/100
+                </span>
+              </div>
+              <div>
+                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Рельеф</span>
+                <span className={`font-mono font-bold flex items-center gap-1 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                  <Mountain className="w-3 h-3" /> ▲{destinationResult.gainM}м ▼{destinationResult.lossM}м
+                </span>
+              </div>
+              <div>
+                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  Погода {destinationResult.forecastUsed ? 'к прибытию' : '(текущая)'}
+                </span>
+                <span className={`font-mono font-bold flex items-center gap-1 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                  {destinationResult.forecastTemperature !== undefined
+                    ? `${destinationResult.forecastTemperature > 0 ? '+' : ''}${destinationResult.forecastTemperature}°C`
+                    : weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°C` : '—'}
+                  {destinationResult.forecastWindSpeed !== undefined && (
+                    <span className={isDark ? 'text-cyan-400' : 'text-cyan-600'}>· {destinationResult.forecastWindSpeed} км/ч</span>
+                  )}
+                </span>
+              </div>
+            </div>
+            {destinationResult.forecastPrecipLabel && (
+              <span className={`block mt-1.5 text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                {destinationResult.forecastPrecipLabel}
+              </span>
+            )}
+            {destinationResult.breakdown && (
+              <div className={`mt-3 rounded-xl border ${isDark ? 'bg-slate-900/80 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                <button onClick={() => setDestinationBreakdownOpen(v => !v)} className="w-full p-3 flex items-center justify-between text-left">
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Разбор поездки</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${destinationBreakdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {destinationBreakdownOpen && <div className="px-3 pb-3">
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px]">
+                    <div className="flex justify-between gap-2"><span>Базовое движение</span><b>{destinationResult.breakdown.baseEnergyKwh.toFixed(2)} кВт⋅ч</b></div>
+                    <div className="flex justify-between gap-2"><span>Температура</span><b>{destinationResult.breakdown.temperatureDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.temperatureDeltaKwh.toFixed(2)}</b></div>
+                    <div className="flex justify-between gap-2"><span>Ветер</span><b>{destinationResult.breakdown.windDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.windDeltaKwh.toFixed(2)}</b></div>
+                    <div className="flex justify-between gap-2"><span>Осадки / дорога</span><b>{destinationResult.breakdown.precipitationDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.precipitationDeltaKwh.toFixed(2)}</b></div>
+                    <div className="flex justify-between gap-2"><span>Стиль</span><b>{destinationResult.breakdown.driverDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.driverDeltaKwh.toFixed(2)}</b></div>
+                    <div className="flex justify-between gap-2"><span>Рельеф</span><b>{destinationResult.breakdown.elevationDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.elevationDeltaKwh.toFixed(2)}</b></div>
+                    <div className="flex justify-between gap-2"><span>Климат</span><b>+{destinationResult.breakdown.climateEnergyKwh.toFixed(2)}</b></div>
+                    <div className="flex justify-between gap-2"><span>Рекуперация</span><b>−{destinationResult.breakdown.regenEnergyKwh.toFixed(2)}</b></div>
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-slate-500/20 flex justify-between text-[10px] font-bold"><span>Сегментов</span><span>{destinationResult.breakdown.segments}</span></div>
+                  <div className="mt-2 text-[9px] text-slate-500">Погода и ветер интерполируются по маршруту, рельеф считается по каждому сегменту.</div>
+                </div>}
+              </div>
+            )}
+            <span className={`block mt-2 text-[9px] ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
+              {destinationResult.forecastUsed
+                ? `Расчет использует прогноз погоды на время прибытия (${destinationResult.arrivalTimeLabel ?? '—'}), а не текущие условия.`
+                : 'Прогноз погоды на время прибытия получить не удалось — использованы текущие условия.'}
+              {' '}
+              {destinationResult.approximate
+                ? 'Режим "по дистанции" не строит маршрут — рельеф экстраполирован из уже проеханного пути (или считается ровным).'
+                : 'Маршрут через публичный OSRM-роутер, высоты через Open-Elevation — оценка, а не точная навигация.'}
+            </span>
+          </div>
+        )}
+      </div>
+
+
       {/* Primary Live Consumption Action */}
       <div className={`rounded-2xl border p-2.5 ${
         isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-50 border-slate-200'
@@ -1840,202 +2037,6 @@ export const HudTab: React.FC<HudTabProps> = ({
             </span>
           </div>
 
-      </div>
-
-      {/* 5. SoC AT DESTINATION FORECAST (Цель поездки) */}
-      <div className={`order-1 w-full max-w-lg mx-auto rounded-2xl p-3 sm:p-4 border transition-colors ${
-        isDark
-          ? 'bg-slate-900/90 border-slate-800/90 shadow-lg'
-          : 'bg-slate-50 border-slate-200 shadow-xs'
-      }`}>
-        <div className="flex items-center gap-1.5 mb-2.5">
-          <div className={`p-1.5 rounded-lg border shrink-0 ${
-            isDark ? 'bg-slate-950 border-slate-800 text-violet-400' : 'bg-white border-slate-200 text-violet-600'
-          }`}>
-            <Flag className="w-4 h-4" />
-          </div>
-          <div className="text-left min-w-0">
-            <span className={`text-xs font-bold uppercase tracking-wider block ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-              SOC на финише
-            </span>
-            <span className={`text-[10px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              Живой прогноз заряда на финише по маршруту
-            </span>
-          </div>
-        </div>
-
-        {/* Destination — address only in Live Consumption mode */}
-        {/* Input + Submit */}
-        <div className="flex gap-1.5">
-          <input
-            type="text"
-            inputMode="text" 
-            value={destinationQuery}
-            onChange={(e) => setDestinationQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleCalculateDestination();
-            }}
-            placeholder="Город, улица, дом…"
-            className={`flex-1 min-w-0 px-3 py-2 rounded-xl border text-xs font-medium focus:outline-hidden focus:ring-1 focus:ring-emerald-500 ${
-              isDark
-                ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600'
-                : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'
-            }`}
-          />
-          <span className={`px-2.5 py-2 rounded-xl border text-[10px] font-semibold flex items-center gap-1 shrink-0 ${
-            isDark ? 'bg-slate-950 border-slate-800 text-slate-500' : 'bg-white border-slate-200 text-slate-500'
-          }`}>
-            <MapPin className="w-3.5 h-3.5" /> Цель
-          </span>
-        </div>
-
-        {/* Error */}
-        {destinationError && (
-          <div className={`mt-2 rounded-xl p-2 flex items-center gap-2 text-[11px] border ${
-            isDark ? 'bg-amber-950/60 border-amber-800/70 text-amber-200' : 'bg-amber-50 border-amber-200 text-amber-900'
-          }`}>
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-            <span>{destinationError}</span>
-          </div>
-        )}
-
-        {/* Result */}
-        {destinationResult && (
-          <div className={`mt-2.5 p-3 rounded-2xl border text-left ${
-            isDark ? 'bg-slate-950/90 border-slate-800/80' : 'bg-white border-slate-200'
-          }`}>
-            <div className="flex items-start justify-between gap-2 mb-2">
-              <div className="min-w-0">
-                <span className={`text-[10px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  {destinationResult.approximate ? 'Оценка по прямой (без учета дорог)' : 'До'}
-                </span>
-                <span className={`text-xs font-bold block truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                  {destinationResult.name}
-                </span>
-              </div>
-              <button
-                onClick={() => {
-                  setDestinationResult(null);
-    setDestinationBreakdownOpen(false);
-                  setDestinationQuery('');
-                }}
-                className={`shrink-0 text-[11px] ${isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-700'}`}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="flex items-baseline gap-2 mb-2 flex-wrap">
-              <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Ожидаемый SOC на финише:
-              </span>
-              <span className={`text-5xl font-black font-mono tracking-tight ${
-                destinationResult.predictedSoc < 10
-                  ? 'text-rose-500'
-                  : destinationResult.predictedSoc < 20
-                  ? 'text-amber-500'
-                  : isDark ? 'text-emerald-400' : 'text-emerald-600'
-              }`}>
-                {destinationResult.predictedSoc}%
-              </span>
-              {destinationResult.isLive && (
-                <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
-                  isDark ? 'bg-emerald-950/70 text-emerald-400' : 'bg-emerald-50 text-emerald-700'
-                }`}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  LIVE · SOC
-                </span>
-              )}
-            </div>
-
-            {destinationResult.predictedSoc <= 0 && (
-              <div className={`mb-2 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold border ${
-                isDark ? 'bg-rose-950/70 border-rose-800 text-rose-300' : 'bg-rose-50 border-rose-300 text-rose-800'
-              }`}>
-                ⚠️ Заряда не хватит — потребуется подзарядка в пути
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div>
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{destinationResult.isLive ? 'Осталось' : 'Дистанция'}</span>
-                <span className={`font-mono font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{destinationResult.distanceKm} км</span>
-              </div>
-              <div>
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Время в пути</span>
-                <span className={`font-mono font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                  {destinationResult.etaMinutes ? `~${destinationResult.etaMinutes} мин` : '—'}
-                  {destinationResult.arrivalTimeLabel && (
-                    <span className={`ml-1 font-normal ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                      (к {destinationResult.arrivalTimeLabel})
-                    </span>
-                  )}
-                </span>
-              </div>
-              <div>
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Расход маршрута</span>
-                <span className={`font-mono font-bold ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
-                  {destinationResult.predictedConsumption.toFixed(1)} кВт⋅ч/100
-                </span>
-              </div>
-              <div>
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Рельеф</span>
-                <span className={`font-mono font-bold flex items-center gap-1 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                  <Mountain className="w-3 h-3" /> ▲{destinationResult.gainM}м ▼{destinationResult.lossM}м
-                </span>
-              </div>
-              <div>
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  Погода {destinationResult.forecastUsed ? 'к прибытию' : '(текущая)'}
-                </span>
-                <span className={`font-mono font-bold flex items-center gap-1 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                  {destinationResult.forecastTemperature !== undefined
-                    ? `${destinationResult.forecastTemperature > 0 ? '+' : ''}${destinationResult.forecastTemperature}°C`
-                    : weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°C` : '—'}
-                  {destinationResult.forecastWindSpeed !== undefined && (
-                    <span className={isDark ? 'text-cyan-400' : 'text-cyan-600'}>· {destinationResult.forecastWindSpeed} км/ч</span>
-                  )}
-                </span>
-              </div>
-            </div>
-            {destinationResult.forecastPrecipLabel && (
-              <span className={`block mt-1.5 text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                {destinationResult.forecastPrecipLabel}
-              </span>
-            )}
-            {destinationResult.breakdown && (
-              <div className={`mt-3 rounded-xl border ${isDark ? 'bg-slate-900/80 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
-                <button onClick={() => setDestinationBreakdownOpen(v => !v)} className="w-full p-3 flex items-center justify-between text-left">
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Разбор поездки</span>
-                  <ChevronDown className={`w-4 h-4 transition-transform ${destinationBreakdownOpen ? 'rotate-180' : ''}`} />
-                </button>
-                {destinationBreakdownOpen && <div className="px-3 pb-3">
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px]">
-                    <div className="flex justify-between gap-2"><span>Базовое движение</span><b>{destinationResult.breakdown.baseEnergyKwh.toFixed(2)} кВт⋅ч</b></div>
-                    <div className="flex justify-between gap-2"><span>Температура</span><b>{destinationResult.breakdown.temperatureDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.temperatureDeltaKwh.toFixed(2)}</b></div>
-                    <div className="flex justify-between gap-2"><span>Ветер</span><b>{destinationResult.breakdown.windDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.windDeltaKwh.toFixed(2)}</b></div>
-                    <div className="flex justify-between gap-2"><span>Осадки / дорога</span><b>{destinationResult.breakdown.precipitationDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.precipitationDeltaKwh.toFixed(2)}</b></div>
-                    <div className="flex justify-between gap-2"><span>Стиль</span><b>{destinationResult.breakdown.driverDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.driverDeltaKwh.toFixed(2)}</b></div>
-                    <div className="flex justify-between gap-2"><span>Рельеф</span><b>{destinationResult.breakdown.elevationDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.elevationDeltaKwh.toFixed(2)}</b></div>
-                    <div className="flex justify-between gap-2"><span>Климат</span><b>+{destinationResult.breakdown.climateEnergyKwh.toFixed(2)}</b></div>
-                    <div className="flex justify-between gap-2"><span>Рекуперация</span><b>−{destinationResult.breakdown.regenEnergyKwh.toFixed(2)}</b></div>
-                  </div>
-                  <div className="mt-2 pt-2 border-t border-slate-500/20 flex justify-between text-[10px] font-bold"><span>Сегментов</span><span>{destinationResult.breakdown.segments}</span></div>
-                  <div className="mt-2 text-[9px] text-slate-500">Погода и ветер интерполируются по маршруту, рельеф считается по каждому сегменту.</div>
-                </div>}
-              </div>
-            )}
-            <span className={`block mt-2 text-[9px] ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
-              {destinationResult.forecastUsed
-                ? `Расчет использует прогноз погоды на время прибытия (${destinationResult.arrivalTimeLabel ?? '—'}), а не текущие условия.`
-                : 'Прогноз погоды на время прибытия получить не удалось — использованы текущие условия.'}
-              {' '}
-              {destinationResult.approximate
-                ? 'Режим "по дистанции" не строит маршрут — рельеф экстраполирован из уже проеханного пути (или считается ровным).'
-                : 'Маршрут через публичный OSRM-роутер, высоты через Open-Elevation — оценка, а не точная навигация.'}
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Trip Tracking Metrics & Controls */}
