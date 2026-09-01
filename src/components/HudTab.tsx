@@ -1297,217 +1297,60 @@ export const HudTab: React.FC<HudTabProps> = ({
         </div>
       </div>
 
-          {/* Dynamic Battery SoC Status & Real-time consumption drain */}
-          <div className={`rounded-2xl border p-3 sm:p-3.5 mb-2.5 space-y-2 ${
-            isDark ? 'bg-slate-900/95 border-slate-700/90' : 'bg-white border-slate-200 shadow-xs'
-          }`}>
-            <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-1.5">
-                <span className={`text-xs font-extrabold tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                  {isTracking ? 'Текущий заряд (Live):' : 'SOC НА СТАРТЕ ПОЕЗДКИ'}
-                </span>
-                <span className={`font-mono font-extrabold text-xl leading-none ${
-                  liveDynamicSoc < 20
-                    ? 'text-rose-500'
-                    : liveDynamicSoc < 40
-                    ? 'text-amber-500'
-                    : isDark ? 'text-emerald-400' : 'text-emerald-600'
-                }`}>
-                  {liveDynamicSoc}%
-                </span>
-                {isTracking && tripDistanceKm > 0 && (
-                  <span className={`text-[10px] font-mono font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    (старт: {startTripSoc}%)
-                  </span>
-                )}
-              </div>
-
-              <div className={`text-[11px] font-mono ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                {isTracking && tripDistanceKm > 0 ? (
-                  <span className="text-amber-500 font-bold">
-                    -{energySpentKwh.toFixed(2)} кВт⋅ч (-{socSpentPercent.toFixed(1)}%)
-                  </span>
-                ) : (
-                  <span>{(dynamicRemainingBatteryKwh).toFixed(1)} кВт⋅ч</span>
-                )}
-              </div>
+      {/* Initial / Live SOC — intentionally high in the HUD so the driver cannot miss it */}
+      <div className={`rounded-2xl border p-3 sm:p-3.5 mb-2.5 ${
+        isDark ? 'bg-slate-900/95 border-slate-700/90' : 'bg-white border-slate-200 shadow-xs'
+      }`}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className={`text-[11px] font-extrabold tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+              {isTracking ? 'ТЕКУЩИЙ ЗАРЯД' : 'SOC НА СТАРТЕ ПОЕЗДКИ'}
             </div>
-
-            {/* Battery Progress Bar */}
-            <div className={`w-full h-2 rounded-full overflow-hidden ${
-              isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-200 border border-slate-300'
+            <div className={`font-mono font-black text-3xl leading-none mt-1 ${
+              liveDynamicSoc < 20 ? 'text-rose-500' : liveDynamicSoc < 40 ? 'text-amber-500' : isDark ? 'text-emerald-400' : 'text-emerald-600'
             }`}>
-              <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  liveDynamicSoc < 20
-                    ? 'bg-rose-500'
-                    : liveDynamicSoc < 40
-                    ? 'bg-amber-500'
-                    : 'bg-emerald-500'
-                }`}
-                style={{ width: `${Math.min(100, Math.max(0, liveDynamicSoc))}%` }}
-              />
+              {isTracking ? liveDynamicSoc : startTripSoc}%
             </div>
-
-            {/* Precise Initial SoC Setup with 1% Precision (Sliders, Steppers & Direct Input) */}
-            {!isTracking ? (
-              <div className="space-y-2 pt-0.5">
-                {/* Steppers + Numerical input + Range slider */}
-                <div className="flex items-center gap-1.5">
-                  {/* -5% and -1% buttons */}
-                  <button
-                    onClick={() => {
-                      triggerHaptic('light', settings.hapticFeedback);
-                      setStartTripSoc((prev) => Math.max(1, prev - 5));
-                    }}
-                    className={`text-[11px] px-1.5 py-1 rounded-lg font-mono font-bold border shrink-0 transition-all ${
-                      isDark ? 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                    title="Уменьшить на 5%"
-                  >
-                    -5%
-                  </button>
-                  <button
-                    onClick={() => {
-                      triggerHaptic('light', settings.hapticFeedback);
-                      setStartTripSoc((prev) => Math.max(1, prev - 1));
-                    }}
-                    className={`p-1 rounded-lg border shrink-0 transition-all ${
-                      isDark ? 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                    title="Уменьшить на 1%"
-                  >
-                    <Minus className="w-3.5 h-3.5" />
-                  </button>
-
-                  {/* 1% Precision Range Slider */}
-                  <input
-                    type="range"
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={startTripSoc}
-                    onChange={(e) => {
-                      setStartTripSoc(Number(e.target.value));
-                      triggerHaptic('light', settings.hapticFeedback);
-                    }}
-                    className="flex-1 accent-emerald-500 h-1.5 rounded-lg cursor-pointer min-w-[70px]"
-                  />
-
-                  {/* +1% and +5% buttons */}
-                  <button
-                    onClick={() => {
-                      triggerHaptic('light', settings.hapticFeedback);
-                      setStartTripSoc((prev) => Math.min(100, prev + 1));
-                    }}
-                    className={`p-1 rounded-lg border shrink-0 transition-all ${
-                      isDark ? 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                    title="Увеличить на 1%"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      triggerHaptic('light', settings.hapticFeedback);
-                      setStartTripSoc((prev) => Math.min(100, prev + 5));
-                    }}
-                    className={`text-[11px] px-1.5 py-1 rounded-lg font-mono font-bold border shrink-0 transition-all ${
-                      isDark ? 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                    title="Увеличить на 5%"
-                  >
-                    +5%
-                  </button>
-
-                  {/* Direct Exact Number Input with 1% Precision */}
-                  <div className="relative w-14 shrink-0">
-                    <input
-                      type="number"
-                      min={1}
-                      max={100}
-                      step={1}
-                      value={startTripSoc}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        if (!isNaN(val)) {
-                          setStartTripSoc(Math.min(100, Math.max(1, val)));
-                        }
-                      }}
-                      className={`w-full text-center text-xs font-mono font-bold py-1 px-1 rounded-lg border focus:outline-hidden focus:ring-1 focus:ring-emerald-500 ${
-                        isDark ? 'bg-slate-950 text-emerald-400 border-slate-800' : 'bg-white text-emerald-700 border-slate-300'
-                      }`}
-                    />
-                    <span className={`absolute right-1 top-1 text-[10px] pointer-events-none ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>%</span>
-                  </div>
-                </div>
-
-                {/* Fast Presets */}
-                <div className="flex items-center justify-between gap-1 pt-0.5">
-                  <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Пресеты:</span>
-                  <div className="flex gap-1">
-                    {[50, 70, 80, 90, 100].map((val) => (
-                      <button
-                        key={val}
-                        onClick={() => {
-                          triggerHaptic('light', settings.hapticFeedback);
-                          setStartTripSoc(val);
-                        }}
-                        className={`text-[10px] px-2 py-0.5 rounded-md font-mono font-bold border transition-all ${
-                          startTripSoc === val
-                            ? isDark
-                              ? 'bg-emerald-950 text-emerald-300 border-emerald-600'
-                              : 'bg-emerald-50 text-emerald-800 border-emerald-400 shadow-2xs'
-                            : isDark
-                            ? 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
-                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        {val}%
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* Live Trip In-flight SoC Calibration */
-              <div className="flex items-center justify-between text-[11px] pt-1">
-                <span className="flex items-center gap-1 text-emerald-500 font-semibold text-[10px]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Учет расхода в пути
-                </span>
-
-                {/* Inline 1% calibration steppers without blocking popups */}
-                <div className="flex items-center gap-1">
-                  <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Корр. SoC:</span>
-                  <button
-                    onClick={() => {
-                      triggerHaptic('light', settings.hapticFeedback);
-                      setStartTripSoc((prev) => Math.max(1, prev - 1));
-                    }}
-                    className={`p-1 rounded-md border text-xs ${
-                      isDark ? 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                    title="Уменьшить заряд на 1%"
-                  >
-                    <Minus className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      triggerHaptic('light', settings.hapticFeedback);
-                      setStartTripSoc((prev) => Math.min(100, prev + 1));
-                    }}
-                    className={`p-1 rounded-md border text-xs ${
-                      isDark ? 'bg-slate-950 text-slate-300 border-slate-800 hover:bg-slate-800' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                    title="Увеличить заряд на 1%"
-                  >
-                    <Plus className="w-3 h-3" />
-                  </button>
-                </div>
+            {isTracking && tripDistanceKm > 0 && (
+              <div className={`text-[10px] mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Старт: {startTripSoc}% · потрачено {energySpentKwh.toFixed(2)} кВт⋅ч
               </div>
             )}
           </div>
+
+          {!isTracking && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartTripSoc(prev => Math.max(1, prev - 10)); }}
+                className={`px-2 py-1.5 rounded-lg border text-xs font-bold ${isDark ? 'bg-slate-950 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-slate-200'}`}
+                title="Уменьшить на 10%"
+              >−10%</button>
+              <button
+                onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartTripSoc(prev => Math.max(1, prev - 1)); }}
+                className={`p-1.5 rounded-lg border ${isDark ? 'bg-slate-950 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-slate-200'}`}
+                title="Уменьшить на 1%"
+              ><Minus className="w-3.5 h-3.5" /></button>
+              <button
+                onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartTripSoc(prev => Math.min(100, prev + 1)); }}
+                className={`p-1.5 rounded-lg border ${isDark ? 'bg-slate-950 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-slate-200'}`}
+                title="Увеличить на 1%"
+              ><Plus className="w-3.5 h-3.5" /></button>
+              <button
+                onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartTripSoc(prev => Math.min(100, prev + 10)); }}
+                className={`px-2 py-1.5 rounded-lg border text-xs font-bold ${isDark ? 'bg-slate-950 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-slate-200'}`}
+                title="Увеличить на 10%"
+              >+10%</button>
+            </div>
+          )}
+        </div>
+
+        <div className={`w-full h-2 rounded-full overflow-hidden mt-2 ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-200 border border-slate-300'}`}>
+          <div
+            className={`h-full rounded-full transition-all duration-300 ${liveDynamicSoc < 20 ? 'bg-rose-500' : liveDynamicSoc < 40 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+            style={{ width: `${Math.min(100, Math.max(0, isTracking ? liveDynamicSoc : startTripSoc))}%` }}
+          />
+        </div>
+      </div>
 
       {/* Primary Live Consumption Action */}
       <div className={`rounded-2xl border p-2.5 ${
@@ -2446,6 +2289,7 @@ export const HudTab: React.FC<HudTabProps> = ({
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 };
