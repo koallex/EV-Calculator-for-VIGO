@@ -137,6 +137,15 @@ export const HudTab: React.FC<HudTabProps> = ({
     speedImpactPct?: number;
     driverStyleFactor?: number;
     breakdown?: any;
+    // Live in-trip recalculation support (address mode only — distance mode has no coordinates
+    // to re-measure from). originCoords + routeTortuosity let remaining distance be re-estimated
+    // from the current GPS fix via straight-line distance, without re-fetching the route/weather
+    // on every position update.
+    destCoords?: { lat: number; lon: number };
+    originCoords?: { lat: number; lon: number };
+    routeTortuosity?: number;
+    energyPerKm?: number;
+    isLive?: boolean;
   } | null>(null);
 
   // Weather data fetched via GPS coordinates
@@ -1113,6 +1122,8 @@ export const HudTab: React.FC<HudTabProps> = ({
       const destForecast = estimateTripConsumption(destinationSpeedKmH, calcTemperature, sessions, settings.batteryCapacityKwh, climateOn, segmented.avgWindSpeed, calcRelativeWindAngle, isTracking ? currentTripStyle.factor : undefined, calcWeatherCode, segmented.avgPrecipitation, { gainM, lossM, distanceKm: route.distanceKm }, segmented.durationHours, segmented.climatePowerKw, passengers);
       const energyNeededKwh = segmented.energyKwh;
       const predictedSoc = Math.max(0, Number((liveDynamicSoc - (energyNeededKwh / batteryCap) * 100).toFixed(1)));
+      const originStraightKm = Math.max(0.1, calculateDistance(prevPositionRef.current.lat, prevPositionRef.current.lon, geo.lat, geo.lon));
+      const routeTortuosity = Math.min(3, Math.max(1, route.distanceKm / originStraightKm));
 
       setDestinationResult({
         name: geo.displayName.split(',').slice(0, 3).join(','),
@@ -1142,6 +1153,11 @@ export const HudTab: React.FC<HudTabProps> = ({
         speedImpactPct: destForecast.speedImpactPct,
         driverStyleFactor: destForecast.driverStyleFactor,
         breakdown: segmented,
+        destCoords: { lat: geo.lat, lon: geo.lon },
+        originCoords: { lat: prevPositionRef.current.lat, lon: prevPositionRef.current.lon },
+        routeTortuosity,
+        energyPerKm: route.distanceKm > 0 ? energyNeededKwh / route.distanceKm : undefined,
+        isLive: isTracking,
       });
     } catch (e) {
       // geocodeAddress / buildRouteElevation throw with a specific, user-readable message
@@ -1153,6 +1169,40 @@ export const HudTab: React.FC<HudTabProps> = ({
       setDestinationBusy(false);
     }
   };
+
+  // Live recalculation of "% at arrival" while tracking. Runs off tripDistanceKm (already updates
+  // on every accepted GPS fix) instead of position state directly, since position itself only
+  // lives in a ref. Deliberately does NOT re-run geocoding / route-building / weather-along-route —
+  // those are the expensive network calls handleCalculateDestination already paid for once. It
+  // only re-measures straight-line distance to the pinned destination and scales it by the
+  // route's curviness ratio captured at calc time, which is enough to keep the remaining-distance
+  // (and therefore predicted SoC) honest as you actually drive, at effectively zero cost per tick.
+  useEffect(() => {
+    if (!isTracking || !destinationResult || destinationResult.approximate) return;
+    const { destCoords, originCoords, routeTortuosity, energyPerKm } = destinationResult;
+    if (!destCoords || !originCoords || !routeTortuosity || energyPerKm === undefined) return;
+    const pos = prevPositionRef.current;
+    if (!pos) return;
+
+    const straightNowKm = calculateDistance(pos.lat, pos.lon, destCoords.lat, destCoords.lon);
+    const remainingKm = Math.max(0, straightNowKm * routeTortuosity);
+    const newPredictedSoc = Math.max(0, Math.min(100, Number((liveDynamicSoc - (remainingKm * energyPerKm / batteryCap) * 100).toFixed(1))));
+    const liveAvgSpeed = avgTripSpeedKmH > 3 ? avgTripSpeedKmH : undefined;
+    const newEtaMinutes = liveAvgSpeed ? Math.round((remainingKm / liveAvgSpeed) * 60) : undefined;
+    const arrivalDate = new Date(Date.now() + (newEtaMinutes ?? 0) * 60000);
+
+    setDestinationResult(prev => prev ? {
+      ...prev,
+      distanceKm: Number(remainingKm.toFixed(1)),
+      predictedSoc: newPredictedSoc,
+      etaMinutes: newEtaMinutes,
+      arrivalTimeLabel: newEtaMinutes
+        ? arrivalDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+        : prev.arrivalTimeLabel,
+      isLive: true,
+    } : prev);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripDistanceKm, isTracking]);
 
   return (
     <div
@@ -2062,11 +2112,11 @@ export const HudTab: React.FC<HudTabProps> = ({
               </button>
             </div>
 
-            <div className="flex items-baseline gap-2 mb-2">
+            <div className="flex items-baseline gap-2 mb-2 flex-wrap">
               <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 Прогноз заряда по прибытии:
               </span>
-              <span className={`text-2xl font-black font-mono ${
+              <span className={`text-4xl font-black font-mono tracking-tight ${
                 destinationResult.predictedSoc < 10
                   ? 'text-rose-500'
                   : destinationResult.predictedSoc < 20
@@ -2075,6 +2125,14 @@ export const HudTab: React.FC<HudTabProps> = ({
               }`}>
                 {destinationResult.predictedSoc}%
               </span>
+              {destinationResult.isLive && (
+                <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                  isDark ? 'bg-emerald-950/70 text-emerald-400' : 'bg-emerald-50 text-emerald-700'
+                }`}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  live
+                </span>
+              )}
             </div>
 
             {destinationResult.predictedSoc <= 0 && (
@@ -2087,7 +2145,7 @@ export const HudTab: React.FC<HudTabProps> = ({
 
             <div className="grid grid-cols-2 gap-2 text-[11px]">
               <div>
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Дистанция</span>
+                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{destinationResult.isLive ? 'Осталось' : 'Дистанция'}</span>
                 <span className={`font-mono font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{destinationResult.distanceKm} км</span>
               </div>
               <div>
