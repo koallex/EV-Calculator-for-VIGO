@@ -103,11 +103,13 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [routeForecast, setRouteForecast] = useState<{ consumption:number; energyKwh:number; arrivalSoc:number; windLabel:string; weatherLabel:string; precipitationLabel:string; relativeWindAngle:number; driverStyleFactor:number; driverStyleSource:string; climateLabel:string; climateImpactPct:number; climateDeltaKwh100:number; speedImpactPct:number; breakdown?: any } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<'searching' | 'ok' | 'error'>('searching');
   const [quickWeather, setQuickWeather] = useState<{ temperature:number; weatherCode:number; windSpeed:number } | null>(null);
-  const [routeMapOpen, setRouteMapOpen] = useState(true);
+  const [routeMapOpen, setRouteMapOpen] = useState(false);
   const [elevationOpen, setElevationOpen] = useState(false);
-  const [consumptionOpen, setConsumptionOpen] = useState(false);
-  const [speedProfileOpen, setSpeedProfileOpen] = useState(true);
+  const [consumptionOpen, setConsumptionOpen] = useState(true);
+  const [speedProfileOpen, setSpeedProfileOpen] = useState(false);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
+  /** Reserve SoC kept as safety buffer when interpreting arrival forecast */
+  const ARRIVAL_RESERVE_SOC = 10;
 
   const weatherIcon = (code: number, className = 'w-4 h-4') => {
     if ([71,73,75,77,85,86].includes(code)) return <CloudSnow className={className} />;
@@ -273,7 +275,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       const displayWeather = weatherMode === 'current' && samples.length ? samples[Math.min(samples.length - 1, Math.floor(samples.length / 2))].weather : { temperature: avgTemperature, windSpeed: avgWindSpeed, windDirection: manualWindDirection, weatherCode: avgWeatherCode, precipitation: avgPrecipitation };
       setRouteWeather({ ...displayWeather, temperature:Math.round(avgTemperature), windSpeed:Math.round(avgWindSpeed), precipitation:Number(avgPrecipitation.toFixed(1)), routeBearing, etaMinutes, arrivalDate, samples });
       setRouteForecast({consumption:Number((energyKwh/data.distanceKm*100).toFixed(2)),energyKwh:Number(energyKwh.toFixed(2)),arrivalSoc,windLabel:segmentedForecast.windStatusText || `Ветер ~${Math.round(segmented.avgWindSpeed)} км/ч`,weatherLabel:`${Math.round(segmented.avgTemperature)>=0?'+':''}${Math.round(segmented.avgTemperature)}°C`,precipitationLabel:segmentedForecast.precipitationLabel||'Без существенных осадков',relativeWindAngle:avgRelativeWindAngle,driverStyleFactor:segmentedForecast.driverStyleFactor,driverStyleSource:getDriverStyleSourceLabel(segmentedForecast.dataSource),climateLabel:segmentedForecast.climateLabel || `Климат · ${segmented.climatePowerKw.toFixed(1)} кВт`,climateImpactPct:segmentedForecast.climateImpactPct || 0,climateDeltaKwh100:Number((segmented.climateEnergyKwh/data.distanceKm*100).toFixed(2)),climatePowerKw:segmented.climatePowerKw,speedImpactPct:segmentedForecast.speedImpactPct,breakdown:segmented});
-      setEndSoc(arrivalSoc); setRouteStatus('Готово');
+      setEndSoc(arrivalSoc);
+      setConsumptionOpen(true);
+      setRouteStatus('Готово');
     } catch (e) {
       const msg=e instanceof Error?e.message:'Ошибка расчёта маршрута';
       setRouteError(/denied|permission/i.test(msg)?'Разрешите доступ к геопозиции или выберите адрес точки А':msg); setRouteStatus('');
@@ -503,6 +507,49 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       {calculatorMode === 'route' && (
         <>
 
+      {/* Compact result strip — always visible at top once a route is calculated */}
+      {routeForecast && (
+        <section
+          className={`rounded-2xl border px-3.5 py-3 ${
+            isDark ? 'bg-emerald-950/40 border-emerald-800/60' : 'bg-emerald-50 border-emerald-200'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-emerald-300/80' : 'text-emerald-700'}`}>
+                SOC на финише
+              </div>
+              <div className="flex items-baseline gap-2 mt-0.5">
+                <span
+                  className={`text-3xl font-black font-mono tabular-nums ${
+                    routeForecast.arrivalSoc >= 20 + ARRIVAL_RESERVE_SOC
+                      ? isDark ? 'text-emerald-400' : 'text-emerald-600'
+                      : routeForecast.arrivalSoc >= ARRIVAL_RESERVE_SOC
+                      ? 'text-amber-500'
+                      : 'text-rose-500'
+                  }`}
+                >
+                  {routeForecast.arrivalSoc}%
+                </span>
+                <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  после резерва {ARRIVAL_RESERVE_SOC}% → {Math.max(0, Number((routeForecast.arrivalSoc - ARRIVAL_RESERVE_SOC).toFixed(1)))}%
+                </span>
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className={`text-sm font-bold font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {routeForecast.consumption.toFixed(1)} <span className="text-[10px] font-semibold text-slate-500">кВт⋅ч/100</span>
+              </div>
+              <div className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                {routeForecast.energyKwh.toFixed(1)} кВт⋅ч
+                {routeElevation ? ` · ${routeElevation.distanceKm} км` : ''}
+                {routeWeather?.etaMinutes != null ? ` · ~${routeWeather.etaMinutes} мин` : ''}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Route elevation profile */}
       <section className={`calculator-route rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center gap-2">
@@ -569,27 +616,80 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
         {routeElevation && (
           <>
-            {routeForecast && (
+            {routeForecast && (() => {
+              const arrival = routeForecast.arrivalSoc;
+              const afterReserve = Math.max(0, Number((arrival - ARRIVAL_RESERVE_SOC).toFixed(1)));
+              const statusTone =
+                arrival >= 20 + ARRIVAL_RESERVE_SOC
+                  ? 'good'
+                  : arrival >= ARRIVAL_RESERVE_SOC
+                  ? 'ok'
+                  : 'low';
+              const statusText =
+                statusTone === 'good'
+                  ? `✓ Доедете с запасом (резерв ${ARRIVAL_RESERVE_SOC}%)`
+                  : statusTone === 'ok'
+                  ? `⚠ Прибытие ~${arrival}% · после резерва ${ARRIVAL_RESERVE_SOC}% останется ~${afterReserve}%`
+                  : startSoc >= 99
+                  ? '⚠ Потребуется зарядка в пути'
+                  : '⚠ Недостаточно заряда — зарядка до поездки или в пути';
+              const statusColor =
+                statusTone === 'good'
+                  ? isDark
+                    ? 'text-emerald-400'
+                    : 'text-emerald-600'
+                  : statusTone === 'ok'
+                  ? 'text-amber-500'
+                  : 'text-rose-500';
+              return (
               <div className={`rounded-2xl border p-4 ${isDark ? 'bg-slate-950/70 border-emerald-900/60' : 'bg-emerald-50/60 border-emerald-200'}`}>
                 <div className="text-center">
-                  <div className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Прогноз прибытия</div>
-                  <div className={`mt-1 text-5xl font-black font-mono ${routeForecast.arrivalSoc >= 20 ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : routeForecast.arrivalSoc >= 10 ? 'text-amber-500' : 'text-rose-500'}`}>{routeForecast.arrivalSoc}%</div>
-                  <div className={`mt-1 text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{routeForecast.arrivalSoc >= 20 ? '✓ Доедете с хорошим запасом' : routeForecast.arrivalSoc >= 10 ? '⚠ Небольшой запас по прибытию' : startSoc >= 99 ? '⚠ Потребуется зарядка в пути' : '⚠ Недостаточно заряда — потребуется зарядка перед поездкой или в пути'}</div>
+                  <div className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>SOC на финише</div>
+                  <div className={`mt-1 text-5xl font-black font-mono ${statusColor}`}>{arrival}%</div>
+                  <div className={`mt-1 text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{statusText}</div>
                 </div>
-                <div className={`mt-4 h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}><div className="h-full rounded-full bg-emerald-500 transition-all duration-300" style={{ width: `${Math.min(100, Math.max(0, routeForecast.arrivalSoc))}%` }} /></div>
-                <div className="mt-2 flex justify-between text-[10px] text-slate-500"><span>0%</span><span>Старт {startSoc}%</span><span>100%</span></div>
-                <SecondaryStatRow
-                  isDark={isDark}
-                  className="mt-4"
-                  items={[
-                    { label: 'кВт⋅ч/100 км', value: routeForecast.consumption.toFixed(1) },
-                    { label: 'кВт⋅ч всего', value: routeForecast.energyKwh.toFixed(2) },
-                  ]}
-                />
+
+                {/* Dual bar: arrival SoC + reserved band */}
+                <div className={`mt-4 h-3 rounded-full overflow-hidden relative ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${statusTone === 'good' ? 'bg-emerald-500' : statusTone === 'ok' ? 'bg-amber-500' : 'bg-rose-500'}`}
+                    style={{ width: `${Math.min(100, Math.max(0, arrival))}%` }}
+                  />
+                  <div
+                    className="absolute top-0 bottom-0 w-0.5 bg-white/80"
+                    style={{ left: `${ARRIVAL_RESERVE_SOC}%` }}
+                    title={`Резерв ${ARRIVAL_RESERVE_SOC}%`}
+                  />
+                </div>
+                <div className="mt-2 flex justify-between text-[10px] text-slate-500">
+                  <span>0%</span>
+                  <span>резерв {ARRIVAL_RESERVE_SOC}%</span>
+                  <span>старт {startSoc}%</span>
+                  <span>100%</span>
+                </div>
+
+                <div className={`mt-3 grid grid-cols-3 gap-2 text-center`}>
+                  <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-900/80' : 'bg-white/80'}`}>
+                    <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Расход</div>
+                    <div className="text-sm font-black font-mono">{routeForecast.consumption.toFixed(1)}</div>
+                    <div className="text-[10px] text-slate-500">кВт⋅ч/100</div>
+                  </div>
+                  <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-900/80' : 'bg-white/80'}`}>
+                    <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Всего</div>
+                    <div className="text-sm font-black font-mono">{routeForecast.energyKwh.toFixed(1)}</div>
+                    <div className="text-[10px] text-slate-500">кВт⋅ч</div>
+                  </div>
+                  <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-900/80' : 'bg-white/80'}`}>
+                    <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>После резерва</div>
+                    <div className={`text-sm font-black font-mono ${afterReserve < 5 ? 'text-rose-500' : ''}`}>{afterReserve}%</div>
+                    <div className="text-[10px] text-slate-500">запас {ARRIVAL_RESERVE_SOC}%</div>
+                  </div>
+                </div>
+
                 {routeWeather && (
                   <ChipRow
                     isDark={isDark}
-                    className="mt-2 justify-center"
+                    className="mt-3 justify-center"
                     items={[
                       {
                         label: (
@@ -617,7 +717,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   />
                 )}
               </div>
-            )}
+              );
+            })()}
 
             {routeForecast?.breakdown && (
               <CollapsibleDetails
@@ -628,8 +729,43 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 className="mt-3"
               >
                 <div className={`rounded-xl border p-3 space-y-2 text-xs ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                  {[['Базовое движение',routeForecast.breakdown.baseEnergyKwh],['Температура',routeForecast.breakdown.temperatureDeltaKwh],['Ветер',routeForecast.breakdown.windDeltaKwh],['Осадки / дорога',routeForecast.breakdown.precipitationDeltaKwh],['Стиль',routeForecast.breakdown.driverDeltaKwh],['Рельеф',routeForecast.breakdown.elevationDeltaKwh],['Климат',routeForecast.breakdown.climateEnergyKwh]].map(([label,value]) => <div key={String(label)} className="flex justify-between gap-3"><span>{label}</span><b>{Number(value)>=0?'+':''}{Number(value).toFixed(2)} кВт⋅ч</b></div>)}
-                  <div className="pt-2 border-t border-slate-700/30 flex justify-between font-bold"><span>Сегментов</span><span>{routeForecast.breakdown.segments}</span></div>
+                  {([
+                    ['Базовое движение', routeForecast.breakdown.baseEnergyKwh],
+                    ['Температура', routeForecast.breakdown.temperatureDeltaKwh],
+                    ['Ветер', routeForecast.breakdown.windDeltaKwh],
+                    ['Осадки / дорога', routeForecast.breakdown.precipitationDeltaKwh],
+                    ['Стиль', routeForecast.breakdown.driverDeltaKwh],
+                    ['Рельеф', routeForecast.breakdown.elevationDeltaKwh],
+                    ['Климат', routeForecast.breakdown.climateEnergyKwh],
+                  ] as Array<[string, number]>).map(([label, value]) => {
+                    const kwh = Number(value) || 0;
+                    const pct = routeForecast.energyKwh > 0.01
+                      ? (kwh / routeForecast.energyKwh) * 100
+                      : 0;
+                    return (
+                      <div key={label} className="space-y-1">
+                        <div className="flex justify-between gap-3">
+                          <span>{label}</span>
+                          <b className="tabular-nums whitespace-nowrap">
+                            {kwh >= 0 ? '+' : ''}{kwh.toFixed(2)} кВт⋅ч
+                            <span className={`ml-1.5 font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                              ({pct >= 0 ? '+' : ''}{pct.toFixed(0)}%)
+                            </span>
+                          </b>
+                        </div>
+                        <div className={`h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                          <div
+                            className={`h-full rounded-full ${kwh >= 0 ? 'bg-amber-500/80' : 'bg-cyan-500/80'}`}
+                            style={{ width: `${Math.min(100, Math.abs(pct))}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="pt-2 border-t border-slate-700/30 flex justify-between font-bold">
+                    <span>Итого / сегментов</span>
+                    <span>{routeForecast.energyKwh.toFixed(2)} кВт⋅ч · {routeForecast.breakdown.segments}</span>
+                  </div>
                 </div>
               </CollapsibleDetails>
             )}
