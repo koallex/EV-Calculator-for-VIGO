@@ -7,6 +7,7 @@ import {
   Percent,
 } from 'lucide-react';
 import { UserSettings } from '../types';
+import { getOperatorLabel } from '../utils/storage';
 import { BatteryVisual } from './BatteryVisual';
 import { DecimalInput } from './DecimalInput';
 import { triggerHaptic } from '../utils/haptics';
@@ -587,7 +588,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
             }`}
           >
-            <span className="text-xs font-semibold block">⚡ Маланка DC</span>
+            <span className="text-xs font-semibold block">⚡ {getOperatorLabel('malanka_dc', settings.regionPreset)}</span>
             <span className={`text-sm font-bold font-mono ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
               {settings.malankaDcTariff ?? settings.fastDayTariff} {settings.currency}
             </span>
@@ -610,7 +611,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
             }`}
           >
-            <span className="text-xs font-semibold block">🔌 AC / Evika</span>
+            <span className="text-xs font-semibold block">🔌 {getOperatorLabel('evika', settings.regionPreset)}</span>
             <span className={`text-sm font-bold font-mono ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>
               {settings.evikaTariff ?? settings.slowPublicTariff} {settings.currency}
             </span>
@@ -633,7 +634,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
             }`}
           >
-            <span className="text-xs font-semibold block">🔋 BatteryFly</span>
+            <span className="text-xs font-semibold block">🔋 {getOperatorLabel('batteryfly', settings.regionPreset)}</span>
             <span className={`text-sm font-bold font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
               {settings.batteryFlyTariff ?? 0.6} {settings.currency}
             </span>
@@ -656,7 +657,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
             }`}
           >
-            <span className="text-xs font-semibold block">☀️ Зарядка День</span>
+            <span className="text-xs font-semibold block">☀️ {getOperatorLabel('zaryadka_day', settings.regionPreset)}</span>
             <span className={`text-sm font-bold font-mono ${isDark ? 'text-orange-400' : 'text-orange-600'}`}>
               {settings.zaryadkaDayTariff ?? settings.zaryadkaTariff ?? settings.zaryadkaDcTariff ?? 0.56} {settings.currency}
             </span>
@@ -679,7 +680,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
             }`}
           >
-            <span className="text-xs font-semibold block">🌙 Зарядка Ночь</span>
+            <span className="text-xs font-semibold block">🌙 {getOperatorLabel('zaryadka_night', settings.regionPreset)}</span>
             <span className={`text-sm font-bold font-mono ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
               {settings.zaryadkaNightTariff ?? 0.43} {settings.currency}
             </span>

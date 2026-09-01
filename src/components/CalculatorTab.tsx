@@ -25,7 +25,7 @@ import {
 import { UserSettings, RoadType, TripSession } from '../types';
 import { BatteryVisual } from './BatteryVisual';
 import { DecimalInput } from './DecimalInput';
-import { getTariffForType, estimateTripConsumption, estimateSegmentedRouteConsumption, calculateClimateImpact } from '../utils/storage';
+import { getTariffForType, getOperatorLabel, estimateTripConsumption, estimateSegmentedRouteConsumption, calculateClimateImpact } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
 import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
@@ -1183,7 +1183,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              ⚡ Маланка DC
+              ⚡ {getOperatorLabel('malanka_dc', settings.regionPreset)}
             </button>
 
             <button
@@ -1201,7 +1201,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              🔌 AC / Evika
+              🔌 {getOperatorLabel('evika', settings.regionPreset)}
             </button>
 
             <button
@@ -1219,7 +1219,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              ☀️ Зарядка День
+              ☀️ {getOperatorLabel('zaryadka_day', settings.regionPreset)}
             </button>
 
             <button
@@ -1237,7 +1237,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              🌙 Зарядка Ночь
+              🌙 {getOperatorLabel('zaryadka_night', settings.regionPreset)}
             </button>
 
             <button
@@ -1255,7 +1255,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              🔋 BatteryFly
+              🔋 {getOperatorLabel('batteryfly', settings.regionPreset)}
             </button>
 
             <button

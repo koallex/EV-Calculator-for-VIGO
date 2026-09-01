@@ -16,6 +16,7 @@ import { UserSettings, TripSession } from '../types';
 import {
   DEFAULT_SETTINGS,
   REGION_PRESETS,
+  getOperatorLabel,
   exportBackupJSON,
   exportSessionsCSV,
 } from '../utils/storage';
@@ -111,11 +112,63 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           </h2>
         </div>
         <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-          Гибкая настройка стоимости зарядки операторов (Маланка, Evika, BatteryFly, домашний тариф) и параметров автомобиля.
+          Регион, валюта, тарифы операторов ЭЗС и параметры автомобиля.
         </p>
       </div>
 
       <form onSubmit={handleSave} className="space-y-4">
+        {/* 0. Region preset */}
+        <div
+          className={`border rounded-2xl p-4 space-y-3 transition-colors ${
+            isDark
+              ? 'bg-slate-900/60 border-slate-800/80'
+              : 'bg-white border-slate-200/80 shadow-xs'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <MapPin className={`w-4 h-4 ${isDark ? 'text-sky-400' : 'text-sky-600'}`} />
+            <h3
+              className={`text-xs font-bold uppercase tracking-wider ${
+                isDark ? 'text-slate-300' : 'text-slate-700'
+              }`}
+            >
+              Регион
+            </h3>
+          </div>
+          <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            При смене региона автоматически подставляются валюта, тарифы и названия операторов ЭЗС.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { key: 'belarus' as const, label: '🇧🇾 Беларусь', sub: 'Br · Маланка, Evika…' },
+              { key: 'russia' as const, label: '🇷🇺 Россия', sub: '₽ · Punkt E, Россети…' },
+            ]).map((r) => {
+              const active = (form.regionPreset ?? 'belarus') === r.key;
+              return (
+                <button
+                  key={r.key}
+                  type="button"
+                  onClick={() => applyRegionPreset(r.key)}
+                  className={`rounded-xl border px-3 py-2.5 text-left transition-all ${
+                    active
+                      ? isDark
+                        ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300'
+                        : 'bg-emerald-50 border-emerald-400 text-emerald-800'
+                      : isDark
+                      ? 'bg-slate-950/50 border-slate-800 text-slate-300 hover:border-slate-600'
+                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300'
+                  }`}
+                >
+                  <span className="block text-sm font-bold">{r.label}</span>
+                  <span className={`block text-[10px] mt-0.5 ${active ? '' : isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    {r.sub}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* 1. Electricity Tariffs Breakdown */}
         <div
           className={`border rounded-2xl p-4 space-y-3 transition-colors ${
@@ -139,7 +192,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {/* Malanka DC */}
+            {/* Malanka DC / Punkt E */}
             <div
               className={`space-y-1 p-2.5 rounded-xl border ${
                 isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
@@ -147,7 +200,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             >
               <div className="flex items-center justify-between">
                 <label className={`text-xs font-semibold ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
-                  ⚡ Маланка DC (быстрая)
+                  ⚡ {getOperatorLabel('malanka_dc', form.regionPreset)}
                 </label>
                 <span className="text-[10px] text-slate-400">DC 50-160 кВт</span>
               </div>
@@ -173,7 +226,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             >
               <div className="flex items-center justify-between">
                 <label className={`text-xs font-semibold ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
-                  🔌 Маланка AC (медленная)
+                  🔌 {getOperatorLabel('malanka_ac', form.regionPreset)}
                 </label>
                 <span className="text-[10px] text-slate-400">AC до 22 кВт</span>
               </div>
@@ -199,7 +252,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             >
               <div className="flex items-center justify-between">
                 <label className={`text-xs font-semibold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
-                  🔌 Evika (Белтелеком)
+                  🔌 {getOperatorLabel('evika', form.regionPreset)}
                 </label>
                 <span className="text-[10px] text-slate-400">AC станция</span>
               </div>
@@ -223,7 +276,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             >
               <div className="flex items-center justify-between">
                 <label className={`text-xs font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
-                  🔋 BatteryFly / Forpost
+                  🔋 {getOperatorLabel('batteryfly', form.regionPreset)}
                 </label>
                 <span className="text-[10px] text-slate-400">Коммерческая</span>
               </div>
@@ -247,7 +300,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             >
               <div className="flex items-center justify-between">
                 <label className={`text-xs font-semibold ${isDark ? 'text-orange-300' : 'text-orange-700'}`}>
-                  ☀️ Zaryadka (День)
+                  ☀️ {getOperatorLabel('zaryadka_day', form.regionPreset)}
                 </label>
                 <span className="text-[10px] text-slate-400">Дневной тариф</span>
               </div>
@@ -271,7 +324,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             >
               <div className="flex items-center justify-between">
                 <label className={`text-xs font-semibold ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
-                  🌙 Zaryadka (Ночь)
+                  🌙 {getOperatorLabel('zaryadka_night', form.regionPreset)}
                 </label>
                 <span className="text-[10px] text-slate-400">Ночной льготный</span>
               </div>

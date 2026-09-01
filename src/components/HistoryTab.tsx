@@ -37,7 +37,7 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { TripSession, UserSettings, RoadType } from '../types';
-import { exportBackupJSON, exportSessionsCSV, calculateHistoricalDriverStyle, deriveDrivingStyleFactor, getDrivingStyleLabel } from '../utils/storage';
+import { exportBackupJSON, exportSessionsCSV, calculateHistoricalDriverStyle, deriveDrivingStyleFactor, getDrivingStyleLabel, getOperatorLabel } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
 
 interface HistoryTabProps {
@@ -192,38 +192,37 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   };
 
   const getChargingTypeLabel = (type: TripSession['chargingType']) => {
+    const region = settings.regionPreset;
+    const label = getOperatorLabel(type, region);
+    // Keep a few special icons/prefixes for common types
     switch (type) {
       case 'malanka_dc':
-        return '⚡ Маланка DC';
-      case 'malanka_ac':
-        return '🔌 Маланка AC';
-      case 'evika':
-        return '🔌 Evika AC';
-      case 'batteryfly':
-        return '🔋 BatteryFly';
-      case 'zaryadka':
-      case 'zaryadka_dc':
-        return '⚡ Зарядка DC';
-      case 'zaryadka_ac':
-        return '🔌 Зарядка AC';
       case 'fast_day':
       case 'fast_dc':
-        return '☀️ Быстрая (День)';
-      case 'fast_night':
-        return '🌙 Быстрая (Ночь)';
-      case 'home_night':
-        return '🌙 Дом (Ночь)';
+      case 'zaryadka_dc':
+        return `⚡ ${label}`;
+      case 'malanka_ac':
+      case 'evika':
+      case 'zaryadka_ac':
       case 'slow_public':
-        return '⚡ Медленная ЭЗС';
+        return `🔌 ${label}`;
+      case 'batteryfly':
+        return `🔋 ${label}`;
+      case 'zaryadka_day':
+        return `☀️ ${label}`;
+      case 'zaryadka_night':
+      case 'fast_night':
+      case 'home_night':
+        return `🌙 ${label}`;
       case 'home':
       case 'home_day':
-        return '🏠 Домашняя';
+        return `🏠 ${label}`;
       case 'free':
-        return '🎁 Бесплатно';
+        return `🎁 ${label}`;
       case 'custom':
-        return '✏️ Свой тариф';
+        return `✏️ ${label}`;
       default:
-        return '⚡ ЭЗС';
+        return label || '⚡ ЭЗС';
     }
   };
 

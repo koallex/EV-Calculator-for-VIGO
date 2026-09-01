@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { TripSession, UserSettings, RoadType } from '../types';
 import { DecimalInput } from './DecimalInput';
-import { getTariffForType } from '../utils/storage';
+import { getTariffForType, getOperatorLabel } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
 
 interface AddTripModalProps {
@@ -274,12 +274,12 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
                     : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-emerald-500'
                 }`}
               >
-                <option value="malanka_dc">⚡ Маланка DC ({settings.malankaDcTariff ?? settings.fastDayTariff ?? 0.56} {settings.currency})</option>
-                <option value="malanka_ac">🔌 Маланка AC ({settings.malankaAcTariff ?? settings.slowPublicTariff ?? 0.43} {settings.currency})</option>
-                <option value="evika">🔌 Evika ({settings.evikaTariff ?? 0.43} {settings.currency})</option>
-                <option value="batteryfly">🔋 BatteryFly ({settings.batteryFlyTariff ?? 0.60} {settings.currency})</option>
-                <option value="zaryadka_day">☀️ Зарядка День ({settings.zaryadkaDayTariff ?? settings.zaryadkaTariff ?? 0.56} {settings.currency})</option>
-                <option value="zaryadka_night">🌙 Зарядка Ночь ({settings.zaryadkaNightTariff ?? 0.43} {settings.currency})</option>
+                <option value="malanka_dc">⚡ {getOperatorLabel('malanka_dc', settings.regionPreset)} ({settings.malankaDcTariff ?? settings.fastDayTariff ?? 0.56} {settings.currency})</option>
+                <option value="malanka_ac">🔌 {getOperatorLabel('malanka_ac', settings.regionPreset)} ({settings.malankaAcTariff ?? settings.slowPublicTariff ?? 0.43} {settings.currency})</option>
+                <option value="evika">🔌 {getOperatorLabel('evika', settings.regionPreset)} ({settings.evikaTariff ?? 0.43} {settings.currency})</option>
+                <option value="batteryfly">🔋 {getOperatorLabel('batteryfly', settings.regionPreset)} ({settings.batteryFlyTariff ?? 0.60} {settings.currency})</option>
+                <option value="zaryadka_day">☀️ {getOperatorLabel('zaryadka_day', settings.regionPreset)} ({settings.zaryadkaDayTariff ?? settings.zaryadkaTariff ?? 0.56} {settings.currency})</option>
+                <option value="zaryadka_night">🌙 {getOperatorLabel('zaryadka_night', settings.regionPreset)} ({settings.zaryadkaNightTariff ?? 0.43} {settings.currency})</option>
                 <option value="home_night">🌙 Домашняя Ночь ({settings.homeNightTariff ?? 0.16} {settings.currency})</option>
                 <option value="home">🏠 Домашняя День ({settings.homeTariff} {settings.currency})</option>
                 <option value="free">🎁 Бесплатная зарядка</option>
