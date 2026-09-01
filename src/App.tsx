@@ -34,6 +34,12 @@ export default function App() {
   const [sessions, setSessions] = useState<TripSession[]>(loadSessions);
   const [activeTab, setActiveTab] = useState<TabType>('calculator');
   const [isHudTracking, setIsHudTracking] = useState(false);
+  // Route plan transferred from Calculator → HUD (destination + start SoC)
+  const [hudPlan, setHudPlan] = useState<{
+    destination: string;
+    startSoc: number;
+    plannedSpeedKmH?: number;
+  } | null>(null);
 
   // Modals
   const [isAddTripOpen, setIsAddTripOpen] = useState(false);
@@ -214,6 +220,8 @@ export default function App() {
             onSaveToHistory={handleSaveTrip}
             onOpenAddModalWithData={openAddModalWithData}
             onTrackingChange={setIsHudTracking}
+            hudPlan={hudPlan}
+            onHudPlanConsumed={() => setHudPlan(null)}
           />
         </div>
 
@@ -231,6 +239,10 @@ export default function App() {
                 sessions={sessions}
                 onSaveToHistory={handleSaveTrip}
                 onOpenAddModalWithData={openAddModalWithData}
+                onSendToHud={(plan) => {
+                  setHudPlan(plan);
+                  setActiveTab('hud');
+                }}
               />
             </motion.div>
           )}
