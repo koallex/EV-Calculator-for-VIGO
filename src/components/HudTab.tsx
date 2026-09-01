@@ -1355,8 +1355,11 @@ export const HudTab: React.FC<HudTabProps> = ({
           </div>
         )}
         {isTracking && (
-          <div className={`text-right text-[10px] font-mono mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            Скорость: {currentSpeed} км/ч
+          <div className={`flex items-baseline justify-between gap-3 mt-2 pt-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+            <span className={`text-[11px] font-extrabold tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>СКОРОСТЬ</span>
+            <span className={`font-mono font-black text-2xl sm:text-3xl leading-none ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
+              {currentSpeed} <span className="text-sm sm:text-base font-bold">км/ч</span>
+            </span>
           </div>
         )}
 
