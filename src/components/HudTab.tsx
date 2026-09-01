@@ -1344,6 +1344,22 @@ export const HudTab: React.FC<HudTabProps> = ({
           )}
         </div>
 
+        {!isTracking && (
+          <div className="mt-2 px-0.5">
+            <input
+              type="range" min="1" max="100" step="1" value={startTripSoc}
+              onChange={(e) => setStartTripSoc(Number(e.target.value))}
+              className="w-full h-2 accent-emerald-500 cursor-pointer touch-pan-x"
+              aria-label="SOC на старте поездки"
+            />
+          </div>
+        )}
+        {isTracking && (
+          <div className={`text-right text-[10px] font-mono mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Скорость: {currentSpeed} км/ч
+          </div>
+        )}
+
         <div className={`w-full h-2 rounded-full overflow-hidden mt-2 ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-200 border border-slate-300'}`}>
           <div
             className={`h-full rounded-full transition-all duration-300 ${liveDynamicSoc < 20 ? 'bg-rose-500' : liveDynamicSoc < 40 ? 'bg-amber-500' : 'bg-emerald-500'}`}
@@ -1351,6 +1367,18 @@ export const HudTab: React.FC<HudTabProps> = ({
           />
         </div>
       </div>
+
+      {/* Tracking controls — directly under SOC for immediate visibility */}
+      {isTracking && (
+        <div className="grid grid-cols-2 gap-2 w-full max-w-lg mx-auto mb-2">
+          <button onClick={handleStopTracking} className="py-3 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+            <Square className="w-4 h-4 fill-current" /><span>СТОП</span>
+          </button>
+          <button onClick={handleResetTracking} className={`py-3 px-3 rounded-xl font-bold text-xs border active:scale-[0.98] transition-all flex items-center justify-center gap-2 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'}`}>
+            <RotateCcw className="w-4 h-4" /><span>СБРОС</span>
+          </button>
+        </div>
+      )}
 
       {/* 5. SoC AT DESTINATION FORECAST (Цель поездки) */}
       <div className={`order-1 w-full max-w-lg mx-auto rounded-2xl p-3 sm:p-4 border transition-colors ${
@@ -2100,29 +2128,6 @@ export const HudTab: React.FC<HudTabProps> = ({
           </div>
         </div>
 
-        {/* Secondary trip controls — the primary start action is kept near the top. */}
-        {isTracking && (
-          <div className="grid grid-cols-2 gap-2 mt-1">
-            <button
-              onClick={handleStopTracking}
-              className="py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs shadow-md shadow-rose-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-            >
-              <Square className="w-4 h-4 fill-current" />
-              <span>Завершить поездку</span>
-            </button>
-            <button
-              onClick={handleResetTracking}
-              className={`py-2.5 px-3 rounded-xl font-bold text-xs border active:scale-[0.98] transition-all flex items-center justify-center gap-2 ${
-                isDark
-                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-              }`}
-            >
-              <RotateCcw className="w-4 h-4" />
-              <span>Сбросить</span>
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Completed Trip Summary Modal */}
