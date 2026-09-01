@@ -224,6 +224,13 @@ export const HudTab: React.FC<HudTabProps> = ({
   const weatherRefreshInFlightRef = useRef(false);
   const lastWeatherFetchAtRef = useRef(0);
 
+  // Cached destination geo so live recalculations during tracking don't re-geocode every time.
+  const cachedDestRef = useRef<{ lat: number; lon: number; name: string } | null>(null);
+  // Throttling for automatic live SoC-at-destination recalculation while tracking.
+  const lastDestRecalcAtRef = useRef(0);
+  const lastDestRecalcDistanceRef = useRef(0);
+  const destRecalcInFlightRef = useRef(false);
+
   // Live per-segment energy accumulation. Instead of applying the trip's average speed to the
   // whole distance (which under-costs a route that mixes city and highway driving, since the
   // speed→consumption curve is convex), every accepted GPS segment below adds its own distance
@@ -876,6 +883,14 @@ export const HudTab: React.FC<HudTabProps> = ({
   // Live dynamic remaining SoC %
   const liveDynamicSoc = Math.max(0, Number((startTripSoc - socSpentPercent).toFixed(1)));
 
+  // Live SoC-at-destination: always derived from the *current* liveDynamicSoc + last
+  // calculated remaining energy. This makes the big "SOC на финише" number move in real time
+  // while tracking, even between full route recalculations.
+  const livePredictedSoc =
+    destinationResult != null
+      ? Math.max(0, Number((liveDynamicSoc - (destinationResult.energyNeededKwh / batteryCap) * 100).toFixed(1)))
+      : null;
+
   // Remaining battery kWh at live dynamic SoC
   const dynamicRemainingBatteryKwh = (liveDynamicSoc / 100) * batteryCap;
 
@@ -941,6 +956,10 @@ export const HudTab: React.FC<HudTabProps> = ({
     setDestinationResult(null);
     setDestinationError(null);
     setDestinationBreakdownOpen(false);
+    cachedDestRef.current = null;
+    lastDestRecalcAtRef.current = 0;
+    lastDestRecalcDistanceRef.current = 0;
+    destRecalcInFlightRef.current = false;
     setTrackingStopMessage('Расчёт остановлен');
 
     const finalDistance = Number(distanceRef.current.toFixed(1));
@@ -1063,17 +1082,28 @@ export const HudTab: React.FC<HudTabProps> = ({
   // geocodeAddress / buildRouteElevation live in ../services/routeElevation and
   // fetchForecastWeatherAt lives in ../services/weatherForecast, so the Calculator tab's route
   // planner shares the exact same implementations instead of maintaining its own copies.
+  //
+  // While tracking is active the forecast is automatically refreshed (throttled) so that
+  // "SOC на финише" stays live. Manual press still works the same way.
 
-  const handleCalculateDestination = async () => {
-    if (!destinationQuery.trim() || destinationBusy) return;
-    triggerHaptic('light', settings.hapticFeedback);
-    setDestinationBusy(true);
-    setDestinationError(null);
-    setDestinationResult(null);
-    setDestinationBreakdownOpen(false);
+  const handleCalculateDestination = async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!destinationQuery.trim()) return;
+    if (destinationBusy && !silent) return;
+    if (destRecalcInFlightRef.current && silent) return;
+
+    if (!silent) {
+      triggerHaptic('light', settings.hapticFeedback);
+      setDestinationBusy(true);
+      setDestinationError(null);
+      // Do not clear destinationResult immediately — avoids UI flicker. New result will replace it.
+      setDestinationBreakdownOpen(false);
+    } else {
+      destRecalcInFlightRef.current = true;
+    }
 
     // Speed used to estimate consumption + ETA for the destination forecast:
-    // - Trekking already running -> use the live, GPS-derived average speed of this trip.
+    // - Tracking already running -> use the live, GPS-derived average speed of this trip.
     // - Not tracking yet -> use the speed the driver manually set for the planned trip.
     const destinationSpeedKmH = isTracking ? avgTripSpeedKmH : Math.min(150, Math.max(5, manualAvgSpeedKmH || 60));
 
@@ -1081,7 +1111,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       if (destinationMode === 'distance') {
         const distanceKm = parseFloat(destinationQuery.replace(',', '.'));
         if (isNaN(distanceKm) || distanceKm <= 0) {
-          setDestinationError('Введите дистанцию в км, например 45');
+          if (!silent) setDestinationError('Введите дистанцию в км, например 45');
           return;
         }
 
@@ -1161,23 +1191,40 @@ export const HudTab: React.FC<HudTabProps> = ({
           driverStyleFactor: destForecast.driverStyleFactor,
           breakdown: segmented,
         });
+        lastDestRecalcAtRef.current = Date.now();
+        lastDestRecalcDistanceRef.current = distanceRef.current;
         return;
       }
 
-      // Address mode: geocode -> real route -> elevation profile along the route
+      // Address mode: geocode (or use cache) -> real route -> elevation profile along the route
       if (!prevPositionRef.current) {
-        setDestinationError('Нет текущих координат GPS. Дождитесь сигнала GPS.');
+        if (!silent) setDestinationError('Нет текущих координат GPS. Дождитесь сигнала GPS.');
         return;
       }
 
-      const geo = await geocodeAddress(destinationQuery.trim());
+      // Prefer cached coordinates during live tracking recalcs to avoid repeated geocoding.
+      let geoLat: number;
+      let geoLon: number;
+      let geoName: string;
+
+      if (silent && cachedDestRef.current) {
+        geoLat = cachedDestRef.current.lat;
+        geoLon = cachedDestRef.current.lon;
+        geoName = cachedDestRef.current.name;
+      } else {
+        const geo = await geocodeAddress(destinationQuery.trim());
+        geoLat = geo.lat;
+        geoLon = geo.lon;
+        geoName = geo.displayName;
+        cachedDestRef.current = { lat: geo.lat, lon: geo.lon, name: geo.displayName };
+      }
 
       const route = await buildRouteElevation(
         prevPositionRef.current.lat,
         prevPositionRef.current.lon,
-        geo.lat,
-        geo.lon,
-        geo.displayName
+        geoLat,
+        geoLon,
+        geoName
       );
       const gainM = route.elevationGainM;
       const lossM = route.elevationLossM;
@@ -1188,14 +1235,14 @@ export const HudTab: React.FC<HudTabProps> = ({
       // Load a small number of weather samples along the route. The calculation itself is then
       // performed segment-by-segment; weather between samples is interpolated by distance.
       const routeWeatherSamples = await fetchForecastWeatherAlongRoute(route.points, new Date(), destinationSpeedKmH);
-      const forecastWeather = await fetchForecastWeatherAt(geo.lat, geo.lon, arrivalDate);
+      const forecastWeather = await fetchForecastWeatherAt(geoLat, geoLon, arrivalDate);
       const forecastUsed = forecastWeather !== null;
       const calcTemperature = forecastWeather?.temperature ?? (weather.isLoaded ? weather.temperature : undefined);
       const calcWindSpeed = forecastWeather?.windSpeed ?? (weather.isLoaded ? weather.windSpeed : undefined);
       const calcWeatherCode = forecastWeather?.weatherCode ?? (weather.isLoaded ? weather.weatherCode : undefined);
       const calcPrecipitation = forecastWeather?.precipitation ?? (weather.isLoaded ? weather.precipitation : undefined);
 
-      const routeBearing = calculateBearing(prevPositionRef.current.lat, prevPositionRef.current.lon, geo.lat, geo.lon);
+      const routeBearing = calculateBearing(prevPositionRef.current.lat, prevPositionRef.current.lon, geoLat, geoLon);
       const calcRelativeWindAngle = forecastWeather
         ? ((forecastWeather.windDirection - routeBearing + 360) % 360)
         : relativeWindAngle;
@@ -1210,7 +1257,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       const predictedSoc = Math.max(0, Number((liveDynamicSoc - (energyNeededKwh / batteryCap) * 100).toFixed(1)));
 
       setDestinationResult({
-        name: geo.displayName.split(',').slice(0, 3).join(','),
+        name: geoName.split(',').slice(0, 3).join(','),
         distanceKm: Number(route.distanceKm.toFixed(1)),
         gainM,
         lossM,
@@ -1238,17 +1285,58 @@ export const HudTab: React.FC<HudTabProps> = ({
         driverStyleFactor: destForecast.driverStyleFactor,
         breakdown: segmented,
       });
+
+      // Record throttle points after successful live/manual recalc
+      lastDestRecalcAtRef.current = Date.now();
+      lastDestRecalcDistanceRef.current = distanceRef.current;
     } catch (e) {
       // geocodeAddress / buildRouteElevation throw with a specific, user-readable message
       // (e.g. "Адрес не найден", "Не удалось построить маршрут") — surface that directly
       // instead of a generic network error, same as the Calculator tab's route planner does.
-      const msg = e instanceof Error ? e.message : '';
-      setDestinationError(msg || 'Ошибка сети при расчете маршрута. Проверьте соединение.');
+      // Silent live recalcs fail quietly — keep the previous result visible.
+      if (!silent) {
+        const msg = e instanceof Error ? e.message : '';
+        setDestinationError(msg || 'Ошибка сети при расчете маршрута. Проверьте соединение.');
+      }
     } finally {
-      setDestinationBusy(false);
+      if (!silent) {
+        setDestinationBusy(false);
+      }
+      destRecalcInFlightRef.current = false;
     }
   };
 
+  // === LIVE SoC-at-destination recalculation while tracking ===
+  // The most important feature: keep "SOC на финише" up to date during the trip.
+  // Throttled by time (≈45 s) OR distance (≈1.5 km) so we don't spam routing/elevation APIs.
+  // Between full recalcs the displayed value still moves live because it is derived from
+  // the current liveDynamicSoc + last known energyNeededKwh.
+  useEffect(() => {
+    if (!isTracking || !destinationQuery.trim()) return;
+
+    const RECALC_INTERVAL_MS = 45 * 1000;
+    const RECALC_EVERY_KM = 1.5;
+    const CHECK_EVERY_MS = 8 * 1000;
+
+    const maybeRecalc = () => {
+      if (!prevPositionRef.current) return;
+      if (destRecalcInFlightRef.current || destinationBusy) return;
+      // Only while actually moving — no point recalculating at a red light.
+      if (latestGpsSpeedRef.current < 3) return;
+
+      const now = Date.now();
+      const dist = distanceRef.current;
+      const timeOk = now - lastDestRecalcAtRef.current >= RECALC_INTERVAL_MS;
+      const distOk = dist - lastDestRecalcDistanceRef.current >= RECALC_EVERY_KM;
+
+      if (timeOk || distOk) {
+        void handleCalculateDestination({ silent: true });
+      }
+    };
+
+    const interval = window.setInterval(maybeRecalc, CHECK_EVERY_MS);
+    return () => window.clearInterval(interval);
+  }, [isTracking, destinationQuery, destinationBusy]);
 
   // Start tracking first so GPS can establish the current position. If a destination was
   // entered, the live destination forecast can then be calculated from that GPS position.
@@ -1430,20 +1518,20 @@ export const HudTab: React.FC<HudTabProps> = ({
               </span>
             </div>
           </div>
-          {destinationResult ? (
+          {destinationResult && livePredictedSoc != null ? (
             <div className="text-right shrink-0">
               <span
                 className={`font-mono font-black text-4xl leading-none tabular-nums ${
-                  destinationResult.predictedSoc < 10
+                  livePredictedSoc < 10
                     ? 'text-rose-500'
-                    : destinationResult.predictedSoc < 20
+                    : livePredictedSoc < 20
                     ? 'text-amber-500'
                     : isDark
                     ? 'text-emerald-400'
                     : 'text-emerald-600'
                 }`}
               >
-                {destinationResult.predictedSoc}%
+                {livePredictedSoc}%
               </span>
               {isTracking && (
                 <span className={`block text-[11px] font-mono mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -1463,7 +1551,15 @@ export const HudTab: React.FC<HudTabProps> = ({
               type="text"
               inputMode="text"
               value={destinationQuery}
-              onChange={(e) => setDestinationQuery(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setDestinationQuery(next);
+                // Clear cached geo when the user edits the destination so the next
+                // calculation (manual or live) will re-geocode the new address.
+                if (cachedDestRef.current) {
+                  cachedDestRef.current = null;
+                }
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleCalculateDestination();
               }}
