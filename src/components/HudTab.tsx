@@ -828,6 +828,30 @@ export const HudTab: React.FC<HudTabProps> = ({
     passengers
   );
 
+  // Range display is intentionally decoupled from passenger-count adjustments.
+  // Passenger count is useful for destination-energy estimation, but the live range
+  // indicator should remain stable and not jump dramatically when passengers change.
+  const rangeForecast: ConsumptionForecast = estimateTripConsumption(
+    avgTripSpeedKmH,
+    weather.isLoaded ? weather.temperature : undefined,
+    sessions,
+    settings.batteryCapacityKwh,
+    climateOn,
+    weather.isLoaded ? weather.windSpeed : undefined,
+    relativeWindAngle,
+    isTracking ? currentTripStyle.factor : undefined,
+    weather.isLoaded ? weather.weatherCode : undefined,
+    weather.isLoaded ? weather.precipitation : undefined,
+    isTracking && tripDistanceKm > 0.3
+      ? { gainM: elevationGainM, lossM: elevationLossM, distanceKm: tripDistanceKm }
+      : undefined,
+    undefined,
+    1
+  );
+  // Keep the range calculation on a stable vehicle-level consumption basis.
+  // Passenger count still affects the destination forecast above.
+  const rangeConsumption = Math.max(0.1, rangeForecast.estimatedConsumption);
+
   // === DYNAMIC SOC & RANGE CALCULATION DURING TRIP ===
   // Energy spent so far during active trip (kWh).
   // The speed/temperature/wind/precipitation/style portion is liveSegmentEnergyKwh, accumulated
@@ -858,7 +882,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   // Remaining range in km dynamically calculated from live SoC & predicted consumption (style + weather + road)
   const dynamicRemainingRangeKm = Math.max(
     0,
-    Math.round((dynamicRemainingBatteryKwh / forecast.estimatedConsumption) * 100)
+    Math.round((dynamicRemainingBatteryKwh / rangeConsumption) * 100)
   );
 
   // Baseline nominal range at the vehicle's official passport rating (340 km at 100% charge for
@@ -877,7 +901,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   const safeDynamicBatteryKwh = (safeDynamicSoc / 100) * batteryCap;
   const safeDynamicRangeKm = Math.max(
     0,
-    Math.round((safeDynamicBatteryKwh / forecast.estimatedConsumption) * 100)
+    Math.round((safeDynamicBatteryKwh / rangeConsumption) * 100)
   );
 
   // Total consumption multiplier factor relative to base
@@ -1266,27 +1290,27 @@ export const HudTab: React.FC<HudTabProps> = ({
       </div>
 
       {/* 3. Battery + range: one SOC indicator only */}
-      <div className={`rounded-2xl border px-3 py-2 sm:px-4 sm:py-2.5 shrink-0 ${isDark ? 'bg-slate-900/95 border-slate-700/80' : 'bg-white border-slate-200 shadow-xs'}`}>
+      <div className={`rounded-2xl border px-3.5 py-2.5 sm:px-4 sm:py-3 shrink-0 ${isDark ? 'bg-slate-900/95 border-slate-700/80' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center justify-between gap-3">
-          <div><span className={`block text-[9px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{isTracking ? 'SOC сейчас' : 'SOC на старте'}</span><span className={`font-mono font-black text-4xl sm:text-5xl leading-none ${liveDynamicSoc < 20 ? 'text-rose-500' : liveDynamicSoc < 40 ? 'text-amber-500' : isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{isTracking ? liveDynamicSoc : startTripSoc}%</span></div>
-          <div className="text-right"><span className={`block text-[9px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Запас хода</span><span className={`font-mono font-black text-3xl sm:text-4xl leading-none ${isDark ? 'text-cyan-300' : 'text-cyan-600'}`}>~{dynamicRemainingRangeKm} <span className="text-xs">км</span></span><span className={`block text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>до 10%: ~{safeDynamicRangeKm} км</span></div>
+          <div><span className={`block text-[10px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{isTracking ? 'SOC сейчас' : 'SOC на старте'}</span><span className={`font-mono font-black text-4xl sm:text-5xl leading-none ${liveDynamicSoc < 20 ? 'text-rose-500' : liveDynamicSoc < 40 ? 'text-amber-500' : isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{isTracking ? liveDynamicSoc : startTripSoc}%</span></div>
+          <div className="text-right"><span className={`block text-[10px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Запас хода</span><span className={`font-mono font-black text-3xl sm:text-4xl leading-none ${isDark ? 'text-cyan-300' : 'text-cyan-600'}`}>~{dynamicRemainingRangeKm} <span className="text-xs">км</span></span><span className={`block text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>до 10%: ~{safeDynamicRangeKm} км</span></div>
         </div>
         {!isTracking ? <div className="flex items-center gap-1.5 mt-1.5"><button onClick={() => setStartTripSoc(prev => Math.max(1, prev - 10))} className={`px-1.5 py-0.5 rounded-md border text-[9px] font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−10</button><input type="range" min="1" max="100" step="1" value={startTripSoc} onChange={(e) => setStartTripSoc(Number(e.target.value))} className="flex-1 h-1.5 accent-emerald-500 cursor-pointer touch-pan-x" aria-label="SOC на старте поездки" /><button onClick={() => setStartTripSoc(prev => Math.min(100, prev + 10))} className={`px-1.5 py-0.5 rounded-md border text-[9px] font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+10</button></div> : <div className={`mt-1.5 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-950' : 'bg-slate-200'}`}><div className={`h-full transition-all duration-300 ${liveDynamicSoc < 20 ? 'bg-rose-500' : liveDynamicSoc < 40 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, Math.max(0, liveDynamicSoc))}%` }} /></div>}
       </div>
 
       {/* 4. Destination forecast: one of the most prominent values */}
-      <div className={`rounded-2xl border px-3 py-2 sm:px-4 sm:py-2.5 shrink-0 ${isDark ? 'bg-slate-900/95 border-emerald-900/60' : 'bg-emerald-50/70 border-emerald-200'}`}>
-        <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-1.5 min-w-0"><Flag className={`w-4 h-4 shrink-0 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} /><div className="min-w-0"><span className={`block text-[9px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>SOC на финише</span><span className={`block text-[9px] truncate ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>{destinationResult?.name || 'Задайте пункт назначения'}</span></div></div>{destinationResult ? <span className={`font-mono font-black text-4xl sm:text-5xl leading-none ${destinationResult.predictedSoc < 10 ? 'text-rose-500' : destinationResult.predictedSoc < 20 ? 'text-amber-500' : isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{destinationResult.predictedSoc}%</span> : <span className={`text-xl font-bold ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>—</span>}</div>
+      <div className={`rounded-2xl border px-3.5 py-2.5 sm:px-4 sm:py-3 shrink-0 ${isDark ? 'bg-slate-900/95 border-emerald-900/60' : 'bg-emerald-50/70 border-emerald-200'}`}>
+        <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-1.5 min-w-0"><Flag className={`w-4 h-4 shrink-0 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} /><div className="min-w-0"><span className={`block text-[10px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>SOC на финише</span><span className={`block text-[10px] truncate ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>{destinationResult?.name || 'Задайте пункт назначения'}</span></div></div>{destinationResult ? <span className={`font-mono font-black text-4xl sm:text-5xl leading-none ${destinationResult.predictedSoc < 10 ? 'text-rose-500' : destinationResult.predictedSoc < 20 ? 'text-amber-500' : isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{destinationResult.predictedSoc}%</span> : <span className={`text-xl font-bold ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>—</span>}</div>
         <div className="flex items-center gap-1.5 mt-1.5"><input type="text" inputMode="text" value={destinationQuery} onChange={(e) => setDestinationQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleCalculateDestination(); }} placeholder="Город, улица, дом…" className={`flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border text-[10px] ${isDark ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600' : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'}`} />{!isTracking && <button onClick={handleStartWithLiveForecast} disabled={destinationBusy} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[10px] font-black shrink-0">{destinationBusy ? '…' : destinationQuery.trim() ? 'РАСЧЁТ + СТАРТ' : 'СТАРТ'}</button>}{isTracking && <span className="px-2 py-1 rounded-lg bg-emerald-950/70 text-emerald-300 text-[9px] font-bold border border-emerald-800/70">LIVE</span>}</div>
-        {destinationResult && <div className={`flex items-center justify-between gap-2 mt-1 text-[9px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}><span>{destinationResult.isLive ? 'Осталось' : 'Дистанция'}: <b>{destinationResult.distanceKm} км</b></span><span>~{destinationResult.etaMinutes ?? '—'} мин</span><span>{destinationResult.predictedConsumption.toFixed(1)} кВт⋅ч/100</span></div>}
+        {destinationResult && <div className={`flex items-center justify-between gap-2 mt-1 text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}><span>{destinationResult.isLive ? 'Осталось' : 'Дистанция'}: <b>{destinationResult.distanceKm} км</b></span><span>~{destinationResult.etaMinutes ?? '—'} мин</span><span>{destinationResult.predictedConsumption.toFixed(1)} кВт⋅ч/100</span></div>}
         {destinationError && <div className="mt-1 text-[9px] text-amber-500 truncate">{destinationError}</div>}
       </div>
 
       {/* 5. Current conditions: wind + climate + passengers */}
-      <div className={`rounded-xl border px-2.5 py-1.5 flex items-center gap-2 shrink-0 ${isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+      <div className={`rounded-2xl border px-3 py-2 flex items-center gap-2.5 shrink-0 ${isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
         <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden text-[9px]"><div className={`w-7 h-7 rounded-full border flex items-center justify-center shrink-0 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}><ArrowDown className={`w-3.5 h-3.5 ${windInfo.color}`} style={{ transform: `rotate(${windInfo.arrowRotation}deg)` }} /></div><span className={`font-bold shrink-0 ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{windSpeedMs} м/с</span><span className={`px-1.5 py-0.5 rounded border font-bold truncate ${windInfo.badgeBg}`}>{windInfo.label}</span>{livePrecipitation.impactPct > 0 && <span className="font-bold shrink-0">{livePrecipitation.type.includes('snow') ? '❄️' : '🌧️'}</span>}</div>
-        <div className={`flex items-center gap-0.5 shrink-0 rounded-lg border px-1 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}><button onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-5 h-5 text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>−</button><span className={`text-[9px] font-bold min-w-4 text-center ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>👤{passengers}</span><button onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-5 h-5 text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>+</button></div>
-        <button onClick={() => setClimateOn(!climateOn)} className={`px-2 py-1 rounded-lg border text-[9px] font-bold shrink-0 ${climateOn ? outdoorTemp < 19 ? 'bg-amber-950/70 text-amber-300 border-amber-800' : 'bg-cyan-950/70 text-cyan-300 border-cyan-800' : isDark ? 'bg-slate-950 text-slate-400 border-slate-800' : 'bg-white text-slate-600 border-slate-200'}`}>{climateOn ? outdoorTemp < 19 ? `🔥 +${liveClimate.impactPct}%` : `❄️ +${liveClimate.impactPct}%` : '🍃 ЭКО'}</button>
+        <div className={`flex items-center gap-0.5 shrink-0 rounded-lg border px-1.5 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}><button onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-8 h-8 text-lg font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>−</button><span className={`text-[12px] font-bold min-w-6 text-center ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>👤{passengers}</span><button onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-8 h-8 text-lg font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>+</button></div>
+        <button onClick={() => setClimateOn(!climateOn)} className={`px-3 py-2 rounded-xl border text-[11px] font-bold shrink-0 ${climateOn ? outdoorTemp < 19 ? 'bg-amber-950/70 text-amber-300 border-amber-800' : 'bg-cyan-950/70 text-cyan-300 border-cyan-800' : isDark ? 'bg-slate-950 text-slate-400 border-slate-800' : 'bg-white text-slate-600 border-slate-200'}`}>{climateOn ? outdoorTemp < 19 ? `🔥 +${liveClimate.impactPct}%` : `❄️ +${liveClimate.impactPct}%` : '🍃 ЭКО'}</button>
       </div>
 
       {/* 6. Trip telemetry */}
@@ -1298,7 +1322,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       </CollapsibleDetails>
 
       {/* 8. Controls */}
-      <div className="mt-auto grid grid-cols-2 gap-1.5 shrink-0">{isTracking ? <><button onClick={handleStopTracking} className="py-2 rounded-xl bg-rose-600 text-white font-black text-[10px] flex items-center justify-center gap-1.5"><Square className="w-3.5 h-3.5 fill-current" /> СТОП</button><button onClick={handleResetTracking} className={`py-2 rounded-xl border font-bold text-[10px] flex items-center justify-center gap-1.5 ${isDark ? 'bg-slate-800 text-slate-200 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-300'}`}><RotateCcw className="w-3.5 h-3.5" /> СБРОС</button></> : <div className={`col-span-2 text-center py-0.5 text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{trackingStopMessage || 'Готов к поездке'}</div>}</div>
+      <div className="mt-auto grid grid-cols-2 gap-1.5 shrink-0">{isTracking ? <><button onClick={handleStopTracking} className="py-2 rounded-xl bg-rose-600 text-white font-black text-[10px] flex items-center justify-center gap-1.5"><Square className="w-3.5 h-3.5 fill-current" /> СТОП</button><button onClick={handleResetTracking} className={`py-2 rounded-xl border font-bold text-[10px] flex items-center justify-center gap-1.5 ${isDark ? 'bg-slate-800 text-slate-200 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-300'}`}><RotateCcw className="w-3.5 h-3.5" /> СБРОС</button></> : <div className={`col-span-2 text-center py-0.5 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{trackingStopMessage || 'Готов к поездке'}</div>}</div>
 
       {/* Completed Trip Summary Modal */}
       {completedTripSummary && (
