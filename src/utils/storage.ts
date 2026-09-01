@@ -82,10 +82,10 @@ export function interpolateVigoSpeedConsumption(speedKmH: number): number {
   // The style coefficient now represents acceleration/braking behaviour only, while
   // sustained 90+ km/h energy is carried by the physical speed curve itself.
   let highSpeedFactor = 1.0;
-  if (speed > 80) {
-    // Gradually restore the ~4–9% correction that used to be supplied indirectly by
-    // a high driving-style factor on fast highway trips.  No change below 80 km/h.
-    const t = Math.min(1, (speed - 80) / 40);
+  if (speed > 90) {
+    // Keep 90 km/h cruising slightly lighter than the previous calibration while
+    // retaining the full high-speed correction by 120 km/h.
+    const t = Math.min(1, (speed - 90) / 30);
     highSpeedFactor = 1 + 0.09 * t;
   }
   if (speed > 120) {
