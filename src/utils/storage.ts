@@ -163,6 +163,63 @@ export const REGION_PRESETS = {
   },
 };
 
+/**
+ * Display names for charging operators by region.
+ * Internal ChargingType IDs stay the same (for history compatibility);
+ * only the visible labels switch when the user changes region.
+ */
+export const OPERATOR_LABELS: Record<
+  'belarus' | 'russia',
+  Record<string, string>
+> = {
+  belarus: {
+    malanka_dc: 'Маланка DC',
+    malanka_ac: 'Маланка AC',
+    evika: 'Evika',
+    batteryfly: 'BatteryFly',
+    zaryadka: 'Зарядка',
+    zaryadka_day: 'Зарядка День',
+    zaryadka_night: 'Зарядка Ночь',
+    zaryadka_dc: 'Зарядка DC',
+    zaryadka_ac: 'Зарядка AC',
+    home: 'Домашний',
+    home_night: 'Домашний ночной',
+    home_day: 'Домашний',
+    fast_day: 'Быстрая DC (день)',
+    fast_night: 'Быстрая DC (ночь)',
+    slow_public: 'Медленная AC',
+    free: 'Бесплатно',
+    custom: 'Свой тариф',
+  },
+  russia: {
+    malanka_dc: 'Punkt E / Россети DC',
+    malanka_ac: 'AC городская',
+    evika: 'AC / городская сеть',
+    batteryfly: 'Electro.cars',
+    zaryadka: 'DC сеть',
+    zaryadka_day: 'DC день',
+    zaryadka_night: 'DC ночь',
+    zaryadka_dc: 'DC быстрая',
+    zaryadka_ac: 'AC городская',
+    home: 'Домашний',
+    home_night: 'Домашний ночной',
+    home_day: 'Домашний',
+    fast_day: 'DC быстрая (день)',
+    fast_night: 'DC быстрая (ночь)',
+    slow_public: 'AC городская',
+    free: 'Бесплатно',
+    custom: 'Свой тариф',
+  },
+};
+
+export function getOperatorLabel(
+  type: string,
+  region: UserSettings['regionPreset'] = 'belarus'
+): string {
+  const key = region === 'russia' ? 'russia' : 'belarus';
+  return OPERATOR_LABELS[key][type] ?? type;
+}
+
 // Initial realistic sample sessions for Dongfeng Vigo (51.87 kWh)
 export const INITIAL_SESSIONS: TripSession[] = [
   {
