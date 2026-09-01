@@ -83,6 +83,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [manualPrecipitationIntensity, setManualPrecipitationIntensity] = useState<'light' | 'moderate' | 'heavy'>('moderate');
   const [chargingType, setChargingType] = useState<TripSession['chargingType']>('malanka_dc');
   const [passengers, setPassengers] = useState(1);
+  // Two distinct workflows used to live interleaved on one long scroll (route planning vs.
+  // logging a completed trip by hand) with no visual separation between them. This just
+  // groups the existing sections under a switcher; nothing about how each section works changes.
+  const [calculatorMode, setCalculatorMode] = useState<'route' | 'manual'>('route');
 
   // Planned route: current GPS point A -> selected destination B -> detailed elevation profile.
   const [startMode, setStartMode] = useState<'gps' | 'address'>('gps');
@@ -434,6 +438,37 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         </div>
       </section>
 
+      {/* Route start SoC — updates route arrival instantly without rebuilding the route */}
+      <section className={`calculator-start-soc rounded-2xl border p-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="font-bold text-sm">Начальный заряд</h2>
+            <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Изменение сразу обновляет прогноз прибытия</p>
+          </div>
+          <span className={`text-2xl font-black font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{startSoc}%</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => updateRouteStartSoc(startSoc - 5)} className={`w-11 h-10 rounded-xl font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>
+          <input type="range" min={1} max={100} value={startSoc} onChange={(e) => updateRouteStartSoc(Number(e.target.value))} className="flex-1 accent-emerald-500 h-2 rounded-lg cursor-pointer" />
+          <button onClick={() => updateRouteStartSoc(startSoc + 5)} className={`w-11 h-10 rounded-xl font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+5</button>
+        </div>
+      </section>
+
+      {/* Occupants — directly after starting SoC */}
+      <section className={`calculator-passengers rounded-2xl border p-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-sm">Людей в салоне</h2>
+            <p className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Включая водителя · +75 кг на каждого дополнительного человека</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-10 h-10 rounded-xl font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−</button>
+            <span className={`min-w-8 text-xl text-center font-bold font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{passengers}</span>
+            <button type="button" onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-10 h-10 rounded-xl font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+</button>
+          </div>
+        </div>
+      </section>
+
       {/* Climate control */}
       <section className={`calculator-climate rounded-2xl border p-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center justify-between gap-3">
@@ -448,6 +483,24 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         </div>
       </section>
 
+      {/* Mode: route planning vs. logging a completed trip — two different workflows, kept visually separate instead of one long interleaved scroll */}
+      <div className={`grid grid-cols-2 rounded-2xl border p-1 gap-1 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+        <button
+          onClick={() => setCalculatorMode('route')}
+          className={`rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${calculatorMode === 'route' ? 'bg-emerald-600 text-white shadow-sm' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
+        >
+          <Navigation className="w-4 h-4" /> Маршрут
+        </button>
+        <button
+          onClick={() => setCalculatorMode('manual')}
+          className={`rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${calculatorMode === 'manual' ? 'bg-emerald-600 text-white shadow-sm' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
+        >
+          <Gauge className="w-4 h-4" /> Ручной ввод
+        </button>
+      </div>
+
+      {calculatorMode === 'route' && (
+        <>
       {/* Weather source */}
       <section className={`calculator-weather rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center justify-between gap-3">
@@ -512,15 +565,19 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           </div>
         )}
 
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input value={destinationAddress} onChange={e => setDestinationAddress(e.target.value)} placeholder="Куда? Город, улица, дом" className={`w-full rounded-xl border py-3 pl-9 pr-3 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`} />
-          </div>
-          <button onClick={calculateRouteProfile} disabled={routeLoading} className="rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white disabled:opacity-60">
-            {routeLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Расчёт'}
-          </button>
+        <div className="relative">
+          <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input value={destinationAddress} onChange={e => setDestinationAddress(e.target.value)} placeholder="Куда? Город, улица, дом" className={`w-full rounded-xl border py-3 pl-9 pr-3 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`} />
         </div>
+        <button
+          onClick={calculateRouteProfile}
+          disabled={routeLoading}
+          className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-500 py-3.5 text-sm font-bold text-white disabled:opacity-60 flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-sm shadow-emerald-600/20"
+        >
+          {routeLoading
+            ? <><Loader2 className="w-5 h-5 animate-spin" /> Считаем маршрут…</>
+            : <><Navigation className="w-5 h-5" /> Рассчитать маршрут</>}
+        </button>
 
         {routeLoading && <div className="text-xs text-emerald-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />{routeStatus || 'Подготавливаем расчёт…'}</div>}
         <div className={`rounded-xl p-3 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="flex items-center justify-between gap-3"><div><div className="text-xs font-semibold">Планируемая средняя скорость</div><div className="text-[10px] text-slate-500">Для ETA и прогноза погоды к моменту прибытия</div></div><div className="flex items-center gap-1"><DecimalInput value={plannedSpeedKmH} onChange={(v) => { setPlannedSpeedKmH(v); setPlannedMaxSpeedKmH((prev) => Math.max(prev, v)); }} min={20} max={140} className="w-20 text-right" /><span className="text-xs text-slate-500 whitespace-nowrap">км/ч</span></div></div></div>
@@ -747,38 +804,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           </>
         )}
       </section>
+        </>
+      )}
 
-      {/* Route start SoC — updates route arrival instantly without rebuilding the route */}
-      <section className={`calculator-start-soc rounded-2xl border p-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="font-bold text-sm">Начальный заряд</h2>
-            <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Изменение сразу обновляет прогноз прибытия</p>
-          </div>
-          <span className={`text-2xl font-black font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{startSoc}%</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => updateRouteStartSoc(startSoc - 5)} className={`w-11 h-10 rounded-xl font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>
-          <input type="range" min={1} max={100} value={startSoc} onChange={(e) => updateRouteStartSoc(Number(e.target.value))} className="flex-1 accent-emerald-500 h-2 rounded-lg cursor-pointer" />
-          <button onClick={() => updateRouteStartSoc(startSoc + 5)} className={`w-11 h-10 rounded-xl font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+5</button>
-        </div>
-      </section>
-
-      {/* Occupants — directly after starting SoC */}
-      <section className={`calculator-passengers rounded-2xl border p-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="font-bold text-sm">Людей в салоне</h2>
-            <p className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Включая водителя · +75 кг на каждого дополнительного человека</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-10 h-10 rounded-xl font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−</button>
-            <span className={`min-w-8 text-xl text-center font-bold font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{passengers}</span>
-            <button type="button" onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-10 h-10 rounded-xl font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+</button>
-          </div>
-        </div>
-      </section>
-
+      {calculatorMode === 'manual' && (
+        <>
       {/* Top Banner: Battery Gauge & Glance Summary */}
       <div
         className={`calculator-battery border rounded-2xl p-4 transition-colors ${
@@ -1131,7 +1161,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              ⚡ Маланка DC ({settings.malankaDcTariff ?? settings.fastDayTariff} {settings.currency})
+              ⚡ Маланка DC
             </button>
 
             <button
@@ -1149,7 +1179,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              🔌 AC / Evika ({settings.evikaTariff ?? settings.slowPublicTariff} {settings.currency})
+              🔌 AC / Evika
             </button>
 
             <button
@@ -1167,7 +1197,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              ☀️ Зарядка День ({settings.zaryadkaDayTariff ?? settings.zaryadkaTariff ?? 0.56} {settings.currency})
+              ☀️ Зарядка День
             </button>
 
             <button
@@ -1185,7 +1215,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              🌙 Зарядка Ночь ({settings.zaryadkaNightTariff ?? 0.43} {settings.currency})
+              🌙 Зарядка Ночь
             </button>
 
             <button
@@ -1203,7 +1233,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              🔋 BatteryFly ({settings.batteryFlyTariff ?? 0.6} {settings.currency})
+              🔋 BatteryFly
             </button>
 
             <button
@@ -1221,7 +1251,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              🌙 Дом Ночь ({settings.homeNightTariff ?? 0.16} {settings.currency})
+              🌙 Дом Ночь
             </button>
 
             <button
@@ -1239,7 +1269,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              🏠 Дом День ({settings.homeTariff} {settings.currency})
+              🏠 Дом День
             </button>
 
             <button
@@ -1257,7 +1287,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
               }`}
             >
-              🎁 Бесплатно (0 {settings.currency})
+              🎁 Бесплатно
             </button>
           </div>
         </div>
@@ -1298,6 +1328,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           </button>
         </div>
       </div>
+        </>
+      )}
+
     </div>
   );
 };

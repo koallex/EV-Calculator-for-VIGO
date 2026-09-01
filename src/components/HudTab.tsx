@@ -1580,17 +1580,27 @@ export const HudTab: React.FC<HudTabProps> = ({
             <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-2">
               <div>
                 <span className={`text-[11px] font-semibold block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  Доступный запас хода при {liveDynamicSoc}% SoC:
+                  Заряд сейчас
                 </span>
-                <div className="flex items-baseline gap-1.5 mt-0.5">
-                  <span className={`text-4xl sm:text-5xl font-black font-mono tracking-tight ${
-                    isDark
+                <div className="flex items-baseline gap-1 mt-0.5">
+                  <span className={`text-6xl sm:text-7xl font-black font-mono tracking-tighter ${
+                    liveDynamicSoc < 20
+                      ? 'text-rose-500'
+                      : liveDynamicSoc < 40
+                      ? 'text-amber-500'
+                      : isDark
                       ? 'text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400'
                       : 'text-emerald-600'
                   }`}>
+                    {liveDynamicSoc}
+                  </span>
+                  <span className={`text-2xl font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>%</span>
+                </div>
+                <div className="flex items-baseline gap-1 mt-0.5">
+                  <span className={`text-xl font-bold font-mono ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                     ~{dynamicRemainingRangeKm}
                   </span>
-                  <span className={`text-base font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>км</span>
+                  <span className={`text-xs font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>км запас хода</span>
                 </div>
               </div>
 
