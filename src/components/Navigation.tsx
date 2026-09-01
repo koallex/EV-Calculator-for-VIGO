@@ -25,7 +25,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   const isDark = theme !== 'light';
   const tabs: { id: TabType; label: string; icon: React.FC<{ className?: string }> }[] = [
     { id: 'calculator', label: 'Калькулятор', icon: Calculator },
-    { id: 'hud', label: 'HUD Спидометр', icon: Gauge },
+    { id: 'hud', label: 'Живой расход', icon: Gauge },
     { id: 'history', label: 'История', icon: History },
     { id: 'charging', label: 'Зарядка', icon: BatteryCharging },
     { id: 'settings', label: 'Настройки', icon: Settings },

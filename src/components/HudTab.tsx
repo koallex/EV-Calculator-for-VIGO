@@ -107,7 +107,6 @@ export const HudTab: React.FC<HudTabProps> = ({
   // SoC-at-Destination forecast tool
   const [destinationMode, setDestinationMode] = useState<'address' | 'distance'>('address');
   const [destinationQuery, setDestinationQuery] = useState('');
-  const [manualAvgSpeedKmH, setManualAvgSpeedKmH] = useState(60);
   const [destinationBusy, setDestinationBusy] = useState(false);
   const [destinationError, setDestinationError] = useState<string | null>(null);
   const [destinationBreakdownOpen, setDestinationBreakdownOpen] = useState(false);
@@ -829,6 +828,16 @@ export const HudTab: React.FC<HudTabProps> = ({
     (forecast.estimatedConsumption / forecast.baseConsumption).toFixed(2)
   );
 
+  // One-tap primary action: prepare the destination forecast (when a destination is set)
+  // and start live tracking. The actual average speed is learned from GPS during the trip.
+  const handleStartWithLiveForecast = async () => {
+    if (isTracking) return;
+    if (destinationQuery.trim()) {
+      await handleCalculateDestination();
+    }
+    handleStartTracking();
+  };
+
   // START tracking
   const handleStartTracking = () => {
     triggerHaptic('success', settings.hapticFeedback);
@@ -986,10 +995,9 @@ export const HudTab: React.FC<HudTabProps> = ({
     setDestinationResult(null);
     setDestinationBreakdownOpen(false);
 
-    // Speed used to estimate consumption + ETA for the destination forecast:
-    // - Trekking already running -> use the live, GPS-derived average speed of this trip.
-    // - Not tracking yet -> use the speed the driver manually set for the planned trip.
-    const destinationSpeedKmH = isTracking ? avgTripSpeedKmH : Math.min(150, Math.max(5, manualAvgSpeedKmH || 60));
+    // While tracking, use the live GPS-derived average. Before the trip starts,
+    // use a conservative fallback; the forecast is immediately updated from live pace.
+    const destinationSpeedKmH = isTracking ? avgTripSpeedKmH : 60;
 
     try {
       if (destinationMode === 'distance') {
@@ -1286,6 +1294,45 @@ export const HudTab: React.FC<HudTabProps> = ({
             <FlipHorizontal className="w-4 h-4" />
             <span className="hidden sm:inline text-[11px]">Зеркало HUD</span>
           </button>
+        </div>
+      </div>
+
+      {/* Primary Live Consumption Action */}
+      <div className={`rounded-2xl border p-2.5 ${
+        isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-50 border-slate-200'
+      }`}>
+        <div className="flex items-center gap-2.5">
+          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+            isDark ? 'bg-emerald-950 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
+          }`}>
+            <Gauge className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1 text-left">
+            <div className={`text-sm font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              {isTracking ? 'Живой расход активен' : 'Живой расход'}
+            </div>
+            <div className={`text-[10px] truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              {isTracking
+                ? `SOC на финише пересчитывается в реальном времени · ${avgTripSpeedKmH} км/ч`
+                : destinationQuery.trim()
+                ? 'Цель задана — одной кнопкой рассчитаем маршрут и начнём поездку'
+                : 'GPS автоматически определит реальный темп поездки'}
+            </div>
+          </div>
+          {!isTracking ? (
+            <button
+              onClick={handleStartWithLiveForecast}
+              disabled={destinationBusy || isTracking}
+              className="py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-black text-xs shadow-lg shadow-emerald-600/25 active:scale-[0.98] transition-all flex items-center gap-1.5 shrink-0"
+            >
+              {destinationBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
+              <span>{destinationQuery.trim() ? 'РАСЧЁТ + СТАРТ' : 'НАЧАТЬ ПОЕЗДКУ'}</span>
+            </button>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-emerald-950/70 text-emerald-300 text-[10px] font-bold border border-emerald-800/70 shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> LIVE
+            </span>
+          )}
         </div>
       </div>
 
@@ -1953,7 +2000,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       </div>
 
       {/* 5. SoC AT DESTINATION FORECAST (Цель поездки) */}
-      <div className={`w-full max-w-lg mx-auto rounded-2xl p-3 sm:p-4 border transition-colors ${
+      <div className={`order-1 w-full max-w-lg mx-auto rounded-2xl p-3 sm:p-4 border transition-colors ${
         isDark
           ? 'bg-slate-900/90 border-slate-800/90 shadow-lg'
           : 'bg-slate-50 border-slate-200 shadow-xs'
@@ -1966,114 +2013,37 @@ export const HudTab: React.FC<HudTabProps> = ({
           </div>
           <div className="text-left min-w-0">
             <span className={`text-xs font-bold uppercase tracking-wider block ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-              Заряд на финише
+              SOC на финише
             </span>
             <span className={`text-[10px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              Прогноз SoC по адресу или дистанции, с учетом рельефа маршрута
+              Живой прогноз заряда на финише по маршруту
             </span>
           </div>
         </div>
 
-        {/* Mode Toggle */}
-        <div className="flex gap-1.5 mb-2">
-          <button
-            onClick={() => {
-              triggerHaptic('light', settings.hapticFeedback);
-              setDestinationMode('address');
-              setDestinationError(null);
-            }}
-            className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold border flex items-center justify-center gap-1 transition-all active:scale-95 ${
-              destinationMode === 'address'
-                ? 'bg-emerald-600 text-white border-emerald-500'
-                : isDark
-                ? 'bg-slate-950 text-slate-400 border-slate-800'
-                : 'bg-white text-slate-600 border-slate-200'
-            }`}
-          >
-            <MapPin className="w-3.5 h-3.5" />
-            По адресу
-          </button>
-          <button
-            onClick={() => {
-              triggerHaptic('light', settings.hapticFeedback);
-              setDestinationMode('distance');
-              setDestinationError(null);
-            }}
-            className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold border flex items-center justify-center gap-1 transition-all active:scale-95 ${
-              destinationMode === 'distance'
-                ? 'bg-emerald-600 text-white border-emerald-500'
-                : isDark
-                ? 'bg-slate-950 text-slate-400 border-slate-800'
-                : 'bg-white text-slate-600 border-slate-200'
-            }`}
-          >
-            <Navigation className="w-3.5 h-3.5" />
-            По дистанции
-          </button>
-        </div>
-
-        {/* Average speed used for this forecast: live while tracking, manual otherwise */}
-        <div className={`flex items-center justify-between gap-2 mb-2 px-2.5 py-1.5 rounded-lg border ${
-          isDark ? 'bg-slate-950/70 border-slate-800' : 'bg-white border-slate-200'
-        }`}>
-          <span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            Ср. скорость для расчета:
-          </span>
-          {isTracking ? (
-            <span className={`text-xs font-mono font-bold flex items-center gap-1 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              {avgTripSpeedKmH} км/ч (live трек)
-            </span>
-          ) : (
-            <div className="flex items-center gap-1">
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={manualAvgSpeedKmH === 0 ? '' : manualAvgSpeedKmH}
-                onChange={(e) => {
-                  // Strip non-digits but do NOT clamp while typing — clamping mid-keystroke is
-                  // what breaks numeric entry on iOS (e.g. typing "45" got forced to "5" after
-                  // the first digit, since 4 < min). Range is enforced only once, on blur.
-                  const digitsOnly = e.target.value.replace(/[^0-9]/g, '').slice(0, 3);
-                  setManualAvgSpeedKmH(digitsOnly === '' ? 0 : parseInt(digitsOnly, 10));
-                }}
-                onBlur={() => {
-                  setManualAvgSpeedKmH((prev) => Math.min(150, Math.max(5, prev || 60)));
-                }}
-                className={`w-14 text-center text-xs font-mono font-bold py-0.5 px-1 rounded-md border focus:outline-hidden focus:ring-1 focus:ring-emerald-500 ${
-                  isDark ? 'bg-slate-900 text-emerald-400 border-slate-700' : 'bg-slate-50 text-emerald-700 border-slate-300'
-                }`}
-              />
-              <span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>км/ч</span>
-            </div>
-          )}
-        </div>
-
+        {/* Destination — address only in Live Consumption mode */}
         {/* Input + Submit */}
         <div className="flex gap-1.5">
           <input
-            type={destinationMode === 'distance' ? 'number' : 'text'}
-            inputMode={destinationMode === 'distance' ? 'decimal' : 'text'}
+            type="text"
+            inputMode="text" 
             value={destinationQuery}
             onChange={(e) => setDestinationQuery(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleCalculateDestination();
             }}
-            placeholder={destinationMode === 'address' ? 'Город, улица, дом…' : 'Дистанция в км, напр. 45'}
+            placeholder="Город, улица, дом…"
             className={`flex-1 min-w-0 px-3 py-2 rounded-xl border text-xs font-medium focus:outline-hidden focus:ring-1 focus:ring-emerald-500 ${
               isDark
                 ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600'
                 : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'
             }`}
           />
-          <button
-            onClick={handleCalculateDestination}
-            disabled={destinationBusy || !destinationQuery.trim()}
-            className="px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:hover:bg-emerald-600 text-white font-bold text-xs shrink-0 active:scale-95 transition-all flex items-center gap-1.5"
-          >
-            {destinationBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Расчет'}
-          </button>
+          <span className={`px-2.5 py-2 rounded-xl border text-[10px] font-semibold flex items-center gap-1 shrink-0 ${
+            isDark ? 'bg-slate-950 border-slate-800 text-slate-500' : 'bg-white border-slate-200 text-slate-500'
+          }`}>
+            <MapPin className="w-3.5 h-3.5" /> Цель
+          </span>
         </div>
 
         {/* Error */}
@@ -2114,9 +2084,9 @@ export const HudTab: React.FC<HudTabProps> = ({
 
             <div className="flex items-baseline gap-2 mb-2 flex-wrap">
               <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Прогноз заряда по прибытии:
+                Ожидаемый SOC на финише:
               </span>
-              <span className={`text-4xl font-black font-mono tracking-tight ${
+              <span className={`text-5xl font-black font-mono tracking-tight ${
                 destinationResult.predictedSoc < 10
                   ? 'text-rose-500'
                   : destinationResult.predictedSoc < 20
@@ -2130,7 +2100,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                   isDark ? 'bg-emerald-950/70 text-emerald-400' : 'bg-emerald-50 text-emerald-700'
                 }`}>
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  live
+                  LIVE · SOC
                 </span>
               )}
             </div>
@@ -2286,40 +2256,29 @@ export const HudTab: React.FC<HudTabProps> = ({
           </div>
         </div>
 
-        {/* START / STOP Primary Action Buttons */}
-        <div className="grid grid-cols-2 gap-2.5">
-          {!isTracking ? (
+        {/* Secondary trip controls — the primary start action is kept near the top. */}
+        {isTracking && (
+          <div className="grid grid-cols-2 gap-2 mt-1">
             <button
-              onClick={handleStartTracking}
-              className="py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm sm:text-base shadow-lg shadow-emerald-600/25 active:scale-[0.98] transition-all flex items-center justify-center gap-2 col-span-2"
+              onClick={handleStopTracking}
+              className="py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs shadow-md shadow-rose-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
             >
-              <Play className="w-5 h-5 fill-current" />
-              <span>СТАРТ ТРЕКИНГА ПОЕЗДКИ</span>
+              <Square className="w-4 h-4 fill-current" />
+              <span>Завершить поездку</span>
             </button>
-          ) : (
-            <>
-              <button
-                onClick={handleStopTracking}
-                className="py-3.5 px-4 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs sm:text-sm shadow-lg shadow-rose-600/25 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-              >
-                <Square className="w-4 h-4 fill-current" />
-                <span>СТОП (ФИНИШ)</span>
-              </button>
-
-              <button
-                onClick={handleResetTracking}
-                className={`py-3.5 px-4 rounded-2xl font-bold text-xs sm:text-sm border active:scale-[0.98] transition-all flex items-center justify-center gap-2 ${
-                  isDark
-                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-                }`}
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Сброс</span>
-              </button>
-            </>
-          )}
-        </div>
+            <button
+              onClick={handleResetTracking}
+              className={`py-2.5 px-3 rounded-xl font-bold text-xs border active:scale-[0.98] transition-all flex items-center justify-center gap-2 ${
+                isDark
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+              }`}
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Сбросить</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Completed Trip Summary Modal */}
