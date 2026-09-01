@@ -44,7 +44,6 @@ import {
 import { triggerHaptic } from '../utils/haptics';
 import { geocodeAddress, buildRouteElevation } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute } from '../services/weatherForecast';
-import { CollapsibleDetails } from './ui/CollapsibleDetails';
 
 interface HudTabProps {
   settings: UserSettings;
@@ -90,7 +89,6 @@ export const HudTab: React.FC<HudTabProps> = ({
 
   // HUD display modes
   const [isMirrored, setIsMirrored] = useState(false);
-  const [factorsOpen, setFactorsOpen] = useState(false);
 
   // Dynamic SoC State
   // User sets initial SoC at start of trip (e.g. 80%), and it dynamically decreases during the trip
@@ -107,9 +105,9 @@ export const HudTab: React.FC<HudTabProps> = ({
   // SoC-at-Destination forecast tool
   const [destinationMode, setDestinationMode] = useState<'address' | 'distance'>('address');
   const [destinationQuery, setDestinationQuery] = useState('');
+  const [manualAvgSpeedKmH, setManualAvgSpeedKmH] = useState(60);
   const [destinationBusy, setDestinationBusy] = useState(false);
   const [destinationError, setDestinationError] = useState<string | null>(null);
-  const [trackingStopMessage, setTrackingStopMessage] = useState<string | null>(null);
   const [destinationBreakdownOpen, setDestinationBreakdownOpen] = useState(false);
   const [destinationResult, setDestinationResult] = useState<{
     name: string;
@@ -137,15 +135,6 @@ export const HudTab: React.FC<HudTabProps> = ({
     speedImpactPct?: number;
     driverStyleFactor?: number;
     breakdown?: any;
-    // Live in-trip recalculation support (address mode only — distance mode has no coordinates
-    // to re-measure from). originCoords + routeTortuosity let remaining distance be re-estimated
-    // from the current GPS fix via straight-line distance, without re-fetching the route/weather
-    // on every position update.
-    destCoords?: { lat: number; lon: number };
-    originCoords?: { lat: number; lon: number };
-    routeTortuosity?: number;
-    energyPerKm?: number;
-    isLive?: boolean;
   } | null>(null);
 
   // Weather data fetched via GPS coordinates
@@ -675,41 +664,67 @@ export const HudTab: React.FC<HudTabProps> = ({
   // Dynamic speed kinetics, speed stability and high-speed intensity only.
   // Weather/temperature/precipitation are deliberately excluded from driving style.
   const currentTripStyle = useMemo(() => {
+    // When tracking is inactive or in early calibration
     if (!isTracking || tripDistanceKm < 0.05 || elapsedSeconds < 6 || speedHistoryRef.current.length < 4) {
       return {
-        factor: 1.0, label: 'Калибровка', subLabel: 'Анализ темпа в пути...',
-        details: 'Определение стиля вождения', diffPct: 0,
+        factor: 1.0,
+        label: 'Калибровка',
+        subLabel: 'Анализ темпа в пути...',
+        details: 'Определение стиля вождения',
+        diffPct: 0,
         color: isDark ? 'text-slate-300' : 'text-slate-700',
         badgeBg: isDark ? 'bg-slate-800/80 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700',
       };
     }
+
     const movingSpeeds = speedHistoryRef.current.filter((s) => s >= 5);
     if (movingSpeeds.length < 4) {
       return {
-        factor: 1.0, label: 'Сбалансированный', subLabel: 'Штатный темп', details: 'Штатный темп', diffPct: 0,
+        factor: 1.0,
+        label: 'Сбалансированный',
+        subLabel: 'Штатный темп',
+        details: 'Штатный темп',
+        diffPct: 0,
         color: isDark ? 'text-slate-200' : 'text-slate-800',
         badgeBg: isDark ? 'bg-slate-800/80 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700',
       };
     }
 
-    // Driving style is now about kinetics, not speed itself. A steady 120 km/h cruise
-    // is expensive because of aerodynamics, but it is not automatically an aggressive style.
+    // 1. Speed stability & standard deviation
     const mean = movingSpeeds.reduce((a, b) => a + b, 0) / movingSpeeds.length;
     const variance = movingSpeeds.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / movingSpeeds.length;
     const stdDev = Math.sqrt(variance);
-    const deltas = movingSpeeds.slice(1).map((v, i) => Math.abs(v - movingSpeeds[i]));
-    const meanDelta = deltas.length ? deltas.reduce((a, b) => a + b, 0) / deltas.length : 0;
-    const sharpChangeRatio = deltas.length ? deltas.filter((d) => d >= 6).length / deltas.length : 0;
 
     let factor = 1.0;
-    if (stdDev < 8 && meanDelta < 2.5) factor -= 0.03;
-    else if (stdDev < 14 && meanDelta < 4) factor -= 0.01;
-    else if (stdDev > 30 || sharpChangeRatio > 0.20) factor += 0.07;
-    else if (stdDev > 23 || sharpChangeRatio > 0.10) factor += 0.04;
-    else if (meanDelta > 5) factor += 0.03;
 
-    const clamped = Number(Math.max(0.97, Math.min(1.10, factor)).toFixed(2));
+    // Smooth cruise vs stop-and-go jerks
+    if (stdDev < 10 && movingSpeeds.length > 8) {
+      factor -= 0.08; // High cruising stability bonus
+    } else if (stdDev < 16) {
+      factor -= 0.03; // Smooth driving
+    } else if (stdDev > 26) {
+      factor += 0.08; // Volatile bursts & hard brakes
+    }
+
+    // 2. Max speed vs Average speed burstiness
+    if (maxSpeed > 80 && avgTripSpeedKmH > 0) {
+      const burstRatio = maxSpeed / Math.max(30, avgTripSpeedKmH);
+      if (burstRatio > 1.6) {
+        factor += 0.06;
+      }
+    }
+
+    // 3. High speed intensity
+    const highSpeedRatio = movingSpeeds.filter((s) => s > 105).length / movingSpeeds.length;
+    if (highSpeedRatio > 0.35) {
+      factor += 0.08;
+    } else if (highSpeedRatio > 0.15) {
+      factor += 0.04;
+    }
+
+    const clamped = Number(Math.max(0.75, Math.min(1.35, factor)).toFixed(2));
     const diffPct = Math.round((clamped - 1) * 100);
+
     if (clamped < 0.95) {
       return {
         factor: clamped,
@@ -751,7 +766,7 @@ export const HudTab: React.FC<HudTabProps> = ({
         badgeBg: isDark ? 'bg-rose-950/70 border-rose-800 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-800',
       };
     }
-  }, [isTracking, tripDistanceKm, elapsedSeconds, isDark]);
+  }, [isTracking, tripDistanceKm, elapsedSeconds, maxSpeed, avgTripSpeedKmH, isDark]);
 
   // Energy consumption forecast combining live trip style + speed + temperature + climate + relative wind + precipitation + elevation
   const forecast: ConsumptionForecast = estimateTripConsumption(
@@ -829,19 +844,8 @@ export const HudTab: React.FC<HudTabProps> = ({
     (forecast.estimatedConsumption / forecast.baseConsumption).toFixed(2)
   );
 
-  // One-tap primary action: prepare the destination forecast (when a destination is set)
-  // and start live tracking. The actual average speed is learned from GPS during the trip.
-  const handleStartWithLiveForecast = async () => {
-    if (isTracking) return;
-    if (destinationQuery.trim()) {
-      await handleCalculateDestination();
-    }
-    handleStartTracking();
-  };
-
   // START tracking
   const handleStartTracking = () => {
-    setTrackingStopMessage(null);
     triggerHaptic('success', settings.hapticFeedback);
     requestWakeLock();
     setIsTracking(true);
@@ -860,6 +864,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     setElevationLossM(0);
     setAltitudeAvailable(false);
     setCompletedTripSummary(null);
+    setTrackingStopMessage('');
     segmentEnergyKwhRef.current = 0;
     setLiveSegmentEnergyKwh(0);
   };
@@ -908,9 +913,9 @@ export const HudTab: React.FC<HudTabProps> = ({
 
   // RESET tracking
   const handleResetTracking = () => {
-    setTrackingStopMessage(null);
     triggerHaptic('light', settings.hapticFeedback);
     setIsTracking(false);
+    setTrackingStopMessage('');
     setTripStartTime(null);
     setElapsedSeconds(0);
     setTripDistanceKm(0);
@@ -1002,9 +1007,10 @@ export const HudTab: React.FC<HudTabProps> = ({
     setDestinationResult(null);
     setDestinationBreakdownOpen(false);
 
-    // While tracking, use the live GPS-derived average. Before the trip starts,
-    // use a conservative fallback; the forecast is immediately updated from live pace.
-    const destinationSpeedKmH = isTracking ? avgTripSpeedKmH : 60;
+    // Speed used to estimate consumption + ETA for the destination forecast:
+    // - Trekking already running -> use the live, GPS-derived average speed of this trip.
+    // - Not tracking yet -> use the speed the driver manually set for the planned trip.
+    const destinationSpeedKmH = isTracking ? avgTripSpeedKmH : Math.min(150, Math.max(5, manualAvgSpeedKmH || 60));
 
     try {
       if (destinationMode === 'distance') {
@@ -1137,8 +1143,6 @@ export const HudTab: React.FC<HudTabProps> = ({
       const destForecast = estimateTripConsumption(destinationSpeedKmH, calcTemperature, sessions, settings.batteryCapacityKwh, climateOn, segmented.avgWindSpeed, calcRelativeWindAngle, isTracking ? currentTripStyle.factor : undefined, calcWeatherCode, segmented.avgPrecipitation, { gainM, lossM, distanceKm: route.distanceKm }, segmented.durationHours, segmented.climatePowerKw, passengers);
       const energyNeededKwh = segmented.energyKwh;
       const predictedSoc = Math.max(0, Number((liveDynamicSoc - (energyNeededKwh / batteryCap) * 100).toFixed(1)));
-      const originStraightKm = Math.max(0.1, calculateDistance(prevPositionRef.current.lat, prevPositionRef.current.lon, geo.lat, geo.lon));
-      const routeTortuosity = Math.min(3, Math.max(1, route.distanceKm / originStraightKm));
 
       setDestinationResult({
         name: geo.displayName.split(',').slice(0, 3).join(','),
@@ -1168,11 +1172,6 @@ export const HudTab: React.FC<HudTabProps> = ({
         speedImpactPct: destForecast.speedImpactPct,
         driverStyleFactor: destForecast.driverStyleFactor,
         breakdown: segmented,
-        destCoords: { lat: geo.lat, lon: geo.lon },
-        originCoords: { lat: prevPositionRef.current.lat, lon: prevPositionRef.current.lon },
-        routeTortuosity,
-        energyPerKm: route.distanceKm > 0 ? energyNeededKwh / route.distanceKm : undefined,
-        isLive: isTracking,
       });
     } catch (e) {
       // geocodeAddress / buildRouteElevation throw with a specific, user-readable message
@@ -1185,940 +1184,65 @@ export const HudTab: React.FC<HudTabProps> = ({
     }
   };
 
-  // Live recalculation of "% at arrival" while tracking. Runs off tripDistanceKm (already updates
-  // on every accepted GPS fix) instead of position state directly, since position itself only
-  // lives in a ref. Deliberately does NOT re-run geocoding / route-building / weather-along-route —
-  // those are the expensive network calls handleCalculateDestination already paid for once. It
-  // only re-measures straight-line distance to the pinned destination and scales it by the
-  // route's curviness ratio captured at calc time, which is enough to keep the remaining-distance
-  // (and therefore predicted SoC) honest as you actually drive, at effectively zero cost per tick.
-  useEffect(() => {
-    if (!isTracking || !destinationResult || destinationResult.approximate) return;
-    const { destCoords, originCoords, routeTortuosity, energyPerKm } = destinationResult;
-    if (!destCoords || !originCoords || !routeTortuosity || energyPerKm === undefined) return;
-    const pos = prevPositionRef.current;
-    if (!pos) return;
-
-    const straightNowKm = calculateDistance(pos.lat, pos.lon, destCoords.lat, destCoords.lon);
-    const remainingKm = Math.max(0, straightNowKm * routeTortuosity);
-    const newPredictedSoc = Math.max(0, Math.min(100, Number((liveDynamicSoc - (remainingKm * energyPerKm / batteryCap) * 100).toFixed(1))));
-    const liveAvgSpeed = avgTripSpeedKmH > 3 ? avgTripSpeedKmH : undefined;
-    const newEtaMinutes = liveAvgSpeed ? Math.round((remainingKm / liveAvgSpeed) * 60) : undefined;
-    const arrivalDate = new Date(Date.now() + (newEtaMinutes ?? 0) * 60000);
-
-    setDestinationResult(prev => prev ? {
-      ...prev,
-      distanceKm: Number(remainingKm.toFixed(1)),
-      predictedSoc: newPredictedSoc,
-      etaMinutes: newEtaMinutes,
-      arrivalTimeLabel: newEtaMinutes
-        ? arrivalDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-        : prev.arrivalTimeLabel,
-      isLive: true,
-    } : prev);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tripDistanceKm, isTracking]);
-
   return (
-    <div
-      id="hud-tab-container"
-      className={`hud-minimal-shell relative min-h-[82vh] rounded-3xl p-3 sm:p-5 flex flex-col gap-2 select-none transition-all duration-200 ${
-        isMirrored ? 'scale-x-[-1]' : ''
-      } ${
-        isDark
-          ? 'bg-slate-950 text-white border border-slate-800/90 shadow-2xl'
-          : 'bg-white text-slate-900 border border-slate-200 shadow-xl'
-      }`}
-    >
-      {/* Top HUD Controls & Sensor Status Bar */}
-      <div className={`hud-topbar flex items-center justify-between gap-2 border-b pb-3 ${
-        isDark ? 'border-slate-800/80' : 'border-slate-200'
-      }`}>
-        {/* GPS, Temp, and Screen Wake Lock Status */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* GPS Accuracy Indicator */}
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border ${
-            isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-100 border-slate-200'
-          }`}>
-            <span
-              className={`w-2 h-2 rounded-full shrink-0 ${
-                gpsAccuracy !== null && gpsAccuracy <= 15
-                  ? 'bg-emerald-400 animate-pulse shadow-[0_0_8px_rgba(52,211,153,0.8)]'
-                  : gpsAccuracy !== null
-                  ? 'bg-amber-400'
-                  : 'bg-rose-500'
-              }`}
-            />
-            <span className={`text-[11px] font-mono font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-              {gpsAccuracy !== null ? `GPS ±${gpsAccuracy}м` : 'Поиск GPS...'}
-            </span>
+    <div id="hud-tab-container" className={`hud-minimal-shell relative h-[calc(100vh-7.5rem)] min-h-[500px] max-h-[900px] overflow-hidden rounded-3xl p-2.5 sm:p-4 flex flex-col gap-1.5 select-none transition-all duration-200 ${isMirrored ? 'scale-x-[-1]' : ''} ${isDark ? 'bg-slate-950 text-white border border-slate-800/90 shadow-2xl' : 'bg-white text-slate-900 border border-slate-200 shadow-xl'}`}>
+      {/* 1. Compact status bar */}
+      <div className={`flex items-center justify-between gap-2 border-b pb-1.5 shrink-0 ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
+        <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+          <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border shrink-0 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${gpsAccuracy !== null && gpsAccuracy <= 15 ? 'bg-emerald-400 animate-pulse' : gpsAccuracy !== null ? 'bg-amber-400' : 'bg-rose-500'}`} />
+            <span className={`font-mono font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{gpsAccuracy !== null ? `GPS ±${gpsAccuracy}м` : 'GPS...'}</span>
           </div>
-
-          {/* Temperature */}
-          <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-mono border ${
-            isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-100 border-slate-200'
-          }`}>
-            <Thermometer className="w-3.5 h-3.5 text-cyan-500" />
-            <span className={`font-bold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
-              {weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°C` : '20°C'}
-            </span>
+          <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-mono border shrink-0 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
+            <Thermometer className="w-3 h-3 text-cyan-500" />
+            <span className={isDark ? 'text-cyan-300' : 'text-cyan-700'}>{weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°C` : '—'}</span>
           </div>
-
-          {/* WakeLock Active Indicator */}
-          <div
-            title="Экран iPhone не заблокируется во время работы HUD"
-            className={`hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] border font-medium ${
-              wakeLockActive
-                ? isDark
-                  ? 'bg-emerald-950/60 border-emerald-800/70 text-emerald-300'
-                  : 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                : isDark
-                ? 'bg-slate-900/80 border-slate-800 text-slate-400'
-                : 'bg-slate-100 border-slate-200 text-slate-500'
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Экран активен</span>
-          </div>
+          {wakeLockActive && <span className="text-[9px] text-emerald-500 hidden sm:inline">● Экран активен</span>}
+          {isTracking && <span className="text-[9px] font-bold text-emerald-400">● LIVE</span>}
         </div>
-
-        {/* Action Controls: Mirror Mode */}
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => {
-              triggerHaptic('light', settings.hapticFeedback);
-              setIsMirrored(!isMirrored);
-            }}
-            title="Зеркальный режим для проекции на лобовое стекло (HUD)"
-            className={`p-2 sm:px-3 sm:py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 ${
-              isMirrored
-                ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                : isDark
-                ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border-slate-700'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-            }`}
-          >
-            <FlipHorizontal className="w-4 h-4" />
-            <span className="hidden sm:inline text-[11px]">Зеркало HUD</span>
-          </button>
-        </div>
+        <button onClick={() => { triggerHaptic('light', settings.hapticFeedback); setIsMirrored(!isMirrored); }} title="Зеркальный режим" className={`p-1.5 rounded-lg border shrink-0 ${isMirrored ? 'bg-emerald-600 text-white border-emerald-500' : isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-300'}`}><FlipHorizontal className="w-3.5 h-3.5" /></button>
       </div>
 
-      {/* Initial / Live SOC — intentionally high in the HUD so the driver cannot miss it */}
-      <div className={`rounded-2xl border p-3 sm:p-3.5 mb-2.5 ${
-        isDark ? 'bg-slate-900/95 border-slate-700/90' : 'bg-white border-slate-200 shadow-xs'
-      }`}>
+      {/* 2. Main driving value: speed appears only here */}
+      <div className="flex items-center justify-center gap-2 shrink-0 py-0.5 leading-none">
+        <span className={`text-7xl sm:text-8xl font-black font-mono tracking-tighter ${isDark ? 'text-transparent bg-clip-text bg-gradient-to-b from-white via-slate-100 to-slate-300' : 'text-slate-900'}`}>{currentSpeed}</span>
+        <div className="flex flex-col items-start"><span className={`text-sm font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>км/ч</span>{gpsHeading !== null && <span className={`text-[9px] font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{gpsHeading}° · {currentHeading < 45 || currentHeading >= 315 ? 'С' : currentHeading < 135 ? 'В' : currentHeading < 225 ? 'Ю' : 'З'}</span>}</div>
+      </div>
+
+      {/* 3. Battery + range: one SOC indicator only */}
+      <div className={`rounded-2xl border px-3 py-2 sm:px-4 sm:py-2.5 shrink-0 ${isDark ? 'bg-slate-900/95 border-slate-700/80' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className={`text-[11px] font-extrabold tracking-wide ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-              {isTracking ? 'ТЕКУЩИЙ ЗАРЯД' : 'SOC НА СТАРТЕ ПОЕЗДКИ'}
-            </div>
-            <div className={`font-mono font-black text-3xl leading-none mt-1 ${
-              liveDynamicSoc < 20 ? 'text-rose-500' : liveDynamicSoc < 40 ? 'text-amber-500' : isDark ? 'text-emerald-400' : 'text-emerald-600'
-            }`}>
-              {isTracking ? liveDynamicSoc : startTripSoc}%
-            </div>
-            {isTracking && tripDistanceKm > 0 && (
-              <div className={`text-[10px] mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Старт: {startTripSoc}% · потрачено {energySpentKwh.toFixed(2)} кВт⋅ч
-              </div>
-            )}
-          </div>
-
-          {!isTracking && (
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartTripSoc(prev => Math.max(1, prev - 10)); }}
-                className={`px-2 py-1.5 rounded-lg border text-xs font-bold ${isDark ? 'bg-slate-950 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-slate-200'}`}
-                title="Уменьшить на 10%"
-              >−10%</button>
-              <button
-                onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartTripSoc(prev => Math.max(1, prev - 1)); }}
-                className={`p-1.5 rounded-lg border ${isDark ? 'bg-slate-950 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-slate-200'}`}
-                title="Уменьшить на 1%"
-              ><Minus className="w-3.5 h-3.5" /></button>
-              <button
-                onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartTripSoc(prev => Math.min(100, prev + 1)); }}
-                className={`p-1.5 rounded-lg border ${isDark ? 'bg-slate-950 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-slate-200'}`}
-                title="Увеличить на 1%"
-              ><Plus className="w-3.5 h-3.5" /></button>
-              <button
-                onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartTripSoc(prev => Math.min(100, prev + 10)); }}
-                className={`px-2 py-1.5 rounded-lg border text-xs font-bold ${isDark ? 'bg-slate-950 text-slate-300 border-slate-800' : 'bg-white text-slate-700 border-slate-200'}`}
-                title="Увеличить на 10%"
-              >+10%</button>
-            </div>
-          )}
+          <div><span className={`block text-[9px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{isTracking ? 'SOC сейчас' : 'SOC на старте'}</span><span className={`font-mono font-black text-4xl sm:text-5xl leading-none ${liveDynamicSoc < 20 ? 'text-rose-500' : liveDynamicSoc < 40 ? 'text-amber-500' : isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{isTracking ? liveDynamicSoc : startTripSoc}%</span></div>
+          <div className="text-right"><span className={`block text-[9px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Запас хода</span><span className={`font-mono font-black text-3xl sm:text-4xl leading-none ${isDark ? 'text-cyan-300' : 'text-cyan-600'}`}>~{dynamicRemainingRangeKm} <span className="text-xs">км</span></span><span className={`block text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>до 10%: ~{safeDynamicRangeKm} км</span></div>
         </div>
-
-        {!isTracking && (
-          <div className="mt-2 px-0.5">
-            <input
-              type="range" min="1" max="100" step="1" value={startTripSoc}
-              onChange={(e) => setStartTripSoc(Number(e.target.value))}
-              className="w-full h-2 accent-emerald-500 cursor-pointer touch-pan-x"
-              aria-label="SOC на старте поездки"
-            />
-          </div>
-        )}
-        <div className={`w-full h-2 rounded-full overflow-hidden mt-2 ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-200 border border-slate-300'}`}>
-          <div
-            className={`h-full rounded-full transition-all duration-300 ${liveDynamicSoc < 20 ? 'bg-rose-500' : liveDynamicSoc < 40 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-            style={{ width: `${Math.min(100, Math.max(0, isTracking ? liveDynamicSoc : startTripSoc))}%` }}
-          />
-        </div>
+        {!isTracking ? <div className="flex items-center gap-1.5 mt-1.5"><button onClick={() => setStartTripSoc(prev => Math.max(1, prev - 10))} className={`px-1.5 py-0.5 rounded-md border text-[9px] font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−10</button><input type="range" min="1" max="100" step="1" value={startTripSoc} onChange={(e) => setStartTripSoc(Number(e.target.value))} className="flex-1 h-1.5 accent-emerald-500 cursor-pointer touch-pan-x" aria-label="SOC на старте поездки" /><button onClick={() => setStartTripSoc(prev => Math.min(100, prev + 10))} className={`px-1.5 py-0.5 rounded-md border text-[9px] font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+10</button></div> : <div className={`mt-1.5 h-1.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-950' : 'bg-slate-200'}`}><div className={`h-full transition-all duration-300 ${liveDynamicSoc < 20 ? 'bg-rose-500' : liveDynamicSoc < 40 ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, Math.max(0, liveDynamicSoc))}%` }} /></div>}
       </div>
 
-      {/* Tracking controls — directly under SOC for immediate visibility */}
-      {isTracking && (
-        <div className="grid grid-cols-2 gap-2 w-full max-w-lg mx-auto mb-2">
-          <button onClick={handleStopTracking} className="py-3 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-2">
-            <Square className="w-4 h-4 fill-current" /><span>СТОП</span>
-          </button>
-          <button onClick={handleResetTracking} className={`py-3 px-3 rounded-xl font-bold text-xs border active:scale-[0.98] transition-all flex items-center justify-center gap-2 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'}`}>
-            <RotateCcw className="w-4 h-4" /><span>СБРОС</span>
-          </button>
-        </div>
-      )}
-
-      {trackingStopMessage && !isTracking && (
-        <div className={`mb-2 rounded-xl border px-3 py-2 text-center text-xs font-semibold ${
-          isDark ? 'bg-slate-900/80 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'
-        }`}>
-          {trackingStopMessage}
-        </div>
-      )}
-
-      {/* 5. SoC AT DESTINATION FORECAST (Цель поездки) */}
-      <div className={`order-1 w-full max-w-lg mx-auto rounded-2xl p-3 sm:p-4 border transition-colors ${
-        isDark
-          ? 'bg-slate-900/90 border-slate-800/90 shadow-lg'
-          : 'bg-slate-50 border-slate-200 shadow-xs'
-      }`}>
-        <div className="flex items-center gap-1.5 mb-2.5">
-          <div className={`p-1.5 rounded-lg border shrink-0 ${
-            isDark ? 'bg-slate-950 border-slate-800 text-violet-400' : 'bg-white border-slate-200 text-violet-600'
-          }`}>
-            <Flag className="w-4 h-4" />
-          </div>
-          <div className="text-left min-w-0">
-            <span className={`text-xs font-bold uppercase tracking-wider block ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-              SOC на финише
-            </span>
-            <span className={`text-[10px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              Живой прогноз заряда на финише по маршруту
-            </span>
-          </div>
-        </div>
-
-        {/* Destination — address only in Live Consumption mode */}
-        {/* Input + Submit */}
-        <div className="flex gap-1.5">
-          <input
-            type="text"
-            inputMode="text" 
-            value={destinationQuery}
-            onChange={(e) => setDestinationQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleCalculateDestination();
-            }}
-            placeholder="Город, улица, дом…"
-            className={`flex-1 min-w-0 px-3 py-2 rounded-xl border text-xs font-medium focus:outline-hidden focus:ring-1 focus:ring-emerald-500 ${
-              isDark
-                ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600'
-                : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'
-            }`}
-          />
-          <span className={`px-2.5 py-2 rounded-xl border text-[10px] font-semibold flex items-center gap-1 shrink-0 ${
-            isDark ? 'bg-slate-950 border-slate-800 text-slate-500' : 'bg-white border-slate-200 text-slate-500'
-          }`}>
-            <MapPin className="w-3.5 h-3.5" /> Цель
-          </span>
-        </div>
-
-        {/* Error */}
-        {destinationError && (
-          <div className={`mt-2 rounded-xl p-2 flex items-center gap-2 text-[11px] border ${
-            isDark ? 'bg-amber-950/60 border-amber-800/70 text-amber-200' : 'bg-amber-50 border-amber-200 text-amber-900'
-          }`}>
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-            <span>{destinationError}</span>
-          </div>
-        )}
-
-        {/* Result */}
-        {destinationResult && (
-          <div className={`mt-2.5 p-3 rounded-2xl border text-left ${
-            isDark ? 'bg-slate-950/90 border-slate-800/80' : 'bg-white border-slate-200'
-          }`}>
-            <div className="flex items-start justify-between gap-2 mb-2">
-              <div className="min-w-0">
-                <span className={`text-[10px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  {destinationResult.approximate ? 'Оценка по прямой (без учета дорог)' : 'До'}
-                </span>
-                <span className={`text-xs font-bold block truncate ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                  {destinationResult.name}
-                </span>
-              </div>
-              <button
-                onClick={() => {
-                  setDestinationResult(null);
-    setDestinationBreakdownOpen(false);
-                  setDestinationQuery('');
-                }}
-                className={`shrink-0 text-[11px] ${isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-700'}`}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="flex items-baseline gap-2 mb-2 flex-wrap">
-              <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Ожидаемый SOC на финише:
-              </span>
-              <span className={`text-5xl font-black font-mono tracking-tight ${
-                destinationResult.predictedSoc < 10
-                  ? 'text-rose-500'
-                  : destinationResult.predictedSoc < 20
-                  ? 'text-amber-500'
-                  : isDark ? 'text-emerald-400' : 'text-emerald-600'
-              }`}>
-                {destinationResult.predictedSoc}%
-              </span>
-              {destinationResult.isLive && (
-                <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
-                  isDark ? 'bg-emerald-950/70 text-emerald-400' : 'bg-emerald-50 text-emerald-700'
-                }`}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  LIVE · SOC
-                </span>
-              )}
-            </div>
-
-            {destinationResult.predictedSoc <= 0 && (
-              <div className={`mb-2 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold border ${
-                isDark ? 'bg-rose-950/70 border-rose-800 text-rose-300' : 'bg-rose-50 border-rose-300 text-rose-800'
-              }`}>
-                ⚠️ Заряда не хватит — потребуется подзарядка в пути
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div>
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{destinationResult.isLive ? 'Осталось' : 'Дистанция'}</span>
-                <span className={`font-mono font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{destinationResult.distanceKm} км</span>
-              </div>
-              <div>
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Время в пути</span>
-                <span className={`font-mono font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                  {destinationResult.etaMinutes ? `~${destinationResult.etaMinutes} мин` : '—'}
-                  {destinationResult.arrivalTimeLabel && (
-                    <span className={`ml-1 font-normal ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                      (к {destinationResult.arrivalTimeLabel})
-                    </span>
-                  )}
-                </span>
-              </div>
-              <div>
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Расход маршрута</span>
-                <span className={`font-mono font-bold ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
-                  {destinationResult.predictedConsumption.toFixed(1)} кВт⋅ч/100
-                </span>
-              </div>
-              <div>
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Рельеф</span>
-                <span className={`font-mono font-bold flex items-center gap-1 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                  <Mountain className="w-3 h-3" /> ▲{destinationResult.gainM}м ▼{destinationResult.lossM}м
-                </span>
-              </div>
-              <div>
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  Погода {destinationResult.forecastUsed ? 'к прибытию' : '(текущая)'}
-                </span>
-                <span className={`font-mono font-bold flex items-center gap-1 ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                  {destinationResult.forecastTemperature !== undefined
-                    ? `${destinationResult.forecastTemperature > 0 ? '+' : ''}${destinationResult.forecastTemperature}°C`
-                    : weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°C` : '—'}
-                  {destinationResult.forecastWindSpeed !== undefined && (
-                    <span className={isDark ? 'text-cyan-400' : 'text-cyan-600'}>· {destinationResult.forecastWindSpeed} км/ч</span>
-                  )}
-                </span>
-              </div>
-            </div>
-            {destinationResult.forecastPrecipLabel && (
-              <span className={`block mt-1.5 text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                {destinationResult.forecastPrecipLabel}
-              </span>
-            )}
-            {destinationResult.breakdown && (
-              <div className={`mt-3 rounded-xl border ${isDark ? 'bg-slate-900/80 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
-                <button onClick={() => setDestinationBreakdownOpen(v => !v)} className="w-full p-3 flex items-center justify-between text-left">
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Разбор поездки</span>
-                  <ChevronDown className={`w-4 h-4 transition-transform ${destinationBreakdownOpen ? 'rotate-180' : ''}`} />
-                </button>
-                {destinationBreakdownOpen && <div className="px-3 pb-3">
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px]">
-                    <div className="flex justify-between gap-2"><span>Базовое движение</span><b>{destinationResult.breakdown.baseEnergyKwh.toFixed(2)} кВт⋅ч</b></div>
-                    <div className="flex justify-between gap-2"><span>Температура</span><b>{destinationResult.breakdown.temperatureDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.temperatureDeltaKwh.toFixed(2)}</b></div>
-                    <div className="flex justify-between gap-2"><span>Ветер</span><b>{destinationResult.breakdown.windDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.windDeltaKwh.toFixed(2)}</b></div>
-                    <div className="flex justify-between gap-2"><span>Осадки / дорога</span><b>{destinationResult.breakdown.precipitationDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.precipitationDeltaKwh.toFixed(2)}</b></div>
-                    <div className="flex justify-between gap-2"><span>Стиль</span><b>{destinationResult.breakdown.driverDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.driverDeltaKwh.toFixed(2)}</b></div>
-                    <div className="flex justify-between gap-2"><span>Рельеф</span><b>{destinationResult.breakdown.elevationDeltaKwh >= 0 ? '+' : ''}{destinationResult.breakdown.elevationDeltaKwh.toFixed(2)}</b></div>
-                    <div className="flex justify-between gap-2"><span>Климат</span><b>+{destinationResult.breakdown.climateEnergyKwh.toFixed(2)}</b></div>
-                    <div className="flex justify-between gap-2"><span>Рекуперация</span><b>−{destinationResult.breakdown.regenEnergyKwh.toFixed(2)}</b></div>
-                  </div>
-                  <div className="mt-2 pt-2 border-t border-slate-500/20 flex justify-between text-[10px] font-bold"><span>Сегментов</span><span>{destinationResult.breakdown.segments}</span></div>
-                  <div className="mt-2 text-[9px] text-slate-500">Погода и ветер интерполируются по маршруту, рельеф считается по каждому сегменту.</div>
-                </div>}
-              </div>
-            )}
-            <span className={`block mt-2 text-[9px] ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
-              {destinationResult.forecastUsed
-                ? `Расчет использует прогноз погоды на время прибытия (${destinationResult.arrivalTimeLabel ?? '—'}), а не текущие условия.`
-                : 'Прогноз погоды на время прибытия получить не удалось — использованы текущие условия.'}
-              {' '}
-              {destinationResult.approximate
-                ? 'Режим "по дистанции" не строит маршрут — рельеф экстраполирован из уже проеханного пути (или считается ровным).'
-                : 'Маршрут через публичный OSRM-роутер, высоты через Open-Elevation — оценка, а не точная навигация.'}
-            </span>
-          </div>
-        )}
+      {/* 4. Destination forecast: one of the most prominent values */}
+      <div className={`rounded-2xl border px-3 py-2 sm:px-4 sm:py-2.5 shrink-0 ${isDark ? 'bg-slate-900/95 border-emerald-900/60' : 'bg-emerald-50/70 border-emerald-200'}`}>
+        <div className="flex items-center justify-between gap-2"><div className="flex items-center gap-1.5 min-w-0"><Flag className={`w-4 h-4 shrink-0 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} /><div className="min-w-0"><span className={`block text-[9px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>SOC на финише</span><span className={`block text-[9px] truncate ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>{destinationResult?.name || 'Задайте пункт назначения'}</span></div></div>{destinationResult ? <span className={`font-mono font-black text-4xl sm:text-5xl leading-none ${destinationResult.predictedSoc < 10 ? 'text-rose-500' : destinationResult.predictedSoc < 20 ? 'text-amber-500' : isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{destinationResult.predictedSoc}%</span> : <span className={`text-xl font-bold ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>—</span>}</div>
+        <div className="flex items-center gap-1.5 mt-1.5"><input type="text" inputMode="text" value={destinationQuery} onChange={(e) => setDestinationQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleCalculateDestination(); }} placeholder="Город, улица, дом…" className={`flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border text-[10px] ${isDark ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600' : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'}`} />{!isTracking && <button onClick={handleStartWithLiveForecast} disabled={destinationBusy} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-[10px] font-black shrink-0">{destinationBusy ? '…' : destinationQuery.trim() ? 'РАСЧЁТ + СТАРТ' : 'СТАРТ'}</button>}{isTracking && <span className="px-2 py-1 rounded-lg bg-emerald-950/70 text-emerald-300 text-[9px] font-bold border border-emerald-800/70">LIVE</span>}</div>
+        {destinationResult && <div className={`flex items-center justify-between gap-2 mt-1 text-[9px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}><span>{destinationResult.isLive ? 'Осталось' : 'Дистанция'}: <b>{destinationResult.distanceKm} км</b></span><span>~{destinationResult.etaMinutes ?? '—'} мин</span><span>{destinationResult.predictedConsumption.toFixed(1)} кВт⋅ч/100</span></div>}
+        {destinationError && <div className="mt-1 text-[9px] text-amber-500 truncate">{destinationError}</div>}
       </div>
 
-
-      {/* Primary Live Consumption Action */}
-      <div className={`rounded-2xl border p-2.5 ${
-        isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-50 border-slate-200'
-      }`}>
-        <div className="flex items-center gap-2.5">
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-            isDark ? 'bg-emerald-950 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
-          }`}>
-            <Gauge className="w-5 h-5" />
-          </div>
-          <div className="min-w-0 flex-1 text-left">
-            <div className={`text-sm font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>
-              {isTracking ? 'Живой расход активен' : 'Живой расход'}
-            </div>
-            <div className={`text-[10px] truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              {isTracking
-                ? `SOC на финише пересчитывается в реальном времени · ${avgTripSpeedKmH} км/ч`
-                : destinationQuery.trim()
-                ? 'Цель задана — одной кнопкой рассчитаем маршрут и начнём поездку'
-                : 'GPS автоматически определит реальный темп поездки'}
-            </div>
-          </div>
-          {!isTracking ? (
-            <button
-              onClick={handleStartWithLiveForecast}
-              disabled={destinationBusy || isTracking}
-              className="py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-black text-xs shadow-lg shadow-emerald-600/25 active:scale-[0.98] transition-all flex items-center gap-1.5 shrink-0"
-            >
-              {destinationBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
-              <span>{destinationQuery.trim() ? 'РАСЧЁТ + СТАРТ' : 'НАЧАТЬ ПОЕЗДКУ'}</span>
-            </button>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-emerald-950/70 text-emerald-300 text-[10px] font-bold border border-emerald-800/70 shrink-0">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> LIVE
-            </span>
-          )}
-        </div>
+      {/* 5. Current conditions: wind + climate + passengers */}
+      <div className={`rounded-xl border px-2.5 py-1.5 flex items-center gap-2 shrink-0 ${isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+        <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden text-[9px]"><div className={`w-7 h-7 rounded-full border flex items-center justify-center shrink-0 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}><ArrowDown className={`w-3.5 h-3.5 ${windInfo.color}`} style={{ transform: `rotate(${windInfo.arrowRotation}deg)` }} /></div><span className={`font-bold shrink-0 ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{windSpeedMs} м/с</span><span className={`px-1.5 py-0.5 rounded border font-bold truncate ${windInfo.badgeBg}`}>{windInfo.label}</span>{livePrecipitation.impactPct > 0 && <span className="font-bold shrink-0">{livePrecipitation.type.includes('snow') ? '❄️' : '🌧️'}</span>}</div>
+        <div className={`flex items-center gap-0.5 shrink-0 rounded-lg border px-1 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}><button onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-5 h-5 text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>−</button><span className={`text-[9px] font-bold min-w-4 text-center ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>👤{passengers}</span><button onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-5 h-5 text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>+</button></div>
+        <button onClick={() => setClimateOn(!climateOn)} className={`px-2 py-1 rounded-lg border text-[9px] font-bold shrink-0 ${climateOn ? outdoorTemp < 19 ? 'bg-amber-950/70 text-amber-300 border-amber-800' : 'bg-cyan-950/70 text-cyan-300 border-cyan-800' : isDark ? 'bg-slate-950 text-slate-400 border-slate-800' : 'bg-white text-slate-600 border-slate-200'}`}>{climateOn ? outdoorTemp < 19 ? `🔥 +${liveClimate.impactPct}%` : `❄️ +${liveClimate.impactPct}%` : '🍃 ЭКО'}</button>
       </div>
 
-      {/* GPS Error Warning Banner */}
-      {gpsError && (
-        <div className={`mt-2 rounded-xl p-2 flex items-center gap-2 text-xs border ${
-          isDark
-            ? 'bg-amber-950/60 border-amber-800/70 text-amber-200'
-            : 'bg-amber-50 border-amber-200 text-amber-900'
-        }`}>
-          <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
-          <span>{gpsError}</span>
-        </div>
-      )}
+      {/* 6. Trip telemetry */}
+      <div className={`rounded-xl border grid grid-cols-3 divide-x shrink-0 ${isDark ? 'bg-slate-900/70 border-slate-800 divide-slate-800' : 'bg-slate-50 border-slate-200 divide-slate-200'}`}><div className="py-1.5 text-center"><span className={`block text-[8px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Дистанция</span><b className={`font-mono text-base ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{tripDistanceKm.toFixed(1)} <small className="text-[8px]">км</small></b></div><div className="py-1.5 text-center"><span className={`block text-[8px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>В пути</span><b className={`font-mono text-base ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{formatTime(elapsedSeconds)}</b></div><div className="py-1.5 text-center"><span className={`block text-[8px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Средняя</span><b className={`font-mono text-base ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{avgTripSpeedKmH} <small className="text-[8px]">км/ч</small></b></div></div>
 
-      {/* Main Cockpit Speedometer & Info Display */}
-      <div className="hud-speed-block my-auto py-2 sm:py-3 flex flex-col items-center justify-center text-center space-y-2.5">
-        {/* Live Speed Header */}
-        <div className="flex items-center gap-2 font-bold uppercase tracking-widest text-xs">
-          <Gauge className={`w-4 h-4 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
-          <span className={isDark ? 'text-emerald-400' : 'text-emerald-700'}>Скорость GPS</span>
-          {gpsHeading !== null && (
-            <span className={`text-[11px] font-mono font-normal ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              • {gpsHeading}° ({currentHeading < 45 || currentHeading >= 315 ? 'С' : currentHeading < 135 ? 'В' : currentHeading < 225 ? 'Ю' : 'З'})
-            </span>
-          )}
-        </div>
+      {/* 7. Secondary details */}
+      <CollapsibleDetails isDark={isDark} open={factorsOpen} onToggle={() => setFactorsOpen(v => !v)} className="w-full shrink-0" label={<span className="inline-flex items-center gap-1.5"><Activity className="w-3.5 h-3.5 text-amber-500" /><span className="normal-case font-bold">Факторы расхода</span><span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>x{totalConsumptionFactor.toFixed(2)}</span></span>}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[9px]"><div>Стиль: <b>{currentTripStyle.label} · x{currentTripStyle.factor.toFixed(2)}</b></div><div>Климат: <b>{liveClimate.powerKw.toFixed(1)} кВт</b></div><div>Осадки: <b>{livePrecipitation.impactPct}%</b></div><div>Ветер: <b>{forecast.windImpactPct ?? 0}%</b></div><div>Скорость: <b>{forecast.speedImpactPct}%</b></div><div>Рельеф: <b>{elevationGainM}м / {elevationLossM}м</b></div></div>
+      </CollapsibleDetails>
 
-        {/* GIANT SPEED NUMBER */}
-        <div className="relative my-0.5 flex items-baseline justify-center">
-          <span className={`text-8xl sm:text-9xl font-black font-mono tracking-tighter ${
-            isDark
-              ? 'text-transparent bg-clip-text bg-gradient-to-b from-white via-slate-100 to-slate-300 drop-shadow-[0_0_24px_rgba(16,185,129,0.3)]'
-              : 'text-slate-900 drop-shadow-sm'
-          }`}>
-            {currentSpeed}
-          </span>
-          <span className={`text-sm sm:text-base font-bold ml-2 tracking-wider uppercase ${
-            isDark ? 'text-slate-400' : 'text-slate-500'
-          }`}>
-            км/ч
-          </span>
-        </div>
-
-        {/* 2. DYNAMIC RELATIVE WIND & CLIMATE CONTROL */}
-        <div className={`hud-wind-block w-full max-w-lg rounded-2xl p-3 border transition-colors ${
-          isDark
-            ? 'bg-slate-900/90 border-slate-800/90 shadow-lg'
-            : 'bg-slate-50 border-slate-200 shadow-xs'
-        }`}>
-          <div className="flex items-center justify-between gap-2">
-            {/* Wind Direction with Relative Dynamic Vector Arrow */}
-            <div className="flex items-center gap-2.5 min-w-0">
-              {/* Dynamic Rotating Wind Vector Compass */}
-              <div className={`relative w-9 h-9 rounded-full border flex items-center justify-center shrink-0 shadow-inner ${
-                isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'
-              }`}>
-                {/* Vehicle Front Indicator (12 o'clock / 0 deg) */}
-                <div className="absolute top-1 w-1.5 h-1.5 rounded-full bg-emerald-500" title="Направление движения авто" />
-                
-                {/* Wind Flow Vector Arrow rotating dynamically relative to vehicle heading */}
-                <div
-                  className="transition-transform duration-500 ease-out"
-                  style={{
-                    transform: `rotate(${windInfo.arrowRotation}deg)`,
-                  }}
-                  title={`Поток ветра относительно движения авто (${relativeWindAngle}°)`}
-                >
-                  <ArrowDown className={`w-4 h-4 ${windInfo.color}`} />
-                </div>
-              </div>
-
-              <div className="text-left min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className={`text-xs font-bold truncate ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                    Ветер: {windSpeedMs} м/с
-                  </span>
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${windInfo.badgeBg}`}>
-                    {windInfo.label}
-                  </span>
-                  {livePrecipitation.impactPct > 0 && (
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                      livePrecipitation.type.includes('snow')
-                        ? isDark ? 'bg-indigo-950/80 text-indigo-300 border-indigo-700/70' : 'bg-indigo-50 text-indigo-800 border-indigo-200'
-                        : isDark ? 'bg-blue-950/80 text-blue-300 border-blue-700/70' : 'bg-blue-50 text-blue-800 border-blue-200'
-                    }`} title={livePrecipitation.description}>
-                      {livePrecipitation.type.includes('snow') ? '❄️' : '🌧️'} {livePrecipitation.label}
-                    </span>
-                  )}
-                </div>
-                <span className={`text-[10px] block truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  {forecast.windImpactPct !== undefined && forecast.windImpactPct !== 0
-                    ? `Аэродинамика: ${forecast.windImpactPct > 0 ? '+' : ''}${forecast.windImpactPct}% к расходу`
-                    : 'Штиль / минимальное влияние'}
-                </span>
-              </div>
-            </div>
-
-            {/* A/C / Climate quick toggle with real ambient temperature impact */}
-            <button
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setClimateOn(!climateOn);
-              }}
-              className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold shrink-0 transition-all active:scale-95 flex items-center gap-1 ${
-                climateOn
-                  ? outdoorTemp < 19
-                    ? isDark
-                      ? 'bg-amber-950/80 text-amber-300 border-amber-700/80'
-                      : 'bg-amber-100 text-amber-900 border-amber-300'
-                    : isDark
-                    ? 'bg-cyan-950/80 text-cyan-300 border-cyan-700/80'
-                    : 'bg-cyan-100 text-cyan-900 border-cyan-300'
-                  : isDark
-                  ? 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-              }`}
-              title={`За бортом: ${outdoorTemp}°C. Переключить климат.`}
-            >
-              {climateOn
-                ? outdoorTemp < 19
-                  ? `🔥 Обогрев (+${liveClimate.impactPct}%)`
-                  : `❄️ A/C (+${liveClimate.impactPct}%)`
-                : '🍃 Климат ЭКО (0%)'}
-            </button>
-          </div>
-        </div>
-
-        <div className={`hud-passengers-block w-full max-w-lg rounded-2xl p-3 border text-left transition-colors ${isDark ? 'bg-slate-900/90 border-slate-800/90' : 'bg-slate-50 border-slate-200 shadow-xs'}`}>
-          <div className="flex items-center justify-between">
-            <div><span className={`text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Людей в салоне</span><span className="block text-[10px] text-slate-500">Включая водителя</span></div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-9 h-9 rounded-lg border font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−</button>
-              <span className={`min-w-7 text-center font-mono font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{passengers}</span>
-              <button onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-9 h-9 rounded-lg border font-bold ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+</button>
-            </div>
-          </div>
-        </div>
-
-        {/* 3. MINIMALIST DRIVING STYLE & CONDITIONS COEFFICIENTS */}
-        <CollapsibleDetails
-          isDark={isDark}
-          open={factorsOpen}
-          onToggle={() => setFactorsOpen(v => !v)}
-          className="hud-factors-block w-full max-w-lg"
-          label={
-            <span className="inline-flex items-center gap-1.5">
-              <Activity className={`w-3.5 h-3.5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
-              <span className="normal-case font-bold">Факторы расхода</span>
-              <span className={`ml-1 text-xs font-mono font-extrabold px-2 py-0.5 rounded-lg border ${
-                totalConsumptionFactor > 1.15
-                  ? isDark ? 'bg-rose-950/70 border-rose-800 text-rose-300' : 'bg-rose-50 border-rose-300 text-rose-800'
-                  : totalConsumptionFactor < 0.95
-                  ? isDark ? 'bg-emerald-950/70 border-emerald-800 text-emerald-300' : 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                  : isDark ? 'bg-amber-950/70 border-amber-800 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-800'
-              }`}>
-                x{totalConsumptionFactor.toFixed(2)}
-              </span>
-            </span>
-          }
-        >
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1.5 text-[11px]">
-            {/* Live Driving Style Factor (pure driving kinetics) */}
-            <div className={`p-2 rounded-xl border ${
-              isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-white border-slate-200'
-            }`}>
-              <div className="flex items-center justify-between">
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Стиль езды</span>
-                {isTracking && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" title="Текущий трек" />
-                )}
-              </div>
-              <span className={`font-mono font-bold ${currentTripStyle.color}`}>
-                x{currentTripStyle.factor.toFixed(2)}
-              </span>
-              <span className={`block text-[9px] truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`} title={currentTripStyle.details}>
-                {currentTripStyle.label}
-              </span>
-            </div>
-
-            {/* Climate Impact (ratio of ambient temp & climateOn) */}
-            <div className={`p-2 rounded-xl border ${
-              isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-white border-slate-200'
-            }`}>
-              <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Климат & A/C</span>
-              <span className={`font-mono font-bold ${
-                liveClimate.powerKw > 0
-                  ? 'text-rose-500'
-                  : isDark ? 'text-emerald-400' : 'text-emerald-600'
-              }`}>
-                {liveClimate.powerKw > 0 ? `${liveClimate.powerKw.toFixed(1)} кВт·ч/ч` : '0 кВт·ч/ч'}
-              </span>
-              <span className={`block text-[9px] truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`} title={liveClimate.description}>
-                {climateOn ? `${outdoorTemp}°C · +${liveClimate.impactPct}% экв.` : 'Откл. (ЭКО)'}
-              </span>
-            </div>
-
-            {/* Precipitation & Road Surface Condition */}
-            <div className={`p-2 rounded-xl border ${
-              isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-white border-slate-200'
-            }`}>
-              <div className="flex items-center justify-between">
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Осадки/Дорога</span>
-                {livePrecipitation.impactPct > 0 && (
-                  <span className="text-[10px]">
-                    {livePrecipitation.type.includes('snow') ? '❄️' : '🌧️'}
-                  </span>
-                )}
-              </div>
-              <span className={`font-mono font-bold ${
-                livePrecipitation.impactPct > 0
-                  ? 'text-blue-400'
-                  : isDark ? 'text-emerald-400' : 'text-emerald-600'
-              }`}>
-                {livePrecipitation.impactPct > 0 ? `+${livePrecipitation.impactPct}%` : '0%'}
-              </span>
-              <span className={`block text-[9px] truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`} title={livePrecipitation.description}>
-                {livePrecipitation.roadState}
-              </span>
-            </div>
-
-            {/* Wind Impact */}
-            <div className={`p-2 rounded-xl border ${
-              isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-white border-slate-200'
-            }`}>
-              <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Ветер ({windSpeedMs} м/с)</span>
-              <span className={`font-mono font-bold ${
-                (forecast.windImpactPct ?? 0) > 0
-                  ? 'text-rose-500'
-                  : (forecast.windImpactPct ?? 0) < 0
-                  ? 'text-emerald-500'
-                  : isDark ? 'text-slate-200' : 'text-slate-800'
-              }`}>
-                {(forecast.windImpactPct ?? 0) > 0 ? `+${forecast.windImpactPct}%` : `${forecast.windImpactPct ?? 0}%`}
-              </span>
-              <span className={`block text-[9px] truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                {windInfo.label}
-              </span>
-            </div>
-
-            {/* Speed Impact */}
-            <div className={`p-2 rounded-xl border ${
-              isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-white border-slate-200'
-            }`}>
-              <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Скорость</span>
-              <span className={`font-mono font-bold ${
-                forecast.speedImpactPct > 0
-                  ? 'text-rose-500'
-                  : forecast.speedImpactPct < 0
-                  ? 'text-emerald-500'
-                  : isDark ? 'text-slate-200' : 'text-slate-800'
-              }`}>
-                {forecast.speedImpactPct > 0 ? `+${forecast.speedImpactPct}%` : `${forecast.speedImpactPct}%`}
-              </span>
-              <span className={`block text-[9px] truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                {avgTripSpeedKmH} км/ч
-              </span>
-            </div>
-
-            {/* Elevation / Regen Impact (Рельеф) */}
-            <div className={`p-2 rounded-xl border ${
-              isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-white border-slate-200'
-            }`}>
-              <div className="flex items-center justify-between">
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Рельеф</span>
-                <Mountain className={`w-3 h-3 ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
-              </div>
-              {isTracking && tripDistanceKm > 0.3 ? (
-                <>
-                  <span className={`font-mono font-bold ${
-                    (forecast.elevationImpactPct ?? 0) > 0
-                      ? 'text-rose-500'
-                      : (forecast.elevationImpactPct ?? 0) < 0
-                      ? 'text-emerald-500'
-                      : isDark ? 'text-slate-200' : 'text-slate-800'
-                  }`}>
-                    {(forecast.elevationImpactPct ?? 0) > 0 ? `+${forecast.elevationImpactPct}%` : `${forecast.elevationImpactPct ?? 0}%`}
-                  </span>
-                  <span className={`block text-[9px] truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`} title="Подъём / спуск (сглажено по GPS-высоте)">
-                    ▲{elevationGainM}м ▼{elevationLossM}м
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className={`font-mono font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>—</span>
-                  <span className={`block text-[9px] truncate ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    {altitudeAvailable ? 'Начните поездку' : 'Высота недоступна'}
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-        </CollapsibleDetails>
-
-        {/* 4. DYNAMIC CALCULATED REMAINING RANGE INDICATOR (Стиль + Погода + SoC) */}
-        <div
-          id="hud-calculated-range-indicator"
-          className={`hud-range-block w-full max-w-lg rounded-2xl p-3 sm:p-4 border transition-colors ${
-            isDark
-              ? 'bg-slate-900/90 border-slate-800/90 shadow-lg'
-              : 'bg-slate-50 border-slate-200 shadow-xs'
-          }`}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between gap-2 mb-2.5">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <div className={`p-1.5 rounded-lg border shrink-0 ${
-                isDark ? 'bg-slate-950 border-slate-800 text-amber-400' : 'bg-white border-slate-200 text-amber-600'
-              }`}>
-                <Zap className="w-4 h-4" />
-              </div>
-              <div className="text-left">
-                <span className={`text-xs font-bold uppercase tracking-wider block ${
-                  isDark ? 'text-slate-200' : 'text-slate-800'
-                }`}>
-                  Расчетный остаток пробега
-                </span>
-                <span className={`text-[10px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  Динамический пересчет • Стиль + Погода + SoC
-                </span>
-              </div>
-            </div>
-
-            {/* Live recalculation badge */}
-            <div className="shrink-0">
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                isDark
-                  ? 'bg-emerald-950/80 border-emerald-800 text-emerald-300'
-                  : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-              }`}>
-                ⚡ Live пересчет
-              </span>
-            </div>
-          </div>
-
-          {/* Core Large Range Display & Quick Telemetry Metrics */}
-          <div className={`p-3 rounded-2xl border text-left mb-2.5 ${
-            isDark
-              ? 'bg-slate-950/90 border-slate-800/80'
-              : 'bg-white border-slate-200 shadow-xs'
-          }`}>
-            <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-2">
-              <div>
-                <span className={`text-[11px] font-semibold block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  Заряд сейчас
-                </span>
-                <div className="flex items-baseline gap-1 mt-0.5">
-                  <span className={`text-6xl sm:text-7xl font-black font-mono tracking-tighter ${
-                    liveDynamicSoc < 20
-                      ? 'text-rose-500'
-                      : liveDynamicSoc < 40
-                      ? 'text-amber-500'
-                      : isDark
-                      ? 'text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400'
-                      : 'text-emerald-600'
-                  }`}>
-                    {liveDynamicSoc}
-                  </span>
-                  <span className={`text-2xl font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>%</span>
-                </div>
-                <div className="flex items-baseline gap-1 mt-0.5">
-                  <span className={`text-xl font-bold font-mono ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                    ~{dynamicRemainingRangeKm}
-                  </span>
-                  <span className={`text-xs font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>км запас хода</span>
-                </div>
-              </div>
-
-              {/* Delta relative to baseline nominal rating & Safe Reserve */}
-              <div className="flex sm:flex-col items-end gap-1 text-right">
-                {rangeDeltaKm !== 0 ? (
-                  <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-md border inline-flex items-center gap-1 ${
-                    rangeDeltaKm > 0
-                      ? isDark
-                        ? 'bg-emerald-950/70 border-emerald-800 text-emerald-300'
-                        : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                      : isDark
-                      ? 'bg-amber-950/70 border-amber-800 text-amber-300'
-                      : 'bg-amber-50 border-amber-200 text-amber-800'
-                  }`} title="Сравнение с паспортным запасом хода (340 км при 100% заряда)">
-                    {rangeDeltaKm > 0 ? (
-                      <>
-                        <TrendingUp className="w-3 h-3 text-emerald-400" />
-                        <span>+{rangeDeltaKm} км к паспорту</span>
-                      </>
-                    ) : (
-                      <>
-                        <TrendingDown className="w-3 h-3 text-amber-400" />
-                        <span>{rangeDeltaKm} км к паспорту</span>
-                      </>
-                    )}
-                  </span>
-                ) : (
-                  <span className={`text-[10px] font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Паспортный эквивалент
-                  </span>
-                )}
-
-                {/* Safe buffer to 10% */}
-                <span className={`text-[10px] font-mono block ${isDark ? 'text-slate-400' : 'text-slate-500'}`} title="Запас хода с запасом 10% на непредвиденный доезд">
-                  🛡️ До 10% SoC: <strong className={isDark ? 'text-slate-200' : 'text-slate-700'}>~{safeDynamicRangeKm} км</strong>
-                </span>
-              </div>
-            </div>
-
-            {/* Quick Metrics Sub-grid: Расход & Доступно энергии */}
-            <div className={`mt-2.5 pt-2 border-t grid grid-cols-2 gap-2 text-[11px] ${
-              isDark ? 'border-slate-800/80' : 'border-slate-100'
-            }`}>
-              <div>
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  Расчетный расход ({avgTripSpeedKmH} км/ч):
-                </span>
-                <span className={`font-mono font-bold ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
-                  {forecast.estimatedConsumption.toFixed(1)} кВт⋅ч/100
-                </span>
-              </div>
-              <div className="text-right">
-                <span className={`block text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  Доступно в батарее:
-                </span>
-                <span className={`font-mono font-bold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                  {dynamicRemainingBatteryKwh.toFixed(1)} / {batteryCap} кВт⋅ч
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Factors Contribution Chips (Стиль + Погода + Осадки + Заряд) */}
-          <div className="flex items-center gap-1.5 flex-wrap text-[10px] mb-2.5">
-            {/* SoC */}
-            <span className={`px-2 py-0.5 rounded-lg border font-mono font-semibold ${
-              isDark ? 'bg-slate-950/80 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'
-            }`}>
-              🔋 {liveDynamicSoc}% SoC
-            </span>
-            {/* Style */}
-            <span className={`px-2 py-0.5 rounded-lg border font-semibold ${
-              isDark ? 'bg-slate-950/80 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'
-            }`}>
-              ⚡ Стиль: {currentTripStyle.label} (x{currentTripStyle.factor.toFixed(2)})
-            </span>
-            {/* Weather & Road */}
-            <span className={`px-2 py-0.5 rounded-lg border font-semibold ${
-              isDark ? 'bg-slate-950/80 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'
-            }`}>
-              🌤️ {outdoorTemp > 0 ? `+${outdoorTemp}` : outdoorTemp}°C {climateOn ? (outdoorTemp < 19 ? '• Обогрев' : '• A/C') : '• ЭКО'}
-              {livePrecipitation.impactPct > 0 ? ` • ${livePrecipitation.label}` : ''}
-              {forecast.windImpactPct !== 0 ? ` • Ветер ${(forecast.windImpactPct ?? 0) > 0 ? '+' : ''}${forecast.windImpactPct}%` : ''}
-            </span>
-          </div>
-
-      </div>
-
-      {/* Trip Tracking Metrics & Controls */}
-      <div className="hud-trip-stats space-y-2.5 pt-1">
-        {/* Live Trip Stats Grid (Distance, Average Speed, Time) */}
-        <div className="grid grid-cols-3 gap-2">
-          {/* Distance */}
-          <div className={`rounded-xl p-2 text-center border transition-colors ${
-            isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-50 border-slate-200 shadow-2xs'
-          }`}>
-            <span className={`text-[9px] uppercase font-bold tracking-wider block ${
-              isDark ? 'text-slate-400' : 'text-slate-500'
-            }`}>
-              Дистанция
-            </span>
-            <div className="flex items-baseline justify-center gap-0.5 mt-0.5">
-              <span className={`text-xl sm:text-2xl font-black font-mono ${
-                isDark ? 'text-cyan-400' : 'text-cyan-600'
-              }`}>
-                {tripDistanceKm.toFixed(1)}
-              </span>
-              <span className={`text-[9px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>км</span>
-            </div>
-          </div>
-
-          {/* Elapsed Time */}
-          <div className={`rounded-xl p-2 text-center border transition-colors ${
-            isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-50 border-slate-200 shadow-2xs'
-          }`}>
-            <span className={`text-[9px] uppercase font-bold tracking-wider block ${
-              isDark ? 'text-slate-400' : 'text-slate-500'
-            }`}>
-              Время
-            </span>
-            <div className="flex items-baseline justify-center gap-0.5 mt-0.5">
-              <span className={`text-base sm:text-lg font-bold font-mono ${
-                isDark ? 'text-slate-200' : 'text-slate-800'
-              }`}>
-                {formatTime(elapsedSeconds)}
-              </span>
-            </div>
-          </div>
-        </div>
-
-      </div>
+      {/* 8. Controls */}
+      <div className="mt-auto grid grid-cols-2 gap-1.5 shrink-0">{isTracking ? <><button onClick={handleStopTracking} className="py-2 rounded-xl bg-rose-600 text-white font-black text-[10px] flex items-center justify-center gap-1.5"><Square className="w-3.5 h-3.5 fill-current" /> СТОП</button><button onClick={handleResetTracking} className={`py-2 rounded-xl border font-bold text-[10px] flex items-center justify-center gap-1.5 ${isDark ? 'bg-slate-800 text-slate-200 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-300'}`}><RotateCcw className="w-3.5 h-3.5" /> СБРОС</button></> : <div className={`col-span-2 text-center py-0.5 text-[9px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{trackingStopMessage || 'Готов к поездке'}</div>}</div>
 
       {/* Completed Trip Summary Modal */}
       {completedTripSummary && (
@@ -2285,7 +1409,6 @@ export const HudTab: React.FC<HudTabProps> = ({
           </div>
         </div>
       )}
-    </div>
     </div>
   );
 };
