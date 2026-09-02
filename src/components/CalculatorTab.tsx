@@ -117,7 +117,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [consumptionOpen, setConsumptionOpen] = useState(true);
   const [speedProfileOpen, setSpeedProfileOpen] = useState(false);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
-  /** Reserve SoC kept as safety buffer when interpreting arrival forecast */
+  /** Brief highlight pulse on the result card after a successful route calc */
+  const [resultHighlight, setResultHighlight] = useState(false);
+  /** Reserve SoC kept as safety buffer when interpreting arrival forecast.
+   *  Example: arrival 18% with reserve 10% → "free margin" above the safety floor = 8%. */
   const ARRIVAL_RESERVE_SOC = 10;
 
   const weatherIcon = (code: number, className = 'w-4 h-4') => {
@@ -287,9 +290,22 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       setEndSoc(arrivalSoc);
       setConsumptionOpen(true);
       setRouteStatus('Готово');
+      triggerHaptic('success', settings.hapticFeedback);
+      setResultHighlight(true);
+      window.setTimeout(() => setResultHighlight(false), 1600);
+      window.setTimeout(() => {
+        document.getElementById('route-result-summary')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 50);
     } catch (e) {
       const msg=e instanceof Error?e.message:'Ошибка расчёта маршрута';
-      setRouteError(/denied|permission/i.test(msg)?'Разрешите доступ к геопозиции или выберите адрес точки А':msg); setRouteStatus('');
+      const isGpsIssue = /denied|permission|геопозиц|geolocation|position/i.test(msg);
+      if (isGpsIssue) {
+        setRouteError('GPS недоступен. Укажите адрес точки А вручную.');
+        setStartMode('address');
+      } else {
+        setRouteError(msg);
+      }
+      setRouteStatus('');
     } finally { setRouteLoading(false); }
   };
 
@@ -484,13 +500,31 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       {/* Quick status */}
       <section className={`calculator-status rounded-2xl border px-4 py-2.5 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-xs">
-            <span className={`inline-flex h-2 w-2 rounded-full ${gpsStatus === 'ok' ? 'bg-emerald-500' : gpsStatus === 'error' ? 'bg-rose-500' : 'bg-amber-500 animate-pulse'}`} />
-            <LocateFixed className={`w-4 h-4 ${gpsStatus === 'ok' ? 'text-emerald-500' : gpsStatus === 'error' ? 'text-rose-500' : 'text-amber-500'}`} />
+          <div className="flex items-center gap-2 text-xs min-w-0">
+            <span className={`inline-flex h-2 w-2 shrink-0 rounded-full ${gpsStatus === 'ok' ? 'bg-emerald-500' : gpsStatus === 'error' ? 'bg-rose-500' : 'bg-amber-500 animate-pulse'}`} />
+            <LocateFixed className={`w-4 h-4 shrink-0 ${gpsStatus === 'ok' ? 'text-emerald-500' : gpsStatus === 'error' ? 'text-rose-500' : 'text-amber-500'}`} />
             <span className="font-semibold">GPS</span>
-            <span className="text-slate-500">{gpsStatus === 'ok' ? 'Сигнал есть' : gpsStatus === 'error' ? 'Недоступен' : 'Поиск…'}</span>
+            <span className="text-slate-500 truncate">
+              {gpsStatus === 'ok' ? 'Сигнал есть' : gpsStatus === 'error' ? 'Недоступен' : 'Поиск…'}
+            </span>
           </div>
-          {quickWeather ? (
+          {gpsStatus === 'error' ? (
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('light', settings.hapticFeedback);
+                setStartMode('address');
+                setCalculatorMode('route');
+              }}
+              className={`shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-bold border ${
+                isDark
+                  ? 'bg-rose-950/50 border-rose-700/50 text-rose-300'
+                  : 'bg-rose-50 border-rose-300 text-rose-700'
+              }`}
+            >
+              Указать адрес точки А
+            </button>
+          ) : quickWeather ? (
             <div className="flex items-center gap-1.5 text-xs">
               {weatherIcon(quickWeather.weatherCode)}
               <span className="font-semibold">{quickWeather.temperature >= 0 ? '+' : ''}{quickWeather.temperature}°C</span>
@@ -498,8 +532,15 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               <Wind className="w-3.5 h-3.5 text-slate-400" />
               <span>{quickWeather.windSpeed} км/ч</span>
             </div>
-          ) : <span className="text-xs text-slate-500">Погода загружается…</span>}
+          ) : (
+            <span className="text-xs text-slate-500">Погода загружается…</span>
+          )}
         </div>
+        {gpsStatus === 'error' && startMode === 'gps' && calculatorMode === 'route' && (
+          <p className={`mt-2 text-[11px] ${isDark ? 'text-rose-300/90' : 'text-rose-600'}`}>
+            Без GPS маршрут от текущей позиции недоступен. Переключитесь на «Адрес точки А» или нажмите кнопку выше.
+          </p>
+        )}
       </section>
 
       {/* Route start SoC — updates route arrival instantly without rebuilding the route */}
@@ -569,14 +610,21 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       {/* Compact result strip — always visible at top once a route is calculated */}
       {routeForecast && (
         <section
-          className={`rounded-2xl border px-3.5 py-3 ${
-            isDark ? 'bg-emerald-950/40 border-emerald-800/60' : 'bg-emerald-50 border-emerald-200'
+          id="route-result-summary"
+          className={`rounded-2xl border px-3.5 py-3 transition-shadow duration-500 ${
+            resultHighlight
+              ? isDark
+                ? 'bg-emerald-950/50 border-emerald-400/70 shadow-lg shadow-emerald-500/20 ring-2 ring-emerald-400/40'
+                : 'bg-emerald-50 border-emerald-400 shadow-lg shadow-emerald-500/15 ring-2 ring-emerald-400/50'
+              : isDark
+              ? 'bg-emerald-950/40 border-emerald-800/60'
+              : 'bg-emerald-50 border-emerald-200'
           }`}
         >
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-emerald-300/80' : 'text-emerald-700'}`}>
-                SOC на финише
+                SOC на финише (прогноз)
               </div>
               <div className="flex items-baseline gap-2 mt-0.5">
                 <span
@@ -590,8 +638,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 >
                   {routeForecast.arrivalSoc}%
                 </span>
-                <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  после резерва {ARRIVAL_RESERVE_SOC}% → {Math.max(0, Number((routeForecast.arrivalSoc - ARRIVAL_RESERVE_SOC).toFixed(1)))}%
+                <span className={`text-[11px] leading-snug ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {routeForecast.arrivalSoc >= ARRIVAL_RESERVE_SOC
+                    ? `свободный запас сверх ${ARRIVAL_RESERVE_SOC}%: ${Math.max(0, Number((routeForecast.arrivalSoc - ARRIVAL_RESERVE_SOC).toFixed(1)))}%`
+                    : `ниже безопасных ${ARRIVAL_RESERVE_SOC}%`}
                 </span>
               </div>
             </div>
@@ -698,7 +748,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           <>
             {routeForecast && (() => {
               const arrival = routeForecast.arrivalSoc;
-              const afterReserve = Math.max(0, Number((arrival - ARRIVAL_RESERVE_SOC).toFixed(1)));
+              // Free margin above the safety floor (10%). Not "SoC after subtracting 10% from the car",
+              // but how much headroom you have if you refuse to go below 10%.
+              const freeMargin = Math.max(0, Number((arrival - ARRIVAL_RESERVE_SOC).toFixed(1)));
               const statusTone =
                 arrival >= 20 + ARRIVAL_RESERVE_SOC
                   ? 'good'
@@ -707,12 +759,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : 'low';
               const statusText =
                 statusTone === 'good'
-                  ? `✓ Доедете с запасом (резерв ${ARRIVAL_RESERVE_SOC}%)`
+                  ? `✓ Доедете уверенно · свободный запас сверх ${ARRIVAL_RESERVE_SOC}%: ${freeMargin}%`
                   : statusTone === 'ok'
-                  ? `⚠ Прибытие ~${arrival}% · после резерва ${ARRIVAL_RESERVE_SOC}% останется ~${afterReserve}%`
+                  ? `⚠ На финише ${arrival}% · выше минимума ${ARRIVAL_RESERVE_SOC}% всего на ${freeMargin}%`
                   : startSoc >= 99
-                  ? '⚠ Потребуется зарядка в пути'
-                  : '⚠ Недостаточно заряда — зарядка до поездки или в пути';
+                  ? `⚠ На финише ${arrival}% — ниже безопасных ${ARRIVAL_RESERVE_SOC}%. Нужна зарядка в пути`
+                  : `⚠ На финише ${arrival}% — ниже безопасных ${ARRIVAL_RESERVE_SOC}%. Зарядитесь до поездки или в пути`;
               const statusColor =
                 statusTone === 'good'
                   ? isDark
@@ -721,15 +773,30 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : statusTone === 'ok'
                   ? 'text-amber-500'
                   : 'text-rose-500';
+              const slower = getWhatIfScenario(Math.max(20, plannedSpeedKmH - 10));
+              const noClimate = getClimateScenario(false);
               return (
-              <div className={`rounded-2xl border p-4 ${isDark ? 'bg-slate-950/70 border-emerald-900/60' : 'bg-emerald-50/60 border-emerald-200'}`}>
+              <div
+                className={`rounded-2xl border p-4 transition-shadow duration-500 ${
+                  resultHighlight
+                    ? isDark
+                      ? 'bg-slate-950/80 border-emerald-400/70 shadow-lg shadow-emerald-500/15 ring-2 ring-emerald-400/30'
+                      : 'bg-emerald-50/80 border-emerald-400 shadow-lg shadow-emerald-500/10 ring-2 ring-emerald-400/40'
+                    : isDark
+                    ? 'bg-slate-950/70 border-emerald-900/60'
+                    : 'bg-emerald-50/60 border-emerald-200'
+                }`}
+              >
                 <div className="text-center">
-                  <div className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>SOC на финише</div>
+                  <div className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>SOC на финише (прогноз)</div>
                   <div className={`mt-1 text-5xl font-black font-mono ${statusColor}`}>{arrival}%</div>
-                  <div className={`mt-1 text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{statusText}</div>
+                  <div className={`mt-1 text-xs font-semibold px-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{statusText}</div>
+                  <p className={`mt-1.5 text-[10px] leading-relaxed ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                    Безопасный минимум — не ниже {ARRIVAL_RESERVE_SOC}%. «Свободный запас» = насколько прогноз выше этих {ARRIVAL_RESERVE_SOC}% (не отдельный процент в машине).
+                  </p>
                 </div>
 
-                {/* Dual bar: arrival SoC + reserved band */}
+                {/* Bar: predicted arrival; marker = safety floor */}
                 <div className={`mt-4 h-3 rounded-full overflow-hidden relative ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
                   <div
                     className={`h-full rounded-full transition-all duration-300 ${statusTone === 'good' ? 'bg-emerald-500' : statusTone === 'ok' ? 'bg-amber-500' : 'bg-rose-500'}`}
@@ -738,17 +805,17 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   <div
                     className="absolute top-0 bottom-0 w-0.5 bg-white/80"
                     style={{ left: `${ARRIVAL_RESERVE_SOC}%` }}
-                    title={`Резерв ${ARRIVAL_RESERVE_SOC}%`}
+                    title={`Безопасный минимум ${ARRIVAL_RESERVE_SOC}%`}
                   />
                 </div>
                 <div className="mt-2 flex justify-between text-[10px] text-slate-500">
                   <span>0%</span>
-                  <span>резерв {ARRIVAL_RESERVE_SOC}%</span>
+                  <span>мин. {ARRIVAL_RESERVE_SOC}%</span>
                   <span>старт {startSoc}%</span>
                   <span>100%</span>
                 </div>
 
-                <div className={`mt-3 grid grid-cols-3 gap-2 text-center`}>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                   <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-900/80' : 'bg-white/80'}`}>
                     <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Расход</div>
                     <div className="text-sm font-black font-mono">{routeForecast.consumption.toFixed(1)}</div>
@@ -760,11 +827,67 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     <div className="text-[10px] text-slate-500">кВт⋅ч</div>
                   </div>
                   <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-900/80' : 'bg-white/80'}`}>
-                    <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>После резерва</div>
-                    <div className={`text-sm font-black font-mono ${afterReserve < 5 ? 'text-rose-500' : ''}`}>{afterReserve}%</div>
-                    <div className="text-[10px] text-slate-500">запас {ARRIVAL_RESERVE_SOC}%</div>
+                    <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Своб. запас</div>
+                    <div className={`text-sm font-black font-mono ${freeMargin < 5 ? 'text-rose-500' : ''}`}>{freeMargin}%</div>
+                    <div className="text-[10px] text-slate-500">сверх {ARRIVAL_RESERVE_SOC}%</div>
                   </div>
                 </div>
+
+                {/* Low-reserve action banner */}
+                {statusTone === 'low' && (
+                  <div className={`mt-3 rounded-xl border p-3 ${isDark ? 'bg-rose-950/40 border-rose-700/50' : 'bg-rose-50 border-rose-300'}`}>
+                    <div className={`text-xs font-bold ${isDark ? 'text-rose-300' : 'text-rose-800'}`}>
+                      Запас отрицательный относительно минимума {ARRIVAL_RESERVE_SOC}%
+                    </div>
+                    <p className={`mt-1 text-[11px] ${isDark ? 'text-rose-200/80' : 'text-rose-700'}`}>
+                      При текущих скорости, климате и стартовом SOC доедете ниже безопасного порога. Выберите действие:
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {slower && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic('light', settings.hapticFeedback);
+                            applyWhatIfSpeed(Math.max(20, plannedSpeedKmH - 10));
+                          }}
+                          className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold border ${
+                            isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-rose-200 text-rose-900'
+                          }`}
+                        >
+                          Снизить скорость до {Math.max(20, plannedSpeedKmH - 10)} км/ч
+                          <span className="opacity-70"> → {slower.arrivalSoc}%</span>
+                        </button>
+                      )}
+                      {climateOn && noClimate && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            triggerHaptic('light', settings.hapticFeedback);
+                            applyClimateScenario(false);
+                          }}
+                          className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold border ${
+                            isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-rose-200 text-rose-900'
+                          }`}
+                        >
+                          Выключить климат
+                          <span className="opacity-70"> → {noClimate.arrivalSoc}%</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          triggerHaptic('light', settings.hapticFeedback);
+                          updateRouteStartSoc(Math.min(100, startSoc + 10));
+                        }}
+                        className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold border ${
+                          isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-rose-200 text-rose-900'
+                        }`}
+                      >
+                        +10% к стартовому SOC
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {routeWeather && (
                   <ChipRow
