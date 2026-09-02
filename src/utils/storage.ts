@@ -1235,17 +1235,27 @@ export function estimateSegmentedRouteConsumption(
     const isFastConfident = rawRoadSpeeds.map(
       (v, i) => v > FAST_ROAD_THRESHOLD && lengthWeights[i] > FAST_CONFIDENT_LENGTH_WEIGHT
     );
-    const hasFlexiblePoints = isFastConfident.some((f) => !f);
 
     // Find the scale factor whose harmonic mean equals the requested average while never
     // exceeding the driver's stated maximum. A short bisection is stable for mixed city/highway
     // profiles and avoids the old one-shot scale that could erase the intended max speed.
+    //
+    // Fast-confident points are ALWAYS pinned (never multiplied by scale), regardless of
+    // whether the route also has flexible points to absorb the average correction. A previous
+    // version gated pinning behind `hasFlexiblePoints` (i.e. "only pin if there's something
+    // else to scale instead") — on a route that is entirely fast/confident (e.g. a pure highway
+    // trip with no city or junction sections at all), that guard evaluated to false and fell
+    // back to scaling every point uniformly, silently reintroducing the original peak-erasing
+    // bug on exactly that class of route. If a route truly has no flexible points, there is
+    // nothing that *can* legitimately absorb a lower requested average without erasing the
+    // peak — so on such routes the achieved average may end up a bit above the requested value
+    // instead, which is the physically honest outcome.
     const harmonicMeanForScale = (scale: number) => {
       let dSum = 0, timeSum = 0;
       for (let i = 1; i < points.length; i++) {
         const d = Math.max(0, points[i].distanceFromStartKm - points[i - 1].distanceFromStartKm);
         if (d <= 0.001) continue;
-        const base = hasFlexiblePoints && isFastConfident[i] ? roadSpeeds[i] : roadSpeeds[i] * scale;
+        const base = isFastConfident[i] ? roadSpeeds[i] : roadSpeeds[i] * scale;
         const v = Math.max(10, Math.min(requestedMaxSpeed!, base));
         dSum += d; timeSum += d / v;
       }
@@ -1258,7 +1268,7 @@ export function estimateSegmentedRouteConsumption(
     }
     const scale = (lo + hi) / 2;
     roadSpeeds = roadSpeeds.map((v, i) => {
-      const base = hasFlexiblePoints && isFastConfident[i] ? v : v * scale;
+      const base = isFastConfident[i] ? v : v * scale;
       return Math.max(10, Math.min(requestedMaxSpeed!, base));
     });
   } else {
