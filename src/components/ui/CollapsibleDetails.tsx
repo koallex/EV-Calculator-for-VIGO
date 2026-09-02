@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { ChevronDown } from 'lucide-react';
 
 interface CollapsibleDetailsProps {
@@ -28,14 +29,33 @@ export const CollapsibleDetails: React.FC<CollapsibleDetailsProps> = ({
     <button
       type="button"
       onClick={onToggle}
-      className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 text-sm font-bold transition-colors ${
+      className={`w-full flex items-center justify-between rounded-xl border px-3 py-3 text-sm font-bold transition-colors active:scale-[0.99] ${
         isDark ? 'bg-slate-950 border-slate-800 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'
       }`}
     >
       <span className="inline-flex items-center gap-2">{icon}{label}</span>
-      <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      <motion.span
+        animate={{ rotate: open ? 180 : 0 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+        className="inline-flex shrink-0"
+      >
+        <ChevronDown className="w-4 h-4" />
+      </motion.span>
     </button>
-    {open && <div className="mt-2">{children}</div>}
+    <AnimatePresence initial={false}>
+      {open && (
+        <motion.div
+          key="content"
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          className="overflow-hidden"
+        >
+          <div className="mt-2">{children}</div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   </div>
 );
 
