@@ -165,3 +165,17 @@ input[type=range]::-moz-range-thumb {
 .calculator-minimal-shell > .calculator-metrics { order: 7; }
 .calculator-minimal-shell > .calculator-controls { order: 8; }
 .calculator-minimal-shell > div:not(.calculator-battery):not(.calculator-metrics):not(.calculator-controls) { order: 9; }
+
+/* Subtle interactive press feedback for cards / chips that don't use motion */
+.pressable {
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.pressable:active {
+  transform: scale(0.985);
+}
+
+/* Soft focus ring for keyboard users */
+:focus-visible {
+  outline: 2px solid rgb(16 185 129 / 0.55);
+  outline-offset: 2px;
+}
