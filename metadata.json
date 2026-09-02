@@ -1,6 +1,5 @@
 {
   "name": "Dongfeng Vigo EV Calculator",
   "description": "Калькулятор расхода энергии, история зарядок и динамический GPS HUD для электромобиля Dongfeng Vigo (51.87 кВт⋅ч).",
-  "requestFramePermissions": ["geolocation"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "requestFramePermissions": ["geolocation"]
 }
