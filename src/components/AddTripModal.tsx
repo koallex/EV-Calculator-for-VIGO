@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
   PlusCircle,
@@ -39,7 +40,20 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
   const [note, setNote] = useState<string>(initialData?.note || '');
   const [passengers, setPassengers] = useState<number>(initialData?.passengers ?? 1);
 
-  if (!isOpen) return null;
+  // Reset form fields when modal opens with new initialData
+  useEffect(() => {
+    if (!isOpen) return;
+    setDate(initialData?.date || new Date().toISOString().split('T')[0]);
+    setTitle(initialData?.title || '');
+    setStartSoc(initialData?.startSoc ?? 100);
+    setEndSoc(initialData?.endSoc ?? 30);
+    setDistanceKm(initialData?.distanceKm ?? 190);
+    setRoadType(initialData?.roadType || 'city');
+    setClimateOn(initialData?.climateOn ?? false);
+    setChargingType(initialData?.chargingType || 'malanka_dc');
+    setNote(initialData?.note || '');
+    setPassengers(initialData?.passengers ?? 1);
+  }, [isOpen, initialData]);
 
   const batteryCap = settings.batteryCapacityKwh || 51.87;
   const socUsed = Math.max(0.1, startSoc - endSoc);
@@ -80,14 +94,31 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
   const isDark = settings.theme !== 'light';
 
   return (
-    <div
+    <AnimatePresence>
+      {isOpen && (
+    <motion.div
       id="add-trip-modal-overlay"
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18 }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          triggerHaptic('light', settings.hapticFeedback);
+          onClose();
+        }
+      }}
     >
-      <div
-        className={`border rounded-t-2xl sm:rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto p-4 sm:p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom duration-200 transition-colors ${
+      <motion.div
+        className={`border rounded-t-2xl sm:rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto p-4 sm:p-5 shadow-2xl space-y-4 transition-colors ${
           isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
         }`}
+        initial={{ y: 40, opacity: 0, scale: 0.98 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
+        exit={{ y: 24, opacity: 0, scale: 0.98 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+        onClick={(e) => e.stopPropagation()}
       >
         <div
           className={`flex items-center justify-between border-b pb-3 ${
@@ -331,7 +362,9 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
             Сохранить поездку в журнал
           </button>
         </form>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
+      )}
+    </AnimatePresence>
   );
 };

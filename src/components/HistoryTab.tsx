@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   History,
   TrendingUp,
@@ -714,12 +715,19 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             </p>
           </div>
         ) : (
-          filteredSessions.map((trip) => {
+          filteredSessions.map((trip, index) => {
             const isExpanded = expandedId === trip.id;
 
             return (
-              <div
+              <motion.div
                 key={trip.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  duration: 0.22,
+                  delay: Math.min(index * 0.035, 0.28),
+                  ease: [0.22, 1, 0.36, 1],
+                }}
                 className={`border rounded-2xl p-3.5 transition-all shadow-sm ${
                   isDark
                     ? 'bg-slate-900/90 border-slate-800 hover:border-slate-700/80'
@@ -760,15 +768,30 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                     <div className={`px-2.5 py-1 rounded-xl border font-mono font-bold text-xs ${getConsumptionBadge(trip.consumptionPer100Km)}`}>
                       {trip.consumptionPer100Km.toFixed(1)} <span className="text-[10px] font-normal">кВт⋅ч/100</span>
                     </div>
-                    <ChevronDown
-                      className={`w-4 h-4 transition-transform ${isDark ? 'text-slate-400' : 'text-slate-500'} ${isExpanded ? 'rotate-180' : ''}`}
-                    />
+                    <motion.span
+                      animate={{ rotate: isExpanded ? 180 : 0 }}
+                      transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                      className="inline-flex"
+                    >
+                      <ChevronDown
+                        className={`w-4 h-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
+                      />
+                    </motion.span>
                   </div>
                 </div>
 
                 {/* Expanded Details */}
+                <AnimatePresence initial={false}>
                 {isExpanded && (
-                  <div className={`mt-3 pt-3 border-t space-y-2.5 text-xs animate-in fade-in duration-200 ${
+                  <motion.div
+                    key="expanded"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                    className="overflow-hidden"
+                  >
+                  <div className={`mt-3 pt-3 border-t space-y-2.5 text-xs ${
                     isDark ? 'border-slate-800/80' : 'border-slate-100'
                   }`}>
                     <div className={`grid grid-cols-2 sm:grid-cols-3 gap-2 p-2.5 rounded-xl border ${
@@ -955,8 +978,10 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                       </button>
                     </div>
                   </div>
+                  </motion.div>
                 )}
-              </div>
+                </AnimatePresence>
+              </motion.div>
             );
           })
         )}

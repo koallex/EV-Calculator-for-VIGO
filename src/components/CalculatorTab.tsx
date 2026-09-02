@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import {
   Zap,
   Gauge,
@@ -32,6 +33,7 @@ import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSam
 import { RouteMap } from './RouteMap';
 import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts';
 import { CollapsibleDetails, SecondaryStatRow, ChipRow } from './ui/CollapsibleDetails';
+import { AnimatedNumber } from './ui/AnimatedNumber';
 
 // Manual "Планирование" precipitation presets: type × intensity → (mm/h, WMO weather code).
 // Values sit inside the intensity bands calculatePrecipitationImpact() already uses, so each
@@ -592,22 +594,51 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       </section>
 
       {/* Mode: route planning vs. logging a completed trip — two different workflows, kept visually separate instead of one long interleaved scroll */}
-      <div className={`grid grid-cols-2 rounded-2xl border p-1 gap-1 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-        <button
-          onClick={() => setCalculatorMode('route')}
-          className={`rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${calculatorMode === 'route' ? 'bg-emerald-600 text-white shadow-sm' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
-        >
-          <Navigation className="w-4 h-4" /> Маршрут
-        </button>
-        <button
-          onClick={() => setCalculatorMode('manual')}
-          className={`rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${calculatorMode === 'manual' ? 'bg-emerald-600 text-white shadow-sm' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
-        >
-          <Gauge className="w-4 h-4" /> Ручной ввод
-        </button>
-      </div>
+      <LayoutGroup>
+        <div className={`relative grid grid-cols-2 rounded-2xl border p-1 gap-1 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+          <button
+            onClick={() => { triggerHaptic('light', settings.hapticFeedback); setCalculatorMode('route'); }}
+            className={`relative z-10 rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors ${calculatorMode === 'route' ? 'text-white' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            {calculatorMode === 'route' && (
+              <motion.div
+                layoutId="calculatorModePill"
+                className="absolute inset-0 rounded-xl bg-emerald-600 shadow-sm"
+                transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+              />
+            )}
+            <span className="relative z-10 inline-flex items-center gap-1.5">
+              <Navigation className="w-4 h-4" /> Маршрут
+            </span>
+          </button>
+          <button
+            onClick={() => { triggerHaptic('light', settings.hapticFeedback); setCalculatorMode('manual'); }}
+            className={`relative z-10 rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors ${calculatorMode === 'manual' ? 'text-white' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            {calculatorMode === 'manual' && (
+              <motion.div
+                layoutId="calculatorModePill"
+                className="absolute inset-0 rounded-xl bg-emerald-600 shadow-sm"
+                transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+              />
+            )}
+            <span className="relative z-10 inline-flex items-center gap-1.5">
+              <Gauge className="w-4 h-4" /> Ручной ввод
+            </span>
+          </button>
+        </div>
+      </LayoutGroup>
 
+      <AnimatePresence mode="wait" initial={false}>
       {calculatorMode === 'route' && (
+        <motion.div
+          key="mode-route"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          className="flex flex-col gap-3"
+        >
         <>
 
       {/* Compact result strip — always visible at top once a route is calculated */}
@@ -630,22 +661,23 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 SOC на финише
               </div>
               <div className="flex items-baseline gap-2 mt-0.5">
-                <span
-                  className={`text-3xl font-black font-mono tabular-nums ${
+                <AnimatedNumber
+                  value={routeForecast.arrivalSoc}
+                  decimals={1}
+                  suffix="%"
+                  className={`text-3xl font-black font-mono ${
                     routeForecast.arrivalSoc >= 20
                       ? isDark ? 'text-emerald-400' : 'text-emerald-600'
                       : routeForecast.arrivalSoc >= ARRIVAL_RESERVE_SOC
                       ? 'text-amber-500'
                       : 'text-rose-500'
                   }`}
-                >
-                  {routeForecast.arrivalSoc}%
-                </span>
+                />
               </div>
             </div>
             <div className="text-right shrink-0">
               <div className={`text-sm font-bold font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                {routeForecast.consumption.toFixed(1)} <span className="text-[10px] font-semibold text-slate-500">кВт⋅ч/100</span>
+                <AnimatedNumber value={routeForecast.consumption} decimals={1} className={isDark ? 'text-white' : 'text-slate-900'} /> <span className="text-[10px] font-semibold text-slate-500">кВт⋅ч/100</span>
               </div>
               <div className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 {routeForecast.energyKwh.toFixed(1)} кВт⋅ч
@@ -777,7 +809,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               >
                 <div className="text-center">
                   <div className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>SOC на финише</div>
-                  <div className={`mt-1 text-5xl font-black font-mono ${statusColor}`}>{arrival}%</div>
+                  <div className={`mt-1 text-5xl font-black font-mono ${statusColor}`}>
+                    <AnimatedNumber value={arrival} decimals={0} suffix="%" className={statusColor} />
+                  </div>
                   <div className={`mt-1 text-xs font-semibold px-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{statusText}</div>
                 </div>
 
@@ -796,12 +830,16 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 <div className="mt-3 grid grid-cols-2 gap-2 text-center">
                   <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-900/80' : 'bg-white/80'}`}>
                     <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Расход</div>
-                    <div className="text-sm font-black font-mono">{routeForecast.consumption.toFixed(1)}</div>
+                    <div className="text-sm font-black font-mono">
+                      <AnimatedNumber value={routeForecast.consumption} decimals={1} />
+                    </div>
                     <div className="text-[10px] text-slate-500">кВт⋅ч/100</div>
                   </div>
                   <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-900/80' : 'bg-white/80'}`}>
                     <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Всего</div>
-                    <div className="text-sm font-black font-mono">{routeForecast.energyKwh.toFixed(1)}</div>
+                    <div className="text-sm font-black font-mono">
+                      <AnimatedNumber value={routeForecast.energyKwh} decimals={1} />
+                    </div>
                     <div className="text-[10px] text-slate-500">кВт⋅ч</div>
                   </div>
                 </div>
@@ -1181,9 +1219,18 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         </div>
       </CollapsibleDetails>
         </>
+        </motion.div>
       )}
 
       {calculatorMode === 'manual' && (
+        <motion.div
+          key="mode-manual"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          className="flex flex-col gap-3"
+        >
         <>
           {/* Hero result */}
           <section
@@ -1195,7 +1242,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               Расход
             </div>
             <div className={`mt-1 text-5xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-              {consumptionPer100Km > 0 ? consumptionPer100Km.toFixed(1) : '—'}
+              {consumptionPer100Km > 0 ? (
+                <AnimatedNumber value={consumptionPer100Km} decimals={1} className={isDark ? 'text-emerald-400' : 'text-emerald-600'} />
+              ) : '—'}
               <span className="text-base font-bold ml-1.5 opacity-70">кВт⋅ч/100</span>
             </div>
             <div className={`mt-2 text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
@@ -1411,7 +1460,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             </button>
           </div>
         </>
+        </motion.div>
       )}
+      </AnimatePresence>
 
     </div>
   );

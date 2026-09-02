@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion } from 'motion/react';
 
 interface BatteryVisualProps {
   currentPercent: number;
@@ -46,23 +47,46 @@ export const BatteryVisual: React.FC<BatteryVisualProps> = ({
           isDark ? 'bg-slate-900/90' : 'bg-slate-100 border-slate-300'
         } ${getBorderGlow(clampedCurrent)}`}
       >
-        {/* Fill bar */}
-        <div
+        {/* Fill bar — animated width via motion for smoother spring-like feel */}
+        <motion.div
           className={`h-full rounded-lg bg-gradient-to-r ${getBatteryColor(
             clampedCurrent
-          )} transition-all duration-500 relative flex items-center justify-end px-2 overflow-hidden shadow-inner`}
-          style={{ width: `${Math.max(6, clampedCurrent)}%` }}
+          )} relative flex items-center justify-end px-2 overflow-hidden shadow-inner`}
+          initial={false}
+          animate={{ width: `${Math.max(6, clampedCurrent)}%` }}
+          transition={{ type: 'spring', stiffness: 120, damping: 22, mass: 0.8 }}
         >
-          {/* Subtle shine effect */}
-          <div className="absolute inset-0 bg-white/15 opacity-60" />
-        </div>
+          {/* Subtle shine / shimmer sweep */}
+          <motion.div
+            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/25 to-transparent"
+            initial={{ x: '-100%' }}
+            animate={{ x: '200%' }}
+            transition={{
+              duration: 2.4,
+              repeat: Infinity,
+              repeatDelay: 3.5,
+              ease: 'easeInOut',
+            }}
+            style={{ width: '40%' }}
+          />
+          {/* Static soft highlight */}
+          <div className="absolute inset-0 bg-white/10 opacity-50 pointer-events-none" />
+        </motion.div>
 
         {/* Center label inside battery */}
         <div className="absolute inset-0 flex items-center justify-between px-3.5 pointer-events-none">
           <span className={`text-xs font-bold drop-shadow flex items-center gap-1.5 ${
             isDark ? 'text-white' : 'text-slate-900'
           }`}>
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-sm" />
+            <span
+              className={`w-2 h-2 rounded-full shadow-sm ${
+                clampedCurrent > 50
+                  ? 'bg-emerald-400'
+                  : clampedCurrent > 25
+                    ? 'bg-amber-400'
+                    : 'bg-rose-400'
+              } ${clampedCurrent <= 25 ? 'animate-pulse' : ''}`}
+            />
             {remainingKwh} кВт⋅ч
           </span>
           <span className={`text-sm font-extrabold font-mono drop-shadow tracking-tight ${
@@ -78,4 +102,3 @@ export const BatteryVisual: React.FC<BatteryVisualProps> = ({
     </div>
   );
 };
-

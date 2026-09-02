@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Zap, Moon, Sun, Plus, ShieldCheck, LogOut } from 'lucide-react';
 import { UserSettings } from '../types';
 import { triggerHaptic } from '../utils/haptics';
@@ -66,22 +67,42 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action buttons */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Theme toggle */}
+          {/* Theme toggle with icon rotation */}
           <button
             id="theme-toggle-button"
             onClick={toggleTheme}
             title={isDark ? 'Включить светлую тему' : 'Включить темную тему'}
-            className={`w-9 h-9 rounded-xl flex items-center justify-center active:scale-95 transition-all border ${
+            className={`w-9 h-9 rounded-xl flex items-center justify-center active:scale-95 transition-all border overflow-hidden ${
               isDark
                 ? 'bg-slate-900/90 hover:bg-slate-800 text-amber-400 border-slate-800'
                 : 'bg-slate-100 hover:bg-slate-200 text-amber-600 border-slate-200'
             }`}
           >
-            {isDark ? (
-              <Sun className="w-4 h-4" />
-            ) : (
-              <Moon className="w-4 h-4 text-slate-700" />
-            )}
+            <AnimatePresence mode="wait" initial={false}>
+              {isDark ? (
+                <motion.span
+                  key="sun"
+                  initial={{ rotate: -90, opacity: 0, scale: 0.6 }}
+                  animate={{ rotate: 0, opacity: 1, scale: 1 }}
+                  exit={{ rotate: 90, opacity: 0, scale: 0.6 }}
+                  transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                  className="inline-flex"
+                >
+                  <Sun className="w-4 h-4" />
+                </motion.span>
+              ) : (
+                <motion.span
+                  key="moon"
+                  initial={{ rotate: 90, opacity: 0, scale: 0.6 }}
+                  animate={{ rotate: 0, opacity: 1, scale: 1 }}
+                  exit={{ rotate: -90, opacity: 0, scale: 0.6 }}
+                  transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                  className="inline-flex"
+                >
+                  <Moon className="w-4 h-4 text-slate-700" />
+                </motion.span>
+              )}
+            </AnimatePresence>
           </button>
 
           {/* Quick Add Trip (Primary CTA) */}
