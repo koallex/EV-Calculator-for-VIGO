@@ -118,6 +118,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [speedProfileOpen, setSpeedProfileOpen] = useState(false);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
   const [routeParamsOpen, setRouteParamsOpen] = useState(false);
+  /** Detailed route info (map, elevation, breakdown) — collapsed after calc */
+  const [routeDetailsOpen, setRouteDetailsOpen] = useState(false);
   /** Brief highlight pulse on the result card after a successful route calc */
   const [resultHighlight, setResultHighlight] = useState(false);
   /** Reserve SoC kept as safety buffer when interpreting arrival forecast.
@@ -300,8 +302,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       setRouteWeather({ ...displayWeather, temperature:Math.round(avgTemperature), windSpeed:Math.round(avgWindSpeed), precipitation:Number(avgPrecipitation.toFixed(1)), routeBearing, etaMinutes, arrivalDate, samples });
       setRouteForecast({consumption:Number((energyKwh/data.distanceKm*100).toFixed(2)),energyKwh:Number(energyKwh.toFixed(2)),arrivalSoc,windLabel:segmentedForecast.windStatusText || `Ветер ~${Math.round(segmented.avgWindSpeed)} км/ч`,weatherLabel:`${Math.round(segmented.avgTemperature)>=0?'+':''}${Math.round(segmented.avgTemperature)}°C`,precipitationLabel:segmentedForecast.precipitationLabel||'Без существенных осадков',relativeWindAngle:avgRelativeWindAngle,driverStyleFactor:segmentedForecast.driverStyleFactor,driverStyleSource:getDriverStyleSourceLabel(segmentedForecast.dataSource),climateLabel:segmentedForecast.climateLabel || `Климат · ${segmented.climatePowerKw.toFixed(1)} кВт`,climateImpactPct:segmentedForecast.climateImpactPct || 0,climateDeltaKwh100:Number((segmented.climateEnergyKwh/data.distanceKm*100).toFixed(2)),climatePowerKw:segmented.climatePowerKw,speedImpactPct:segmentedForecast.speedImpactPct,breakdown:segmented});
       setEndSoc(arrivalSoc);
-      // Keep secondary breakdown collapsed so the hero result stays in view
+      // Keep secondary panels collapsed so the hero result stays in view
       setConsumptionOpen(false);
+      setRouteDetailsOpen(false);
       setRouteStatus('Готово');
       triggerHaptic('success', settings.hapticFeedback);
       setResultHighlight(true);
@@ -650,28 +653,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               </div>
             </div>
           </div>
-          {onSendToHud && destinationAddress.trim() && (
-            <button
-              type="button"
-              onClick={() => {
-                triggerHaptic('success', settings.hapticFeedback);
-                onSendToHud({
-                  destination: destinationAddress.trim(),
-                  startSoc,
-                  plannedSpeedKmH,
-                });
-              }}
-              className={`mt-2.5 w-full rounded-xl py-2 text-xs font-bold flex items-center justify-center gap-1.5 border ${
-                isDark
-                  ? 'bg-sky-950/40 border-sky-700/50 text-sky-300'
-                  : 'bg-white border-sky-300 text-sky-800'
-              }`}
-            >
-              <Navigation className="w-3.5 h-3.5" />
-              Вести в HUD
-            </button>
-          )}
-        </section>
+          </section>
       )}
 
       {/* Route: A → B + calculate */}
@@ -913,74 +895,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               );
             })()}
 
-            {routeForecast?.breakdown && (
-              <CollapsibleDetails
-                isDark={isDark}
-                label="Что повлияло на расход"
-                open={consumptionOpen}
-                onToggle={() => setConsumptionOpen(v => !v)}
-                className="mt-3"
-              >
-                <div className={`rounded-xl border p-3 space-y-2 text-xs ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-                  {([
-                    ['Базовое движение', routeForecast.breakdown.baseEnergyKwh],
-                    ['Температура', routeForecast.breakdown.temperatureDeltaKwh],
-                    ['Ветер', routeForecast.breakdown.windDeltaKwh],
-                    ['Осадки / дорога', routeForecast.breakdown.precipitationDeltaKwh],
-                    ['Стиль', routeForecast.breakdown.driverDeltaKwh],
-                    ['Рельеф', routeForecast.breakdown.elevationDeltaKwh],
-                    ['Климат', routeForecast.breakdown.climateEnergyKwh],
-                  ] as Array<[string, number]>).map(([label, value]) => {
-                    const kwh = Number(value) || 0;
-                    const pct = routeForecast.energyKwh > 0.01
-                      ? (kwh / routeForecast.energyKwh) * 100
-                      : 0;
-                    return (
-                      <div key={label} className="space-y-1">
-                        <div className="flex justify-between gap-3">
-                          <span>{label}</span>
-                          <b className="tabular-nums whitespace-nowrap">
-                            {kwh >= 0 ? '+' : ''}{kwh.toFixed(2)} кВт⋅ч
-                            <span className={`ml-1.5 font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                              ({pct >= 0 ? '+' : ''}{pct.toFixed(0)}%)
-                            </span>
-                          </b>
-                        </div>
-                        <div className={`h-1 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
-                          <div
-                            className={`h-full rounded-full ${kwh >= 0 ? 'bg-amber-500/80' : 'bg-cyan-500/80'}`}
-                            style={{ width: `${Math.min(100, Math.abs(pct))}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <div className="pt-2 border-t border-slate-700/30 flex justify-between font-bold">
-                    <span>Итого / сегментов</span>
-                    <span>{routeForecast.energyKwh.toFixed(2)} кВт⋅ч · {routeForecast.breakdown.segments}</span>
-                  </div>
-                </div>
-              </CollapsibleDetails>
-            )}
-
-            {optimalSpeedScenario && (
-              <div className={`mt-3 rounded-xl border p-3 ${isDark ? 'bg-emerald-950/30 border-emerald-900/60' : 'bg-emerald-50 border-emerald-200'}`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className={`text-[10px] font-bold uppercase tracking-wide ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>Оптимальная скорость</div>
-                    <div className={`mt-0.5 text-2xl font-black font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>{optimalSpeedScenario.speed} км/ч</div>
-                  </div>
-                  <div className="text-right text-[11px]">
-                    <div><span className="text-slate-500">Расход</span> <b>{optimalSpeedScenario.consumption.toFixed(1)} кВт⋅ч/100</b></div>
-                    <div className="mt-0.5"><span className="text-slate-500">Прибытие</span> <b>{optimalSpeedScenario.arrivalSoc}% SOC</b></div>
-                  </div>
-                </div>
-                <div className={`mt-2 text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                  Минимум энергии для текущих условий маршрута, погоды, рельефа и климата. Проверен диапазон 50–120 км/ч.
-                </div>
-              </div>
-            )}
-
+            {/* Primary post-calc UI: SOC (above) → What if → HUD → Details */}
             <div className={`rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-bold inline-flex items-center gap-2"><Gauge className="w-4 h-4 text-emerald-500" />А что если?</span>
@@ -1077,90 +992,121 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               </button>
             )}
 
+            {/* All secondary route info behind one control */}
             <CollapsibleDetails
               isDark={isDark}
-              label="Карта маршрута"
-              icon={<Map className="w-4 h-4 text-emerald-500" />}
-              open={routeMapOpen}
-              onToggle={() => setRouteMapOpen(v => !v)}
+              label="Подробнее о маршруте"
+              open={routeDetailsOpen}
+              onToggle={() => setRouteDetailsOpen(v => !v)}
+              className="mt-1"
             >
-              <RouteMap points={routeElevation.points} isDark={isDark} />
-            </CollapsibleDetails>
+              <div className="space-y-3">
+                {routeForecast?.breakdown && (
+                  <div className={`rounded-xl border p-3 space-y-2 text-xs ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className={`text-[11px] font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Что повлияло на расход</div>
+                    {([
+                      ['Базовое движение', routeForecast.breakdown.baseEnergyKwh],
+                      ['Температура', routeForecast.breakdown.temperatureDeltaKwh],
+                      ['Ветер', routeForecast.breakdown.windDeltaKwh],
+                      ['Осадки / дорога', routeForecast.breakdown.precipitationDeltaKwh],
+                      ['Стиль', routeForecast.breakdown.driverDeltaKwh],
+                      ['Рельеф', routeForecast.breakdown.elevationDeltaKwh],
+                      ['Климат', routeForecast.breakdown.climateEnergyKwh],
+                    ] as Array<[string, number]>).map(([label, value]) => {
+                      const kwh = Number(value) || 0;
+                      const pct = routeForecast.energyKwh > 0.01 ? (kwh / routeForecast.energyKwh) * 100 : 0;
+                      return (
+                        <div key={label} className="flex justify-between gap-3">
+                          <span>{label}</span>
+                          <b className="tabular-nums whitespace-nowrap">
+                            {kwh >= 0 ? '+' : ''}{kwh.toFixed(2)} кВт⋅ч
+                            <span className={`ml-1.5 font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                              ({pct >= 0 ? '+' : ''}{pct.toFixed(0)}%)
+                            </span>
+                          </b>
+                        </div>
+                      );
+                    })}
+                    <div className="pt-2 border-t border-slate-700/30 flex justify-between font-bold">
+                      <span>Итого / сегментов</span>
+                      <span>{routeForecast.energyKwh.toFixed(2)} кВт⋅ч · {routeForecast.breakdown.segments}</span>
+                    </div>
+                  </div>
+                )}
 
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-center">
-              <div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold">{routeElevation.distanceKm}</div><div className="text-[10px] text-slate-500">км маршрута</div></div><div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold text-amber-500">▲ {routeElevation.elevationGainM} м</div><div className="text-[10px] text-slate-500">набор</div></div><div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold text-cyan-500">▼ {routeElevation.elevationLossM} м</div><div className="text-[10px] text-slate-500">спуск</div></div><div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold">{routeElevation.netElevationEnergyKwh > 0 ? '+' : ''}{routeElevation.netElevationEnergyKwh.toFixed(2)}</div><div className="text-[10px] text-slate-500">кВт⋅ч нетто</div></div>
-            </div>
-            <CollapsibleDetails
-              isDark={isDark}
-              label="Профиль высот"
-              icon={<ChartNoAxesCombined className="w-4 h-4 text-cyan-500" />}
-              open={elevationOpen}
-              onToggle={() => setElevationOpen(v => !v)}
-            >
-              {(() => {
-              const profilePoints = routeElevation.points
-                .map((p: any, i: number) => ({
-                  distance: Number(p?.distanceFromStartKm ?? (i * routeElevation.distanceKm / Math.max(1, routeElevation.points.length - 1))),
-                  elevation: Number(p?.elevationM),
-                }))
-                .filter((p: any) => Number.isFinite(p.elevation));
+                {optimalSpeedScenario && (
+                  <div className={`rounded-xl border p-3 ${isDark ? 'bg-emerald-950/30 border-emerald-900/60' : 'bg-emerald-50 border-emerald-200'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className={`text-[10px] font-bold uppercase tracking-wide ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>Оптимальная скорость</div>
+                        <div className={`mt-0.5 text-2xl font-black font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>{optimalSpeedScenario.speed} км/ч</div>
+                      </div>
+                      <div className="text-right text-[11px]">
+                        <div><span className="text-slate-500">Расход</span> <b>{optimalSpeedScenario.consumption.toFixed(1)} кВт⋅ч/100</b></div>
+                        <div className="mt-0.5"><span className="text-slate-500">Прибытие</span> <b>{optimalSpeedScenario.arrivalSoc}% SOC</b></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-              return profilePoints.length >= 2 ? (
-                <div className={`mt-2 h-56 min-h-56 rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={profilePoints} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
-                      <XAxis dataKey="distance" type="number" domain={[0, 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v} км`} interval="preserveStartEnd" />
-                      <Tooltip formatter={(v: number) => [`${Math.round(v)} м`, 'Высота']} labelFormatter={(v) => `${v} км от старта`} />
-                      <Area type="monotone" dataKey="elevation" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.18} strokeWidth={2} isAnimationActive />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-center">
+                  <div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold">{routeElevation.distanceKm}</div><div className="text-[10px] text-slate-500">км</div></div>
+                  <div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold text-amber-500">▲ {routeElevation.elevationGainM} м</div><div className="text-[10px] text-slate-500">набор</div></div>
+                  <div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold text-cyan-500">▼ {routeElevation.elevationLossM} м</div><div className="text-[10px] text-slate-500">спуск</div></div>
+                  <div className={`rounded-xl p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="text-lg font-bold">{routeElevation.netElevationEnergyKwh > 0 ? '+' : ''}{routeElevation.netElevationEnergyKwh.toFixed(2)}</div><div className="text-[10px] text-slate-500">кВт⋅ч нетто</div></div>
                 </div>
-              ) : (
-                <div className={`mt-2 rounded-xl border p-4 text-center text-xs ${isDark ? 'bg-slate-950 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-500'}`}>
-                  Недостаточно точек профиля высот для отображения графика
-                </div>
-              );
-            })()}
-            </CollapsibleDetails>
-            <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-slate-950 text-slate-300' : 'bg-slate-50 text-slate-600'}`}><div className="flex justify-between"><span>Подъёмы</span><b>+{routeElevation.grossClimbEnergyKwh.toFixed(2)} кВт⋅ч</b></div><div className="flex justify-between mt-1"><span>Рекуперация</span><b className="text-emerald-500">−{routeElevation.recoveredEnergyKwh.toFixed(2)} кВт⋅ч</b></div><div className="flex justify-between mt-2 pt-2 border-t border-slate-500/20"><span>Скорректированный расход</span><b>{elevationAdjustedConsumption.toFixed(1)} кВт⋅ч/100 км</b></div></div>
 
-            {routeForecast?.breakdown?.speedProfile && routeForecast.breakdown.speedProfile.length >= 2 && (
-              <CollapsibleDetails
-                isDark={isDark}
-                label="Профиль скорости по маршруту"
-                icon={<Gauge className="w-4 h-4 text-amber-500" />}
-                open={speedProfileOpen}
-                onToggle={() => setSpeedProfileOpen(v => !v)}
-              >
-                <div className={`h-56 min-h-56 rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={routeForecast.breakdown.speedProfile.map((p) => ({ distance: p.distanceKm, speed: Math.round(p.speedKmH) }))} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
-                      <XAxis dataKey="distance" type="number" domain={[0, 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v} км`} interval="preserveStartEnd" />
-                      <Tooltip formatter={(v: number) => [`${v} км/ч`, 'Скорость']} labelFormatter={(v) => `${v} км от старта`} />
-                      <Area type="stepAfter" dataKey="speed" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.18} strokeWidth={2} isAnimationActive />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                  <p className={`mt-1 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Скорость, заложенная в расчёт по каждому участку маршрута — не факт, а модельное предположение (тип дороги + ваши план/максимум).
-                  </p>
+                <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-slate-950 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
+                  <div className="flex justify-between"><span>Подъёмы</span><b>+{routeElevation.grossClimbEnergyKwh.toFixed(2)} кВт⋅ч</b></div>
+                  <div className="flex justify-between mt-1"><span>Рекуперация</span><b className="text-emerald-500">−{routeElevation.recoveredEnergyKwh.toFixed(2)} кВт⋅ч</b></div>
+                  <div className="flex justify-between mt-2 pt-2 border-t border-slate-500/20"><span>Скорр. расход</span><b>{elevationAdjustedConsumption.toFixed(1)} кВт⋅ч/100 км</b></div>
                 </div>
-              </CollapsibleDetails>
-            )}
 
-            {routeWeather && routeWeather.samples.length > 0 && (
-              <CollapsibleDetails
-                isDark={isDark}
-                label={`Погода по маршруту (${routeWeather.samples.length} точек)`}
-                icon={<CloudSun className="w-4 h-4 text-sky-500" />}
-                open={weatherPanelOpen}
-                onToggle={() => setWeatherPanelOpen(v => !v)}
-              >
+                <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                  <RouteMap points={routeElevation.points} isDark={isDark} />
+                </div>
+
                 {(() => {
-                  // etaMinutes/arrivalDate are for the final point; every sample carries its own
-                  // etaMinutes from the same departure instant, so departure = arrival − final ETA.
+                  const profilePoints = routeElevation.points
+                    .map((p: any, i: number) => ({
+                      distance: Number(p?.distanceFromStartKm ?? (i * routeElevation.distanceKm / Math.max(1, routeElevation.points.length - 1))),
+                      elevation: Number(p?.elevationM),
+                    }))
+                    .filter((p: any) => Number.isFinite(p.elevation));
+                  return profilePoints.length >= 2 ? (
+                    <div className={`h-48 rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
+                      <div className={`text-[11px] font-bold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Профиль высот</div>
+                      <ResponsiveContainer width="100%" height="85%">
+                        <AreaChart data={profilePoints} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
+                          <XAxis dataKey="distance" type="number" domain={[0, 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v} км`} interval="preserveStartEnd" />
+                          <Tooltip formatter={(v: number) => [`${Math.round(v)} м`, 'Высота']} labelFormatter={(v) => `${v} км`} />
+                          <Area type="monotone" dataKey="elevation" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.18} strokeWidth={2} isAnimationActive={false} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : null;
+                })()}
+
+                {routeForecast?.breakdown?.speedProfile && routeForecast.breakdown.speedProfile.length >= 2 && (
+                  <div className={`h-48 rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
+                    <div className={`text-[11px] font-bold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Профиль скорости</div>
+                    <ResponsiveContainer width="100%" height="85%">
+                      <AreaChart data={routeForecast.breakdown.speedProfile.map((p) => ({ distance: p.distanceKm, speed: Math.round(p.speedKmH) }))} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
+                        <XAxis dataKey="distance" type="number" domain={[0, 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v} км`} interval="preserveStartEnd" />
+                        <Tooltip formatter={(v: number) => [`${v} км/ч`, 'Скорость']} labelFormatter={(v) => `${v} км`} />
+                        <Area type="stepAfter" dataKey="speed" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.18} strokeWidth={2} isAnimationActive={false} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
+                {routeWeather && routeWeather.samples.length > 0 && (() => {
                   const departureDate = new Date(routeWeather.arrivalDate.getTime() - routeWeather.etaMinutes * 60000);
                   return (
                     <div className={`rounded-xl border divide-y overflow-hidden ${isDark ? 'bg-slate-950 border-slate-800 divide-slate-800' : 'bg-white border-slate-200 divide-slate-100'}`}>
+                      <div className={`px-3 py-2 text-[11px] font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                        Погода по маршруту ({routeWeather.samples.length})
+                      </div>
                       {routeWeather.samples.map((s, i) => {
                         const sampleTime = new Date(departureDate.getTime() + s.etaMinutes * 60000);
                         const relAngle = ((s.weather.windDirection - s.routeBearing + 360) % 360);
@@ -1186,8 +1132,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     </div>
                   );
                 })()}
-              </CollapsibleDetails>
-            )}
+              </div>
+            </CollapsibleDetails>
           </>
         )}
       </section>
