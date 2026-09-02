@@ -757,7 +757,17 @@ export const HudTab: React.FC<HudTabProps> = ({
       };
     }
 
-    const movingSpeeds = speedHistoryRef.current.filter((s) => s >= 5);
+    // Style is judged from a ROLLING window of recent samples, not the whole trip so far.
+    // Cumulative-since-start variance falsely reads as "volatile/aggressive" driving during the
+    // first minute of any trip — accelerating 0 -> cruising speed is naturally high-variance and
+    // has nothing to do with driving style, but it used to get baked in and diluted only slowly
+    // as more (calm) samples arrived, which is exactly what made the live "SOC на финише" number
+    // look too pessimistic for a while early in a trip even though the driving itself was normal.
+    // ~60 samples at ~1 GPS fix/second is roughly the last 1-2 minutes — long enough to judge
+    // actual style, short enough that an early ramp-up ages out of it within the first couple of
+    // minutes. Short trips that never reach 60 samples still use everything they have, same as before.
+    const RECENT_STYLE_WINDOW = 60;
+    const movingSpeeds = speedHistoryRef.current.slice(-RECENT_STYLE_WINDOW).filter((s) => s >= 5);
     if (movingSpeeds.length < 4) {
       return {
         factor: 1.0,
