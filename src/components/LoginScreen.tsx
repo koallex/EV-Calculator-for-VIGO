@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { motion } from 'motion/react';
 import { LockKeyhole, LogIn, Loader2, Zap } from 'lucide-react';
 
 export interface AuthUser {
@@ -39,23 +38,24 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-      <motion.form
-        onSubmit={submit}
-        className="w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900/90 p-6 shadow-2xl"
-        initial={{ opacity: 0, y: 16, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      >
+    <div className="min-h-screen relative flex items-center justify-center p-4 overflow-hidden bg-slate-950 text-slate-100">
+      {/* Hero background photo. object-position favors the upper-middle of the frame so the
+          car's face stays visible behind the login card on narrow (mobile) viewports, where
+          bg-cover would otherwise crop it out. */}
+      <div
+        className="absolute inset-0 bg-cover"
+        style={{ backgroundImage: "url('/vigo-hero.webp')", backgroundPosition: '50% 20%' }}
+        aria-hidden="true"
+      />
+      {/* Gradient overlay: darkest behind the form card, fading out toward the edges so the
+          photo still reads at the top/sides while the card keeps full contrast. */}
+      <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/80 to-slate-950/30" aria-hidden="true" />
+
+      <form onSubmit={submit} className="relative w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900/90 backdrop-blur-sm p-6 shadow-2xl">
         <div className="flex items-center gap-3 mb-6">
-          <motion.div
-            className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white"
-            initial={{ scale: 0.7, rotate: -12 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.08 }}
-          >
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white">
             <Zap className="w-5 h-5 fill-current" />
-          </motion.div>
+          </div>
           <div>
             <h1 className="text-base font-bold text-white">Dongfeng Vigo</h1>
             <p className="text-xs text-slate-400">Авторизация</p>
@@ -69,7 +69,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               autoComplete="username"
               value={login}
               onChange={(e) => setLogin(e.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 transition-colors"
+              className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
               placeholder="Введите логин"
               required
             />
@@ -84,7 +84,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 py-2.5 text-sm outline-none focus:border-emerald-500 transition-colors"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 py-2.5 text-sm outline-none focus:border-emerald-500"
                 placeholder="Введите пароль"
                 required
               />
@@ -93,24 +93,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         </div>
 
         {error && (
-          <motion.div
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mt-3 rounded-xl border border-rose-900/60 bg-rose-950/30 px-3 py-2 text-xs text-rose-300"
-          >
+          <div className="mt-3 rounded-xl border border-rose-900/60 bg-rose-950/30 px-3 py-2 text-xs text-rose-300">
             {error}
-          </motion.div>
+          </div>
         )}
 
         <button
           type="submit"
           disabled={busy}
-          className="mt-5 w-full h-11 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-sm font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+          className="mt-5 w-full h-11 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-sm font-bold flex items-center justify-center gap-2"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
           {busy ? 'Вход…' : 'Войти'}
         </button>
-      </motion.form>
+      </form>
     </div>
   );
 };
