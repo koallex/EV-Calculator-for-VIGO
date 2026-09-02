@@ -120,6 +120,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [routeParamsOpen, setRouteParamsOpen] = useState(false);
   /** Detailed route info (map, elevation, breakdown) — collapsed after calc */
   const [routeDetailsOpen, setRouteDetailsOpen] = useState(false);
+  const [manualDetailsOpen, setManualDetailsOpen] = useState(false);
   /** Brief highlight pulse on the result card after a successful route calc */
   const [resultHighlight, setResultHighlight] = useState(false);
   /** Reserve SoC kept as safety buffer when interpreting arrival forecast.
@@ -1184,525 +1185,231 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
       {calculatorMode === 'manual' && (
         <>
-      {/* Top Banner: Battery Gauge & Glance Summary */}
-      <div
-        className={`calculator-battery border rounded-2xl p-4 transition-colors ${
-          isDark
-            ? 'bg-slate-900/60 border-slate-800/80'
-            : 'bg-white border-slate-200/80 shadow-xs'
-        }`}
-      >
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div
-              className={`p-1.5 rounded-lg ${
-                isDark ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-50 text-emerald-600'
-              }`}
-            >
-              <Gauge className="w-4 h-4" />
-            </div>
-            <span className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-              Состояние заряда (SoC)
-            </span>
-          </div>
-          <div className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            Израсходовано:{' '}
-            <span className={`font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-              -{socUsedPct}%
-            </span>{' '}
-            ({energyUsedKwh.toFixed(1)} кВт⋅ч)
-          </div>
-        </div>
-
-        <BatteryVisual currentPercent={endSoc} capacityKwh={batteryCap} theme={settings.theme} />
-
-      </div>
-
-      {/* 2. Key Metrics Card: Consumption & Range */}
-      <div
-        className={`calculator-metrics border rounded-2xl p-4 space-y-4 transition-colors ${
-          isDark
-            ? 'bg-slate-900/60 border-slate-800/80'
-            : 'bg-white border-slate-200/80 shadow-xs'
-        }`}
-      >
-        <div className="flex items-center justify-between">
-          <span className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            Расчет эффективности
-          </span>
-          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${rating.bg} ${rating.color}`}>
-            {rating.label}
-          </span>
-        </div>
-
-        {/* Primary Big Metric: kWh / 100 km */}
-        <div className="grid grid-cols-2 gap-3">
-          <div
-            className={`p-3.5 rounded-xl border flex flex-col justify-between ${
-              isDark
-                ? 'bg-slate-950/70 border-slate-800'
-                : 'bg-slate-50 border-slate-200/90 shadow-xs'
+          {/* Hero result */}
+          <section
+            className={`rounded-2xl border p-4 text-center ${
+              isDark ? 'bg-emerald-950/40 border-emerald-800/60' : 'bg-emerald-50 border-emerald-200'
             }`}
           >
-            <div className="flex items-center justify-between">
-              <span className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Расход на 100 км
-              </span>
-              <Zap className={`w-3.5 h-3.5 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
+            <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-emerald-300/80' : 'text-emerald-700'}`}>
+              Расход
             </div>
-            <div className="my-1">
-              <span className={`text-3xl font-extrabold font-mono tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                {consumptionPer100Km > 0 ? consumptionPer100Km.toFixed(1) : '—'}
-              </span>
-              <span className={`text-xs font-semibold ml-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                кВт⋅ч
-              </span>
+            <div className={`mt-1 text-5xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+              {consumptionPer100Km > 0 ? consumptionPer100Km.toFixed(1) : '—'}
+              <span className="text-base font-bold ml-1.5 opacity-70">кВт⋅ч/100</span>
             </div>
-            <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              {kmPerKwh > 0 ? `${kmPerKwh.toFixed(1)} км на 1 кВт⋅ч` : '0.0 км/кВт⋅ч'}
-            </span>
-          </div>
-
-          <div
-            className={`p-3.5 rounded-xl border flex flex-col justify-between ${
-              isDark
-                ? 'bg-slate-950/70 border-slate-800'
-                : 'bg-slate-50 border-slate-200/90 shadow-xs'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <span className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Стоимость поездки
-              </span>
-              <Coins className={`w-3.5 h-3.5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
+            <div className={`mt-2 text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+              {startSoc}% → {endSoc}% · −{socUsedPct}% · {energyUsedKwh.toFixed(1)} кВт⋅ч
+              {distanceKm > 0 ? ` · ${distanceKm} км` : ''}
             </div>
-            <div className="my-1">
-              <span className={`text-3xl font-extrabold font-mono tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                {tripCost.toFixed(2)}
-              </span>
-              <span className={`text-xs font-semibold ml-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                {settings.currency}
-              </span>
+            <div className={`mt-2 inline-flex items-center gap-2 text-[11px] font-semibold px-2.5 py-1 rounded-full border ${rating.bg} ${rating.color}`}>
+              {rating.label}
             </div>
-            <span className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              {costPer100Km.toFixed(2)} {settings.currency} / 100 км
-            </span>
-          </div>
-        </div>
-
-        {/* ICE Comparison & Savings */}
-        <div
-          className={`p-3 rounded-xl border flex items-center justify-between transition-colors ${
-            isDark
-              ? 'bg-emerald-950/25 border-emerald-800/40 text-emerald-300'
-              : 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <div
-              className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                isDark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
-              }`}
-            >
-              <TrendingDown className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="text-xs font-bold">
-                Экономия по сравнению с ДВС:
+            <div className="mt-3 grid grid-cols-2 gap-2 text-center">
+              <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-white/80'}`}>
+                <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Стоимость</div>
+                <div className="text-sm font-black font-mono">{tripCost.toFixed(2)} {settings.currency}</div>
               </div>
-              <div className={`text-[11px] ${isDark ? 'text-emerald-400/80' : 'text-emerald-700'}`}>
-                Аналог ДВС: {settings.gasEquivalentL100km} л/100км ({gasCostEquivalent.toFixed(2)} {settings.currency})
+              <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-white/80'}`}>
+                <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>На 100 км</div>
+                <div className="text-sm font-black font-mono">{costPer100Km.toFixed(2)} {settings.currency}</div>
               </div>
             </div>
-          </div>
-          <div className="text-right">
-            <div className="text-sm font-extrabold font-mono">
-              +{moneySaved.toFixed(2)} {settings.currency}
-            </div>
-            <div className={`text-[10px] font-semibold ${isDark ? 'text-emerald-400/80' : 'text-emerald-700'}`}>
-              {gasCostEquivalent > 0 ? `в ${(gasCostEquivalent / Math.max(0.1, tripCost)).toFixed(1)}x раз дешевле` : ''}
-            </div>
-          </div>
-        </div>
-      </div>
+          </section>
 
-      {/* 4. Interactive Input Controls */}
-      <div
-        className={`calculator-controls border rounded-2xl p-4 space-y-3.5 transition-colors ${
-          isDark
-            ? 'bg-slate-900/60 border-slate-800/80'
-            : 'bg-white border-slate-200/80 shadow-xs'
-        }`}
-      >
-        <div className="flex items-center justify-between">
-          <h3 className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-            Параметры поездки
-          </h3>
-        </div>
-
-        {/* Finish SoC */}
-        <div className={`p-3 rounded-xl border transition-colors ${isDark ? 'bg-slate-950/60 border-slate-800/80' : 'bg-slate-50/80 border-slate-200'}`}>
-          <div className="flex items-center justify-between gap-3">
+          {/* Core inputs: end SOC + distance */}
+          <section className={`rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
             <div>
-              <span className={`text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>SOC на финише</span>
-              <p className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Для расчёта фактического расхода</p>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>SOC на финише</span>
+                <span className={`text-xl font-black font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{endSoc}%</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => adjustValue(setEndSoc, -5, 0, Math.max(0, startSoc - 1))} className={`w-10 h-9 rounded-lg text-xs font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(0, startSoc - 1)}
+                  value={Math.min(endSoc, Math.max(0, startSoc - 1))}
+                  onChange={(e) => setEndSoc(Number(e.target.value))}
+                  className="flex-1 accent-emerald-500 h-1.5 cursor-pointer"
+                  aria-label="SOC на финише"
+                />
+                <button type="button" onClick={() => adjustValue(setEndSoc, 5, 0, Math.max(0, startSoc - 1))} className={`w-10 h-9 rounded-lg text-xs font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+5</button>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              <button onClick={() => adjustValue(setEndSoc, -10, 0, Math.max(0, startSoc - 1))} className={`h-9 px-2 rounded-lg text-xs font-bold border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−10</button>
-              <button onClick={() => adjustValue(setEndSoc, -1, 0, Math.max(0, startSoc - 1))} className={`w-9 h-9 rounded-lg font-bold border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−</button>
-              <span className={`min-w-14 text-center text-lg font-bold font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{endSoc}%</span>
-              <button onClick={() => adjustValue(setEndSoc, 1, 0, Math.max(0, startSoc - 1))} className={`w-9 h-9 rounded-lg font-bold border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+</button>
-              <button onClick={() => adjustValue(setEndSoc, 10, 0, Math.max(0, startSoc - 1))} className={`h-9 px-2 rounded-lg text-xs font-bold border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+10</button>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Расстояние</span>
+                <div className="w-28">
+                  <DecimalInput
+                    value={distanceKm}
+                    onChange={(val) => setDistanceKm(Math.max(0.1, val))}
+                    suffix="км"
+                    className={`w-full text-right px-2 py-1 rounded-lg text-sm font-bold font-mono focus:outline-none border ${
+                      isDark
+                        ? 'bg-slate-950 border-slate-700 text-emerald-400'
+                        : 'bg-slate-50 border-slate-200 text-emerald-600'
+                    }`}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {[
+                  { d: -10, l: '−10' },
+                  { d: -1, l: '−1' },
+                  { d: 1, l: '+1' },
+                  { d: 10, l: '+10' },
+                ].map(({ d, l }) => (
+                  <button
+                    key={l}
+                    type="button"
+                    onClick={() => adjustValue(setDistanceKm, d, 1, 1000)}
+                    className={`py-1.5 rounded-lg text-xs font-bold border ${
+                      isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="mt-3 flex items-center gap-3">
-            <span className={`text-[10px] font-medium ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>0%</span>
-            <input
-              type="range"
-              min={0}
-              max={Math.max(0, startSoc - 1)}
-              value={Math.min(endSoc, Math.max(0, startSoc - 1))}
-              onChange={(e) => setEndSoc(Number(e.target.value))}
-              className="flex-1 accent-emerald-500 h-2 cursor-pointer"
-              aria-label="SOC на финише"
-            />
-            <span className={`text-[10px] font-medium ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>{Math.max(0, startSoc - 1)}%</span>
-          </div>
-          </div>
-        </div>
 
-        {/* Distance with Steppers and iOS-safe DecimalInput */}
-        <div
-          className={`p-3 rounded-xl border transition-colors ${
-            isDark ? 'bg-slate-950/60 border-slate-800/80' : 'bg-slate-50/80 border-slate-200'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className={`text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-              Пройденное расстояние:
-            </span>
-            <div className="w-28">
-              <DecimalInput
-                value={distanceKm}
-                onChange={(val) => setDistanceKm(Math.max(0.1, val))}
-                suffix="км"
-                className={`w-full text-right px-2.5 py-1 rounded-lg text-base font-bold font-mono focus:outline-none border ${
-                  isDark
-                    ? 'bg-slate-900 border-slate-700 text-emerald-400 focus:border-emerald-400'
-                    : 'bg-white border-slate-300 text-emerald-600 focus:border-emerald-500 shadow-xs'
-                }`}
-              />
+            <div>
+              <div className={`text-[11px] font-semibold mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Тип дороги</div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {([
+                  ['city', 'Город'],
+                  ['highway', 'Трасса'],
+                  ['mixed', 'Смешан.'],
+                ] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('light', settings.hapticFeedback);
+                      setRoadType(id);
+                    }}
+                    className={`py-2 rounded-lg text-xs font-semibold border ${
+                      roadType === id
+                        ? isDark
+                          ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60'
+                          : 'bg-emerald-600 text-white border-emerald-700'
+                        : isDark
+                        ? 'bg-slate-950 text-slate-400 border-slate-800'
+                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          </section>
 
-          <div className="grid grid-cols-4 gap-1.5 mt-2">
-            <button
-              onClick={() => adjustValue(setDistanceKm, -10, 1, 1000)}
-              className={`py-1.5 rounded-lg text-xs font-bold border active:scale-95 transition-all ${
-                isDark
-                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
-                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs'
-              }`}
-            >
-              -10 км
-            </button>
-            <button
-              onClick={() => adjustValue(setDistanceKm, -1, 1, 1000)}
-              className={`py-1.5 rounded-lg text-xs font-semibold border active:scale-95 transition-all ${
-                isDark
-                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
-                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs'
-              }`}
-            >
-              -1 км
-            </button>
-            <button
-              onClick={() => adjustValue(setDistanceKm, 1, 1, 1000)}
-              className={`py-1.5 rounded-lg text-xs font-semibold border active:scale-95 transition-all ${
-                isDark
-                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
-                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs'
-              }`}
-            >
-              +1 км
-            </button>
-            <button
-              onClick={() => adjustValue(setDistanceKm, 10, 1, 1000)}
-              className={`py-1.5 rounded-lg text-xs font-bold border active:scale-95 transition-all ${
-                isDark
-                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
-                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-xs'
-              }`}
-            >
-              +10 км
-            </button>
-          </div>
-        </div>
-
-        {/* Road Type & Climate */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-          {/* Road Type */}
-          <div
-            className={`p-2.5 rounded-xl border transition-colors ${
-              isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
-            }`}
+          {/* Secondary: tariff, ICE, range */}
+          <CollapsibleDetails
+            isDark={isDark}
+            label={`Тариф · ${activeTariff} ${settings.currency}/кВт⋅ч`}
+            open={manualDetailsOpen}
+            onToggle={() => setManualDetailsOpen(v => !v)}
           >
-            <span className={`text-[11px] font-semibold block mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              Условия движения:
-            </span>
-            <div className="grid grid-cols-3 gap-1">
-              <button
-                onClick={() => {
-                  triggerHaptic('light', settings.hapticFeedback);
-                  setRoadType('city');
-                }}
-                className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-all border ${
-                  roadType === 'city'
-                    ? isDark
-                      ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60'
-                      : 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
-                    : isDark
-                    ? 'bg-slate-900 text-slate-400 border-transparent'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                🏙️ Город
-              </button>
-              <button
-                onClick={() => {
-                  triggerHaptic('light', settings.hapticFeedback);
-                  setRoadType('highway');
-                }}
-                className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-all border ${
-                  roadType === 'highway'
-                    ? isDark
-                      ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60'
-                      : 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
-                    : isDark
-                    ? 'bg-slate-900 text-slate-400 border-transparent'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                🛣️ Трасса
-              </button>
-              <button
-                onClick={() => {
-                  triggerHaptic('light', settings.hapticFeedback);
-                  setRoadType('mixed');
-                }}
-                className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-all border ${
-                  roadType === 'mixed'
-                    ? isDark
-                      ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60'
-                      : 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
-                    : isDark
-                    ? 'bg-slate-900 text-slate-400 border-transparent'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                🔀 Смешан.
-              </button>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                {([
+                  ['malanka_dc', 'malanka_dc', 'fast_day'],
+                  ['evika', 'evika', 'malanka_ac', 'slow_public'],
+                  ['zaryadka_day', 'zaryadka_day', 'zaryadka', 'zaryadka_dc'],
+                  ['zaryadka_night', 'zaryadka_night'],
+                  ['batteryfly', 'batteryfly'],
+                  ['home_night', 'home_night', 'fast_night'],
+                  ['home', 'home', 'home_day'],
+                  ['free', 'free'],
+                ] as Array<[TripSession['chargingType'], ...string[]]>).map(([id, ...aliases]) => {
+                  const active = aliases.includes(chargingType) || chargingType === id;
+                  const label =
+                    id === 'home_night' ? 'Дом ночь' :
+                    id === 'home' ? 'Дом день' :
+                    id === 'free' ? 'Бесплатно' :
+                    getOperatorLabel(id, settings.regionPreset);
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic('light', settings.hapticFeedback);
+                        setChargingType(id);
+                      }}
+                      className={`py-2 px-2 rounded-lg text-xs font-semibold border text-left ${
+                        active
+                          ? isDark
+                            ? 'bg-amber-950/50 text-amber-300 border-amber-500/50'
+                            : 'bg-amber-50 text-amber-900 border-amber-300'
+                          : isDark
+                          ? 'bg-slate-950 text-slate-400 border-slate-800'
+                          : 'bg-white text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className={`rounded-xl border p-3 text-xs ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                <div className="flex justify-between gap-2">
+                  <span>Экономия vs ДВС</span>
+                  <b className="text-emerald-500">+{moneySaved.toFixed(2)} {settings.currency}</b>
+                </div>
+                <div className={`mt-1 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                  ДВС ≈ {gasCostEquivalent.toFixed(2)} {settings.currency} · {settings.gasEquivalentL100km} л/100 км
+                </div>
+                {consumptionPer100Km > 0 && (
+                  <div className="mt-2 pt-2 border-t border-slate-500/20 flex justify-between gap-2">
+                    <span>Запас на текущем SOC</span>
+                    <b>{remainingRangeKm.toFixed(0)} км</b>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          </CollapsibleDetails>
 
-        {/* 5. Tariff / Operator Selector */}
-        <div
-          className={`p-3 rounded-xl border transition-colors ${
-            isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              Оператор зарядки:
-            </span>
-            <span className={`text-xs font-mono font-bold ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
-              {activeTariff} {settings.currency}/кВт⋅ч
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+          <div className="flex flex-col sm:flex-row gap-2">
             <button
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setChargingType('malanka_dc');
-              }}
-              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
-                chargingType === 'malanka_dc' || chargingType === 'fast_day'
-                  ? isDark
-                    ? 'bg-amber-950/70 text-amber-300 border-amber-500/60'
-                    : 'bg-amber-500 text-white border-amber-600 shadow-xs'
-                  : isDark
-                  ? 'bg-slate-900 text-slate-400 border-transparent'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-              }`}
+              id="save-trip-direct-button"
+              type="button"
+              onClick={handleQuickSave}
+              className="flex-1 py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-sm shadow-emerald-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
             >
-              ⚡ {getOperatorLabel('malanka_dc', settings.regionPreset)}
+              <Zap className="w-4 h-4 fill-current" />
+              Сохранить · {consumptionPer100Km > 0 ? `${consumptionPer100Km.toFixed(1)} кВт⋅ч/100` : '—'}
             </button>
-
             <button
+              id="save-trip-detailed-button"
+              type="button"
               onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setChargingType('evika');
+                triggerHaptic('medium', settings.hapticFeedback);
+                onOpenAddModalWithData({
+                  startSoc,
+                  endSoc,
+                  distanceKm,
+                  roadType,
+                  climateOn,
+                  chargingType,
+                  passengers,
+                });
               }}
-              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
-                chargingType === 'evika' || chargingType === 'malanka_ac' || chargingType === 'slow_public'
-                  ? isDark
-                    ? 'bg-teal-950/70 text-teal-300 border-teal-500/60'
-                    : 'bg-teal-600 text-white border-teal-700 shadow-xs'
-                  : isDark
-                  ? 'bg-slate-900 text-slate-400 border-transparent'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+              className={`py-3 px-3.5 rounded-xl font-semibold text-xs border active:scale-95 transition-all flex items-center justify-center gap-1.5 ${
+                isDark
+                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-800'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-200'
               }`}
             >
-              🔌 {getOperatorLabel('evika', settings.regionPreset)}
-            </button>
-
-            <button
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setChargingType('zaryadka_day');
-              }}
-              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
-                chargingType === 'zaryadka_day' || chargingType === 'zaryadka' || chargingType === 'zaryadka_dc'
-                  ? isDark
-                    ? 'bg-orange-950/70 text-orange-300 border-orange-500/60'
-                    : 'bg-orange-500 text-white border-orange-600 shadow-xs'
-                  : isDark
-                  ? 'bg-slate-900 text-slate-400 border-transparent'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              ☀️ {getOperatorLabel('zaryadka_day', settings.regionPreset)}
-            </button>
-
-            <button
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setChargingType('zaryadka_night');
-              }}
-              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
-                chargingType === 'zaryadka_night'
-                  ? isDark
-                    ? 'bg-amber-950/70 text-amber-300 border-amber-500/60'
-                    : 'bg-amber-600 text-white border-amber-700 shadow-xs'
-                  : isDark
-                  ? 'bg-slate-900 text-slate-400 border-transparent'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              🌙 {getOperatorLabel('zaryadka_night', settings.regionPreset)}
-            </button>
-
-            <button
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setChargingType('batteryfly');
-              }}
-              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
-                chargingType === 'batteryfly'
-                  ? isDark
-                    ? 'bg-cyan-950/70 text-cyan-300 border-cyan-500/60'
-                    : 'bg-cyan-600 text-white border-cyan-700 shadow-xs'
-                  : isDark
-                  ? 'bg-slate-900 text-slate-400 border-transparent'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              🔋 {getOperatorLabel('batteryfly', settings.regionPreset)}
-            </button>
-
-            <button
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setChargingType('home_night');
-              }}
-              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
-                chargingType === 'home_night' || chargingType === 'fast_night'
-                  ? isDark
-                    ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60'
-                    : 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
-                  : isDark
-                  ? 'bg-slate-900 text-slate-400 border-transparent'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              🌙 Дом Ночь
-            </button>
-
-            <button
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setChargingType('home');
-              }}
-              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
-                chargingType === 'home' || chargingType === 'home_day'
-                  ? isDark
-                    ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60'
-                    : 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
-                  : isDark
-                  ? 'bg-slate-900 text-slate-400 border-transparent'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              🏠 Дом День
-            </button>
-
-            <button
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setChargingType('free');
-              }}
-              className={`py-2 px-2.5 rounded-lg text-xs font-semibold transition-all text-left border ${
-                chargingType === 'free'
-                  ? isDark
-                    ? 'bg-purple-950/70 text-purple-300 border-purple-500/60'
-                    : 'bg-purple-600 text-white border-purple-700 shadow-xs'
-                  : isDark
-                  ? 'bg-slate-900 text-slate-400 border-transparent'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              🎁 Бесплатно
+              Подробнее
+              <ChevronRight className={`w-3.5 h-3.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
             </button>
           </div>
-        </div>
-
-        {/* Action buttons */}
-        <div className="pt-2 flex flex-col sm:flex-row gap-2">
-          <button
-            id="save-trip-direct-button"
-            onClick={handleQuickSave}
-            className="flex-1 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-sm shadow-emerald-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-          >
-            <Zap className="w-4 h-4 fill-current" />
-            <span>Сохранить в историю ({consumptionPer100Km.toFixed(1)} кВт⋅ч/100км)</span>
-          </button>
-
-          <button
-            id="save-trip-detailed-button"
-            onClick={() => {
-              triggerHaptic('medium', settings.hapticFeedback);
-              onOpenAddModalWithData({
-                startSoc,
-                endSoc,
-                distanceKm,
-                roadType,
-                climateOn,
-                chargingType,
-                passengers,
-              });
-            }}
-            className={`py-3 px-3.5 rounded-xl font-semibold text-xs border active:scale-95 transition-all flex items-center justify-center gap-1.5 ${
-              isDark
-                ? 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-800'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-200'
-            }`}
-          >
-            <span>Подробная запись...</span>
-            <ChevronRight className={`w-3.5 h-3.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
-          </button>
-        </div>
-      </div>
         </>
       )}
 
