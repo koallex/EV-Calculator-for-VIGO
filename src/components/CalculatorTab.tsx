@@ -165,6 +165,17 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
+  // After a successful route calc, keep the hero result in the viewport (not the page bottom).
+  useEffect(() => {
+    if (!resultHighlight || !routeForecast) return;
+    const timer = window.setTimeout(() => {
+      const el =
+        document.getElementById('route-result-main') ||
+        document.getElementById('route-result-summary');
+      el?.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [resultHighlight, routeForecast]);
 
   const calculateBearing = (lat1:number, lon1:number, lat2:number, lon2:number) => {
     const r=Math.PI/180, y=Math.sin((lon2-lon1)*r)*Math.cos(lat2*r), x=Math.cos(lat1*r)*Math.sin(lat2*r)-Math.sin(lat1*r)*Math.cos(lat2*r)*Math.cos((lon2-lon1)*r);
@@ -289,14 +300,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       setRouteWeather({ ...displayWeather, temperature:Math.round(avgTemperature), windSpeed:Math.round(avgWindSpeed), precipitation:Number(avgPrecipitation.toFixed(1)), routeBearing, etaMinutes, arrivalDate, samples });
       setRouteForecast({consumption:Number((energyKwh/data.distanceKm*100).toFixed(2)),energyKwh:Number(energyKwh.toFixed(2)),arrivalSoc,windLabel:segmentedForecast.windStatusText || `Ветер ~${Math.round(segmented.avgWindSpeed)} км/ч`,weatherLabel:`${Math.round(segmented.avgTemperature)>=0?'+':''}${Math.round(segmented.avgTemperature)}°C`,precipitationLabel:segmentedForecast.precipitationLabel||'Без существенных осадков',relativeWindAngle:avgRelativeWindAngle,driverStyleFactor:segmentedForecast.driverStyleFactor,driverStyleSource:getDriverStyleSourceLabel(segmentedForecast.dataSource),climateLabel:segmentedForecast.climateLabel || `Климат · ${segmented.climatePowerKw.toFixed(1)} кВт`,climateImpactPct:segmentedForecast.climateImpactPct || 0,climateDeltaKwh100:Number((segmented.climateEnergyKwh/data.distanceKm*100).toFixed(2)),climatePowerKw:segmented.climatePowerKw,speedImpactPct:segmentedForecast.speedImpactPct,breakdown:segmented});
       setEndSoc(arrivalSoc);
-      setConsumptionOpen(true);
+      // Keep secondary breakdown collapsed so the hero result stays in view
+      setConsumptionOpen(false);
       setRouteStatus('Готово');
       triggerHaptic('success', settings.hapticFeedback);
       setResultHighlight(true);
-      window.setTimeout(() => setResultHighlight(false), 1600);
-      window.setTimeout(() => {
-        document.getElementById('route-result-summary')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }, 50);
+      window.setTimeout(() => setResultHighlight(false), 1800);
     } catch (e) {
       const msg=e instanceof Error?e.message:'Ошибка расчёта маршрута';
       const isGpsIssue = /denied|permission|геопозиц|geolocation|position/i.test(msg);
@@ -772,6 +781,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               const noClimate = getClimateScenario(false);
               return (
               <div
+                id="route-result-main"
                 className={`rounded-2xl border p-4 transition-shadow duration-500 ${
                   resultHighlight
                     ? isDark
