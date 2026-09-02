@@ -117,6 +117,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [consumptionOpen, setConsumptionOpen] = useState(true);
   const [speedProfileOpen, setSpeedProfileOpen] = useState(false);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
+  const [routeParamsOpen, setRouteParamsOpen] = useState(false);
   /** Brief highlight pulse on the result card after a successful route calc */
   const [resultHighlight, setResultHighlight] = useState(false);
   /** Reserve SoC kept as safety buffer when interpreting arrival forecast.
@@ -543,47 +544,36 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         )}
       </section>
 
-      {/* Route start SoC — updates route arrival instantly without rebuilding the route */}
-      <section className={`calculator-start-soc rounded-2xl border p-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="font-bold text-sm">Начальный заряд</h2>
-            <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Изменение сразу обновляет прогноз прибытия</p>
-          </div>
-          <span className={`text-2xl font-black font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{startSoc}%</span>
+      {/* Compact trip conditions: SoC + people + climate in one row-card */}
+      <section className={`rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+        <div className="flex items-center justify-between gap-2">
+          <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Старт</span>
+          <span className={`text-xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{startSoc}%</span>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => updateRouteStartSoc(startSoc - 5)} className={`w-11 h-10 rounded-xl font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>
-          <input type="range" min={1} max={100} value={startSoc} onChange={(e) => updateRouteStartSoc(Number(e.target.value))} className="flex-1 accent-emerald-500 h-2 rounded-lg cursor-pointer" />
-          <button onClick={() => updateRouteStartSoc(startSoc + 5)} className={`w-11 h-10 rounded-xl font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+5</button>
+          <button type="button" onClick={() => updateRouteStartSoc(startSoc - 5)} className={`w-10 h-9 rounded-lg font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>
+          <input type="range" min={1} max={100} value={startSoc} onChange={(e) => updateRouteStartSoc(Number(e.target.value))} className="flex-1 accent-emerald-500 h-1.5 rounded-lg cursor-pointer" />
+          <button type="button" onClick={() => updateRouteStartSoc(startSoc + 5)} className={`w-10 h-9 rounded-lg font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+5</button>
         </div>
-      </section>
-
-      {/* Occupants — directly after starting SoC */}
-      <section className={`calculator-passengers rounded-2xl border p-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="font-bold text-sm">Людей в салоне</h2>
-            <p className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Включая водителя · +75 кг на каждого дополнительного человека</p>
+        <div className="flex items-center gap-2">
+          <div className={`flex-1 flex items-center justify-between gap-2 rounded-xl border px-2.5 py-1.5 ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+            <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Люди</span>
+            <div className="flex items-center gap-1.5">
+              <button type="button" onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-8 h-8 rounded-lg font-bold border text-sm ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−</button>
+              <span className={`min-w-5 text-center font-bold font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>{passengers}</span>
+              <button type="button" onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-8 h-8 rounded-lg font-bold border text-sm ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+</button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-10 h-10 rounded-xl font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−</button>
-            <span className={`min-w-8 text-xl text-center font-bold font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{passengers}</span>
-            <button type="button" onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-10 h-10 rounded-xl font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+</button>
-          </div>
-        </div>
-      </section>
-
-      {/* Climate control */}
-      <section className={`calculator-climate rounded-2xl border p-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2 font-bold text-sm"><Thermometer className="w-4 h-4 text-emerald-500" />Климат</div>
-            <p className="text-[11px] text-slate-500 mt-0.5">AUTO учитывается по температуре на улице</p>
-          </div>
-          <button onClick={() => { triggerHaptic('light', settings.hapticFeedback); setClimateOn(v => !v); }}
-            className={`min-w-24 rounded-xl py-2.5 px-3 text-xs font-bold border transition-colors ${climateOn ? (isDark ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60' : 'bg-emerald-600 text-white border-emerald-700') : (isDark ? 'bg-slate-950 text-slate-400 border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200')}`}>
-            <span className="inline-flex items-center gap-1.5"><Power className="w-3.5 h-3.5" />{climateOn ? 'ВКЛ' : 'ВЫКЛ'}</span>
+          <button
+            type="button"
+            onClick={() => { triggerHaptic('light', settings.hapticFeedback); setClimateOn(v => !v); }}
+            className={`shrink-0 rounded-xl px-3 py-2 text-xs font-bold border transition-colors ${
+              climateOn
+                ? isDark ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60' : 'bg-emerald-600 text-white border-emerald-700'
+                : isDark ? 'bg-slate-950 text-slate-400 border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'
+            }`}
+          >
+            <span className="inline-flex items-center gap-1"><Power className="w-3.5 h-3.5" />{climateOn ? 'Климат' : 'Без клим.'}</span>
           </button>
         </div>
       </section>
@@ -675,19 +665,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         </section>
       )}
 
-      {/* Route elevation profile */}
+      {/* Route: A → B + calculate */}
       <section className={`calculator-route rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-        <div className="flex items-center gap-2">
-          <Mountain className="w-5 h-5 text-emerald-500" />
-          <div>
-            <h2 className="font-bold">Рельеф маршрута</h2>
-            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Реальный маршрут · точки по расстоянию · погода, ветер и рекуперация</p>
-          </div>
-        </div>
-
         <div className={`grid grid-cols-2 rounded-xl p-1 ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
-          <button onClick={() => setStartMode('gps')} className={`rounded-lg py-2 text-xs font-semibold ${startMode === 'gps' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>📍 Текущая геопозиция</button>
-          <button onClick={() => setStartMode('address')} className={`rounded-lg py-2 text-xs font-semibold ${startMode === 'address' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>🏠 Адрес точки А</button>
+          <button onClick={() => setStartMode('gps')} className={`rounded-lg py-2 text-xs font-semibold ${startMode === 'gps' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>📍 Здесь</button>
+          <button onClick={() => setStartMode('address')} className={`rounded-lg py-2 text-xs font-semibold ${startMode === 'address' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>🏠 Адрес А</button>
         </div>
 
         {startMode === 'address' && (
@@ -720,8 +702,29 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           <input value={destinationAddress} onChange={e => setDestinationAddress(e.target.value)} placeholder="Куда? Город, улица, дом" className={`w-full rounded-xl border py-3 pl-9 pr-3 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`} />
         </div>
 
-        <div className={`rounded-xl p-3 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="flex items-center justify-between gap-3"><div><div className="text-xs font-semibold">Планируемая средняя скорость</div><div className="text-[10px] text-slate-500">Для ETA и прогноза погоды к моменту прибытия</div></div><div className="flex items-center gap-1"><DecimalInput value={plannedSpeedKmH} onChange={(v) => { setPlannedSpeedKmH(v); setPlannedMaxSpeedKmH((prev) => Math.max(prev, v)); }} min={20} max={140} className="w-20 text-right" /><span className="text-xs text-slate-500 whitespace-nowrap">км/ч</span></div></div></div>
-        <div className={`rounded-xl p-3 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}><div className="flex items-center justify-between gap-3"><div><div className="text-xs font-semibold">Предполагаемая максимальная скорость</div><div className="text-[10px] text-slate-500">Используется для быстрых участков маршрута, где можно ехать быстрее средней</div></div><div className="flex items-center gap-1"><DecimalInput value={plannedMaxSpeedKmH} onChange={(v) => setPlannedMaxSpeedKmH(Math.max(plannedSpeedKmH, Math.min(150, v)))} min={20} max={150} className="w-20 text-right" /><span className="text-xs text-slate-500 whitespace-nowrap">км/ч</span></div></div></div>
+        <CollapsibleDetails
+          isDark={isDark}
+          label={`Скорость · ср. ${plannedSpeedKmH} · макс. ${plannedMaxSpeedKmH} км/ч`}
+          open={routeParamsOpen}
+          onToggle={() => setRouteParamsOpen(v => !v)}
+        >
+          <div className="space-y-2">
+            <div className={`rounded-xl p-2.5 flex items-center justify-between gap-3 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
+              <span className="text-xs font-semibold">Средняя</span>
+              <div className="flex items-center gap-1">
+                <DecimalInput value={plannedSpeedKmH} onChange={(v) => { setPlannedSpeedKmH(v); setPlannedMaxSpeedKmH((prev) => Math.max(prev, v)); }} min={20} max={140} className="w-20 text-right" />
+                <span className="text-xs text-slate-500">км/ч</span>
+              </div>
+            </div>
+            <div className={`rounded-xl p-2.5 flex items-center justify-between gap-3 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
+              <span className="text-xs font-semibold">Максимум</span>
+              <div className="flex items-center gap-1">
+                <DecimalInput value={plannedMaxSpeedKmH} onChange={(v) => setPlannedMaxSpeedKmH(Math.max(plannedSpeedKmH, Math.min(150, v)))} min={20} max={150} className="w-20 text-right" />
+                <span className="text-xs text-slate-500">км/ч</span>
+              </div>
+            </div>
+          </div>
+        </CollapsibleDetails>
 
         <button
           onClick={calculateRouteProfile}
@@ -1179,47 +1182,47 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         )}
       </section>
 
-      {/* Weather source */}
-      <section className={`calculator-weather rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-        <div className="flex items-center justify-between gap-3">
-          <div><div className="flex items-center gap-2 font-bold text-sm"><CloudSun className="w-4 h-4 text-emerald-500" />Условия поездки</div><p className="text-[11px] text-slate-500 mt-0.5">Погода сейчас или ручное долгосрочное планирование</p></div>
-        </div>
-        <div className={`grid grid-cols-2 rounded-xl p-1 ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
-          <button onClick={() => setWeatherMode('current')} className={`rounded-lg py-2 text-xs font-semibold ${weatherMode === 'current' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>Сейчас</button>
-          <button onClick={() => setWeatherMode('planning')} className={`rounded-lg py-2 text-xs font-semibold ${weatherMode === 'planning' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>Планирование</button>
-        </div>
-        {weatherMode === 'current' ? <div className="text-xs text-slate-500">Используется актуальная погода по маршруту и расчётному времени прохождения.</div> : (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <label className="text-xs"><span className="block text-slate-500 mb-1">🌡️ Температура, °C</span><DecimalInput value={manualTemperature} onChange={setManualTemperature} min={-40} max={50} allowNegative className="w-full" /></label>
-              <label className="text-xs"><span className="block text-slate-500 mb-1">💨 Ветер, м/с</span><DecimalInput value={manualWindSpeed} onChange={setManualWindSpeed} min={0} max={40} className="w-full" /></label>
-            </div>
-            <div className="flex items-center gap-2"><Navigation className="w-4 h-4 text-slate-400" style={{transform:`rotate(${manualWindDirection}deg)`}} /><span className="text-xs text-slate-500">Направление ветра</span><DecimalInput value={manualWindDirection} onChange={(v) => setManualWindDirection(((Math.round(v)%360)+360)%360)} min={0} max={359} className="ml-auto w-20 text-right" /><span className="text-xs text-slate-500">°</span></div>
-            <div><div className="text-[11px] text-slate-500 mb-1.5">Осадки</div><div className="grid grid-cols-3 gap-1">{([['none','Нет'],['rain','Дождь'],['snow','Снег']] as const).map(([v,label]) => <button key={v} onClick={() => setManualPrecipitationType(v)} className={`rounded-lg py-2 text-xs font-semibold border ${manualPrecipitationType===v ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : (isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600')}`}>{label}</button>)}</div></div>
-            {manualPrecipitationType !== 'none' && (
-              <div>
-                <div className="text-[11px] text-slate-500 mb-1.5">Интенсивность</div>
+      {/* Weather — collapsed by default */}
+      <CollapsibleDetails
+        isDark={isDark}
+        label={weatherMode === 'current' ? 'Погода · сейчас' : 'Погода · вручную'}
+        icon={<CloudSun className="w-4 h-4 text-emerald-500" />}
+        open={weatherPanelOpen}
+        onToggle={() => setWeatherPanelOpen(v => !v)}
+        className="rounded-2xl"
+      >
+        <div className="space-y-3">
+          <div className={`grid grid-cols-2 rounded-xl p-1 ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
+            <button type="button" onClick={() => setWeatherMode('current')} className={`rounded-lg py-2 text-xs font-semibold ${weatherMode === 'current' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>Сейчас</button>
+            <button type="button" onClick={() => setWeatherMode('planning')} className={`rounded-lg py-2 text-xs font-semibold ${weatherMode === 'planning' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>Планирование</button>
+          </div>
+          {weatherMode === 'current' ? (
+            <div className="text-xs text-slate-500">Актуальная погода по маршруту и времени прибытия.</div>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-xs"><span className="block text-slate-500 mb-1">🌡️ °C</span><DecimalInput value={manualTemperature} onChange={setManualTemperature} min={-40} max={50} allowNegative className="w-full" /></label>
+                <label className="text-xs"><span className="block text-slate-500 mb-1">💨 м/с</span><DecimalInput value={manualWindSpeed} onChange={setManualWindSpeed} min={0} max={40} className="w-full" /></label>
+              </div>
+              <div className="flex items-center gap-2"><Navigation className="w-4 h-4 text-slate-400" style={{transform:`rotate(${manualWindDirection}deg)`}} /><span className="text-xs text-slate-500">Ветер</span><DecimalInput value={manualWindDirection} onChange={(v) => setManualWindDirection(((Math.round(v)%360)+360)%360)} min={0} max={359} className="ml-auto w-20 text-right" /><span className="text-xs text-slate-500">°</span></div>
+              <div><div className="text-[11px] text-slate-500 mb-1.5">Осадки</div><div className="grid grid-cols-3 gap-1">{([['none','Нет'],['rain','Дождь'],['snow','Снег']] as const).map(([v,label]) => <button key={v} type="button" onClick={() => setManualPrecipitationType(v)} className={`rounded-lg py-2 text-xs font-semibold border ${manualPrecipitationType===v ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : (isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600')}`}>{label}</button>)}</div></div>
+              {manualPrecipitationType !== 'none' && (
                 <div className="grid grid-cols-3 gap-1">
                   {(['light','moderate','heavy'] as const).map((v) => {
-                    const preset = MANUAL_PRECIPITATION_PRESETS[manualPrecipitationType][v];
                     const label = v === 'light' ? 'Лёгкая' : v === 'moderate' ? 'Умеренная' : 'Сильная';
                     return (
-                      <button key={v} onClick={() => setManualPrecipitationIntensity(v)}
+                      <button key={v} type="button" onClick={() => setManualPrecipitationIntensity(v)}
                         className={`rounded-lg py-2 text-xs font-semibold border ${manualPrecipitationIntensity===v ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : (isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600')}`}>
-                        {label}<span className="block text-[9px] font-normal opacity-70">{preset.mm} мм/ч</span>
+                        {label}
                       </button>
                     );
                   })}
                 </div>
-                {manualPrecipitationType === 'rain' && manualTemperature <= 2 && (
-                  <p className="text-[10px] text-amber-500 mt-1.5">⚠️ При {manualTemperature}°C дождь автоматически учитывается как риск наледи на дороге (поправка выше, чем для обычного дождя).</p>
-                )}
-              </div>
-            )}
-            <p className="text-[10px] text-slate-500">Ручные условия используются без погодных API — можно планировать поездку на любой сезон.</p>
-          </div>
-        )}
-      </section>
+              )}
+            </div>
+          )}
+        </div>
+      </CollapsibleDetails>
         </>
       )}
 
