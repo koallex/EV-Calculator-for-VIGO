@@ -624,12 +624,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-emerald-300/80' : 'text-emerald-700'}`}>
-                SOC на финише (прогноз)
+                SOC на финише
               </div>
               <div className="flex items-baseline gap-2 mt-0.5">
                 <span
                   className={`text-3xl font-black font-mono tabular-nums ${
-                    routeForecast.arrivalSoc >= 20 + ARRIVAL_RESERVE_SOC
+                    routeForecast.arrivalSoc >= 20
                       ? isDark ? 'text-emerald-400' : 'text-emerald-600'
                       : routeForecast.arrivalSoc >= ARRIVAL_RESERVE_SOC
                       ? 'text-amber-500'
@@ -637,11 +637,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   }`}
                 >
                   {routeForecast.arrivalSoc}%
-                </span>
-                <span className={`text-[11px] leading-snug ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  {routeForecast.arrivalSoc >= ARRIVAL_RESERVE_SOC
-                    ? `свободный запас сверх ${ARRIVAL_RESERVE_SOC}%: ${Math.max(0, Number((routeForecast.arrivalSoc - ARRIVAL_RESERVE_SOC).toFixed(1)))}%`
-                    : `ниже безопасных ${ARRIVAL_RESERVE_SOC}%`}
                 </span>
               </div>
             </div>
@@ -748,23 +743,20 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           <>
             {routeForecast && (() => {
               const arrival = routeForecast.arrivalSoc;
-              // Free margin above the safety floor (10%). Not "SoC after subtracting 10% from the car",
-              // but how much headroom you have if you refuse to go below 10%.
-              const freeMargin = Math.max(0, Number((arrival - ARRIVAL_RESERVE_SOC).toFixed(1)));
               const statusTone =
-                arrival >= 20 + ARRIVAL_RESERVE_SOC
+                arrival >= 20
                   ? 'good'
                   : arrival >= ARRIVAL_RESERVE_SOC
                   ? 'ok'
                   : 'low';
               const statusText =
                 statusTone === 'good'
-                  ? `✓ Доедете уверенно · свободный запас сверх ${ARRIVAL_RESERVE_SOC}%: ${freeMargin}%`
+                  ? '✓ Доедете с хорошим запасом'
                   : statusTone === 'ok'
-                  ? `⚠ На финише ${arrival}% · выше минимума ${ARRIVAL_RESERVE_SOC}% всего на ${freeMargin}%`
+                  ? '⚠ Небольшой запас по прибытию'
                   : startSoc >= 99
-                  ? `⚠ На финише ${arrival}% — ниже безопасных ${ARRIVAL_RESERVE_SOC}%. Нужна зарядка в пути`
-                  : `⚠ На финише ${arrival}% — ниже безопасных ${ARRIVAL_RESERVE_SOC}%. Зарядитесь до поездки или в пути`;
+                  ? '⚠ Потребуется зарядка в пути'
+                  : '⚠ Недостаточно заряда — зарядка до поездки или в пути';
               const statusColor =
                 statusTone === 'good'
                   ? isDark
@@ -788,34 +780,24 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 }`}
               >
                 <div className="text-center">
-                  <div className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>SOC на финише (прогноз)</div>
+                  <div className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>SOC на финише</div>
                   <div className={`mt-1 text-5xl font-black font-mono ${statusColor}`}>{arrival}%</div>
                   <div className={`mt-1 text-xs font-semibold px-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{statusText}</div>
-                  <p className={`mt-1.5 text-[10px] leading-relaxed ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                    Безопасный минимум — не ниже {ARRIVAL_RESERVE_SOC}%. «Свободный запас» = насколько прогноз выше этих {ARRIVAL_RESERVE_SOC}% (не отдельный процент в машине).
-                  </p>
                 </div>
 
-                {/* Bar: predicted arrival; marker = safety floor */}
-                <div className={`mt-4 h-3 rounded-full overflow-hidden relative ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                <div className={`mt-4 h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
                   <div
                     className={`h-full rounded-full transition-all duration-300 ${statusTone === 'good' ? 'bg-emerald-500' : statusTone === 'ok' ? 'bg-amber-500' : 'bg-rose-500'}`}
                     style={{ width: `${Math.min(100, Math.max(0, arrival))}%` }}
                   />
-                  <div
-                    className="absolute top-0 bottom-0 w-0.5 bg-white/80"
-                    style={{ left: `${ARRIVAL_RESERVE_SOC}%` }}
-                    title={`Безопасный минимум ${ARRIVAL_RESERVE_SOC}%`}
-                  />
                 </div>
                 <div className="mt-2 flex justify-between text-[10px] text-slate-500">
                   <span>0%</span>
-                  <span>мин. {ARRIVAL_RESERVE_SOC}%</span>
                   <span>старт {startSoc}%</span>
                   <span>100%</span>
                 </div>
 
-                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                <div className="mt-3 grid grid-cols-2 gap-2 text-center">
                   <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-900/80' : 'bg-white/80'}`}>
                     <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Расход</div>
                     <div className="text-sm font-black font-mono">{routeForecast.consumption.toFixed(1)}</div>
@@ -826,21 +808,16 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     <div className="text-sm font-black font-mono">{routeForecast.energyKwh.toFixed(1)}</div>
                     <div className="text-[10px] text-slate-500">кВт⋅ч</div>
                   </div>
-                  <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-900/80' : 'bg-white/80'}`}>
-                    <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Своб. запас</div>
-                    <div className={`text-sm font-black font-mono ${freeMargin < 5 ? 'text-rose-500' : ''}`}>{freeMargin}%</div>
-                    <div className="text-[10px] text-slate-500">сверх {ARRIVAL_RESERVE_SOC}%</div>
-                  </div>
                 </div>
 
                 {/* Low-reserve action banner */}
                 {statusTone === 'low' && (
                   <div className={`mt-3 rounded-xl border p-3 ${isDark ? 'bg-rose-950/40 border-rose-700/50' : 'bg-rose-50 border-rose-300'}`}>
                     <div className={`text-xs font-bold ${isDark ? 'text-rose-300' : 'text-rose-800'}`}>
-                      Запас отрицательный относительно минимума {ARRIVAL_RESERVE_SOC}%
+                      Низкий запас на финише
                     </div>
                     <p className={`mt-1 text-[11px] ${isDark ? 'text-rose-200/80' : 'text-rose-700'}`}>
-                      При текущих скорости, климате и стартовом SOC доедете ниже безопасного порога. Выберите действие:
+                      При текущих скорости, климате и стартовом SOC запас будет очень маленьким. Варианты:
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {slower && (
