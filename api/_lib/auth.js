@@ -10,6 +10,58 @@ const SESSION_TTL = 60 * 60 * 24 * 7;
 const USERS_KEY = 'vigo:users';
 const SESS_PREFIX = 'vigo:session:';
 
+// Brute-force protection for /api/auth/login. Keyed by IP + attempted login so a single
+// attacker can't rotate logins to dodge the limit, and one user's mistyped password can't
+// lock out other users sharing the same IP (e.g. NAT/office network).
+const LOGIN_ATTEMPTS_PREFIX = 'vigo:loginattempts:';
+const LOGIN_ATTEMPT_WINDOW_SECONDS = 15 * 60; // 15-minute rolling lockout window
+const LOGIN_MAX_ATTEMPTS = 5;
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.length) return forwarded.split(',')[0].trim();
+  return req.socket?.remoteAddress || 'unknown';
+}
+
+function loginAttemptsKey(req, login) {
+  const normalized = (login || '').trim().toLowerCase();
+  return `${LOGIN_ATTEMPTS_PREFIX}${getClientIp(req)}:${normalized}`;
+}
+
+// Call before verifying the password. Returns { allowed, retryAfterSeconds }.
+export async function checkLoginRateLimit(req, login) {
+  const key = loginAttemptsKey(req, login);
+  try {
+    const count = Number((await redis.get(key)) || 0);
+    if (count >= LOGIN_MAX_ATTEMPTS) {
+      const ttl = await redis.ttl(key);
+      return { allowed: false, retryAfterSeconds: ttl > 0 ? ttl : LOGIN_ATTEMPT_WINDOW_SECONDS };
+    }
+    return { allowed: true, retryAfterSeconds: 0 };
+  } catch {
+    // If Redis is unreachable, fail open on rate limiting rather than locking everyone out —
+    // authenticate() will still fail closed if Redis is genuinely down (getUsers() needs it too).
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+}
+
+// Call after a failed password check.
+export async function recordFailedLoginAttempt(req, login) {
+  const key = loginAttemptsKey(req, login);
+  try {
+    const count = await redis.incr(key);
+    if (count === 1) await redis.expire(key, LOGIN_ATTEMPT_WINDOW_SECONDS);
+  } catch {
+    // Best-effort — a Redis hiccup here shouldn't break login entirely.
+  }
+}
+
+// Call after a successful login to un-penalize a previously-mistyped-then-corrected password.
+export async function clearLoginAttempts(req, login) {
+  const key = loginAttemptsKey(req, login);
+  try { await redis.del(key); } catch { /* best-effort */ }
+}
+
 function b64u(buf) {
   return Buffer.from(buf).toString('base64url');
 }
