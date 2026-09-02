@@ -2,6 +2,10 @@
 <html lang="ru" class="dark">
   <head>
     <meta charset="UTF-8" />
+    <!-- Telegram Mini Apps SDK. Must load before the app bundle so window.Telegram.WebApp
+         exists by the time main.tsx initializes it. Harmless outside Telegram (window.Telegram
+         is simply undefined and initTelegramWebApp() no-ops). -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#090d16" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
