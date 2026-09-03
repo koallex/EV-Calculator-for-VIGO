@@ -244,7 +244,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 Текущий процент (Старт):
               </span>
               <span className={`font-bold font-mono ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>
-                {currentSoc}% ({((currentSoc / 100) * batteryCap).toFixed(1)} кВт⋅ч)
+                {Math.round(currentSoc)}% ({((currentSoc / 100) * batteryCap).toFixed(1)} кВт⋅ч)
               </span>
             </div>
 
@@ -336,7 +336,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
               </span>
               <div className="flex items-center gap-1.5">
                 <span className={`font-bold font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                  {targetSoc}% ({((targetSoc / 100) * batteryCap).toFixed(1)} кВт⋅ч)
+                  {Math.round(targetSoc)}% ({((targetSoc / 100) * batteryCap).toFixed(1)} кВт⋅ч)
                 </span>
                 {targetSoc === 80 && (
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-semibold ${

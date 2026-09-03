@@ -92,7 +92,7 @@ export const BatteryVisual: React.FC<BatteryVisualProps> = ({
           <span className={`text-sm font-extrabold font-mono drop-shadow tracking-tight ${
             isDark ? 'text-white' : 'text-slate-900'
           }`}>
-            {clampedCurrent}%
+            {Math.round(clampedCurrent)}%
           </span>
         </div>
       </div>

@@ -750,7 +750,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
                     <div className={`flex items-center gap-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                       <span className={`font-mono font-semibold ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
-                        {trip.startSoc}% → {trip.endSoc}%
+                        {Math.round(trip.startSoc)}% → {Math.round(trip.endSoc)}%
                       </span>
                       <span>•</span>
                       <span className={`font-mono font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
@@ -882,7 +882,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                               Корректировка SOC на финише
                             </span>
                             <span className={`font-mono text-sm font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                              {editingSoc}%
+                              {Math.round(editingSoc)}%
                             </span>
                           </div>
                           <input
@@ -938,7 +938,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                           <div>
                             <div className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>SOC на финише</div>
                             <div className={`text-xs mt-0.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                              {trip.endSoc}%
+                              {Math.round(trip.endSoc)}%
                               {trip.endSocAdjustedManually && (
                                 <span className={`ml-1.5 text-[9px] ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>· изменено вручную</span>
                               )}

@@ -29,8 +29,8 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
     initialData?.date || new Date().toISOString().split('T')[0]
   );
   const [title, setTitle] = useState<string>(initialData?.title || '');
-  const [startSoc, setStartSoc] = useState<number>(initialData?.startSoc ?? 100);
-  const [endSoc, setEndSoc] = useState<number>(initialData?.endSoc ?? 30);
+  const [startSoc, setStartSoc] = useState<number>(Math.round(initialData?.startSoc ?? 100));
+  const [endSoc, setEndSoc] = useState<number>(Math.round(initialData?.endSoc ?? 30));
   const [distanceKm, setDistanceKm] = useState<number>(initialData?.distanceKm ?? 190);
   const [roadType, setRoadType] = useState<RoadType>(initialData?.roadType || 'city');
   const [climateOn, setClimateOn] = useState<boolean>(initialData?.climateOn ?? false);
@@ -45,8 +45,8 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
     if (!isOpen) return;
     setDate(initialData?.date || new Date().toISOString().split('T')[0]);
     setTitle(initialData?.title || '');
-    setStartSoc(initialData?.startSoc ?? 100);
-    setEndSoc(initialData?.endSoc ?? 30);
+    setStartSoc(Math.round(initialData?.startSoc ?? 100));
+    setEndSoc(Math.round(initialData?.endSoc ?? 30));
     setDistanceKm(initialData?.distanceKm ?? 190);
     setRoadType(initialData?.roadType || 'city');
     setClimateOn(initialData?.climateOn ?? false);

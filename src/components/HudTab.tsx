@@ -1509,7 +1509,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                   : 'text-emerald-600'
               }`}
             >
-              {isTracking ? liveDynamicSoc : startTripSoc}%
+              {Math.round(isTracking ? liveDynamicSoc : startTripSoc)}%
             </span>
           </div>
           {!isTracking ? (
@@ -1589,11 +1589,11 @@ export const HudTab: React.FC<HudTabProps> = ({
                     : 'text-emerald-600'
                 }`}
               >
-                {livePredictedSoc}%
+                {Math.round(livePredictedSoc)}%
               </span>
               {isTracking && (
                 <span className={`block text-[11px] font-mono mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                  сейчас {liveDynamicSoc}%
+                  сейчас {Math.round(liveDynamicSoc)}%
                 </span>
               )}
             </div>
@@ -1887,7 +1887,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                     Поездка завершена
                   </h3>
                   <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Данные по GPS треку (SoC: {completedTripSummary.startSoc}% → {completedTripSummary.endSoc}%)
+                    Данные по GPS треку (SoC: {Math.round(completedTripSummary.startSoc)}% → {Math.round(completedTripSummary.endSoc)}%)
                   </span>
                 </div>
               </div>
@@ -1967,7 +1967,7 @@ export const HudTab: React.FC<HudTabProps> = ({
               <div className="flex justify-between">
                 <span>Расход энергии:</span>
                 <span className={`font-bold font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                  {completedTripSummary.energyUsedKwh} кВт⋅ч (SoC: {completedTripSummary.startSoc}% → {completedTripSummary.endSoc}%)
+                  {completedTripSummary.energyUsedKwh} кВт⋅ч (SoC: {Math.round(completedTripSummary.startSoc)}% → {Math.round(completedTripSummary.endSoc)}%)
                 </span>
               </div>
               <div className="flex justify-between">

@@ -499,7 +499,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       climateOn,
       passengers,
       temperature: routeWeather?.temperature ?? 20,
-      note: `Калькулятор: ${startSoc}% → ${endSoc}%, ${distanceKm} км${routeElevation ? ` · ▲${routeElevation.elevationGainM}м ▼${routeElevation.elevationLossM}м` : ''}`,
+      note: `Калькулятор: ${Math.round(startSoc)}% → ${Math.round(endSoc)}%, ${distanceKm} км${routeElevation ? ` · ▲${routeElevation.elevationGainM}м ▼${routeElevation.elevationLossM}м` : ''}`,
       elevationGainM: routeElevation?.elevationGainM,
       elevationLossM: routeElevation?.elevationLossM,
       startElevationM: routeElevation?.startElevationM,
@@ -563,7 +563,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       <section className={`rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center justify-between gap-2">
           <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Старт</span>
-          <span className={`text-xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{startSoc}%</span>
+          <span className={`text-xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{Math.round(startSoc)}%</span>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => updateRouteStartSoc(startSoc - 5)} className={`w-10 h-9 rounded-lg font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>
@@ -823,7 +823,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 </div>
                 <div className="mt-2 flex justify-between text-[10px] text-slate-500">
                   <span>0%</span>
-                  <span>старт {startSoc}%</span>
+                  <span>старт {Math.round(startSoc)}%</span>
                   <span>100%</span>
                 </div>
 
@@ -866,7 +866,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                           }`}
                         >
                           Снизить скорость до {Math.max(20, plannedSpeedKmH - 10)} км/ч
-                          <span className="opacity-70"> → {slower.arrivalSoc}%</span>
+                          <span className="opacity-70"> → {Math.round(slower.arrivalSoc)}%</span>
                         </button>
                       )}
                       {climateOn && noClimate && (
@@ -881,7 +881,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                           }`}
                         >
                           Выключить климат
-                          <span className="opacity-70"> → {noClimate.arrivalSoc}%</span>
+                          <span className="opacity-70"> → {Math.round(noClimate.arrivalSoc)}%</span>
                         </button>
                       )}
                       <button
@@ -963,7 +963,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       >
                         <div className="text-xs font-bold">{withClimate ? 'С климатом' : 'Без климата'}</div>
                         <div className={`mt-1 text-[11px] font-bold ${scenario && scenario.arrivalSoc >= 20 ? 'text-emerald-500' : scenario && scenario.arrivalSoc >= 10 ? 'text-amber-500' : 'text-rose-500'}`}>
-                          {scenario ? `${scenario.arrivalSoc}% SOC` : '—'}
+                          {scenario ? `${Math.round(scenario.arrivalSoc)}% SOC` : '—'}
                         </div>
                         {scenario && (
                           <div className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -998,7 +998,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       >
                         <div className="text-xs font-bold">{speed} км/ч</div>
                         <div className={`mt-1 text-[11px] font-bold ${scenario && scenario.arrivalSoc >= 20 ? 'text-emerald-500' : scenario && scenario.arrivalSoc >= 10 ? 'text-amber-500' : 'text-rose-500'}`}>
-                          {scenario ? `${scenario.arrivalSoc}% SOC` : '—'}
+                          {scenario ? `${Math.round(scenario.arrivalSoc)}% SOC` : '—'}
                         </div>
                       </button>
                     );
@@ -1082,7 +1082,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       </div>
                       <div className="text-right text-[11px]">
                         <div><span className="text-slate-500">Расход</span> <b>{optimalSpeedScenario.consumption.toFixed(1)} кВт⋅ч/100</b></div>
-                        <div className="mt-0.5"><span className="text-slate-500">Прибытие</span> <b>{optimalSpeedScenario.arrivalSoc}% SOC</b></div>
+                        <div className="mt-0.5"><span className="text-slate-500">Прибытие</span> <b>{Math.round(optimalSpeedScenario.arrivalSoc)}% SOC</b></div>
                       </div>
                     </div>
                   </div>
@@ -1248,7 +1248,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               <span className="text-base font-bold ml-1.5 opacity-70">кВт⋅ч/100</span>
             </div>
             <div className={`mt-2 text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-              {startSoc}% → {endSoc}% · −{socUsedPct}% · {energyUsedKwh.toFixed(1)} кВт⋅ч
+              {Math.round(startSoc)}% → {Math.round(endSoc)}% · −{Math.round(socUsedPct)}% · {energyUsedKwh.toFixed(1)} кВт⋅ч
               {distanceKm > 0 ? ` · ${distanceKm} км` : ''}
             </div>
             <div className={`mt-2 inline-flex items-center gap-2 text-[11px] font-semibold px-2.5 py-1 rounded-full border ${rating.bg} ${rating.color}`}>
@@ -1271,7 +1271,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>SOC на финише</span>
-                <span className={`text-xl font-black font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{endSoc}%</span>
+                <span className={`text-xl font-black font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{Math.round(endSoc)}%</span>
               </div>
               <div className="flex items-center gap-2">
                 <button type="button" onClick={() => adjustValue(setEndSoc, -5, 0, Math.max(0, startSoc - 1))} className={`w-10 h-9 rounded-lg text-xs font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>

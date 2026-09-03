@@ -125,7 +125,7 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
                 : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
             }`}
           >
-            Сброс к {currentSoc}%
+            Сброс к {Math.round(currentSoc ?? 0)}%
           </button>
         )}
       </div>
@@ -168,7 +168,7 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
                 <span>Остаток энергии:</span>
               </div>
               <div className={`text-base font-extrabold font-mono mt-0.5 ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
-                {remainingEnergyKwh.toFixed(1)} <span className="text-xs font-normal">кВт⋅ч</span> ({activeSoc}%)
+                {remainingEnergyKwh.toFixed(1)} <span className="text-xs font-normal">кВт⋅ч</span> ({Math.round(activeSoc)}%)
               </div>
             </div>
 
@@ -194,7 +194,7 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
             Остаток заряда батареи (SoC):
           </span>
           <span className={`font-mono font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
-            {activeSoc}% ({remainingEnergyKwh.toFixed(1)} кВт⋅ч)
+            {Math.round(activeSoc)}% ({remainingEnergyKwh.toFixed(1)} кВт⋅ч)
           </span>
         </div>
 
