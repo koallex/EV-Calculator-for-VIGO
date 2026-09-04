@@ -90,6 +90,15 @@ export interface TripSession {
   endElevationM?: number;
   elevationEnergyUsedKwh?: number;
   regenEnergyRecoveredKwh?: number;
+  // Pre-trip Calculator route forecast, attached automatically (see routeForecastBridge.ts) when
+  // a HUD trip is saved shortly after a matching route calculation — lets History compare
+  // predicted vs actual without needing a separate "forecast accuracy" screen yet.
+  forecastArrivalSoc?: number;
+  forecastConsumptionPer100Km?: number;
+  forecastEnergyKwh?: number;
+  forecastPlannedSpeedKmH?: number;
+  forecastPlannedMaxSpeedKmH?: number;
+  forecastSpeedProfile?: Array<{ distanceKm: number; speedKmH: number }>;
   createdAt: number;
 }
 
