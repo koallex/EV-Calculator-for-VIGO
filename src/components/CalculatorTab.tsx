@@ -28,6 +28,7 @@ import { BatteryVisual } from './BatteryVisual';
 import { DecimalInput } from './DecimalInput';
 import { getTariffForType, getOperatorLabel, estimateTripConsumption, estimateSegmentedRouteConsumption, calculateClimateImpact } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
+import { saveLastRouteForecast } from '../utils/routeForecastBridge';
 import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
 import { RouteMap } from './RouteMap';
@@ -305,6 +306,17 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       setRouteWeather({ ...displayWeather, temperature:Math.round(avgTemperature), windSpeed:Math.round(avgWindSpeed), precipitation:Number(avgPrecipitation.toFixed(1)), routeBearing, etaMinutes, arrivalDate, samples });
       setRouteForecast({consumption:Number((energyKwh/data.distanceKm*100).toFixed(2)),energyKwh:Number(energyKwh.toFixed(2)),arrivalSoc,windLabel:segmentedForecast.windStatusText || `Ветер ~${Math.round(segmented.avgWindSpeed)} км/ч`,weatherLabel:`${Math.round(segmented.avgTemperature)>=0?'+':''}${Math.round(segmented.avgTemperature)}°C`,precipitationLabel:segmentedForecast.precipitationLabel||'Без существенных осадков',relativeWindAngle:avgRelativeWindAngle,driverStyleFactor:segmentedForecast.driverStyleFactor,driverStyleSource:getDriverStyleSourceLabel(segmentedForecast.dataSource),climateLabel:segmentedForecast.climateLabel || `Климат · ${segmented.climatePowerKw.toFixed(1)} кВт`,climateImpactPct:segmentedForecast.climateImpactPct || 0,climateDeltaKwh100:Number((segmented.climateEnergyKwh/data.distanceKm*100).toFixed(2)),climatePowerKw:segmented.climatePowerKw,speedImpactPct:segmentedForecast.speedImpactPct,breakdown:segmented});
       setEndSoc(arrivalSoc);
+      // Stash this forecast so that if a matching HUD trip is saved to history later today, we
+      // can attach predicted-vs-actual for comparison (see routeForecastBridge.ts).
+      saveLastRouteForecast({
+        distanceKm: data.distanceKm,
+        plannedSpeedKmH,
+        plannedMaxSpeedKmH,
+        arrivalSoc,
+        consumptionPer100Km: Number((energyKwh / data.distanceKm * 100).toFixed(2)),
+        energyKwh: Number(energyKwh.toFixed(2)),
+        speedProfile: segmented.speedProfile,
+      });
       // Keep secondary panels collapsed so the hero result stays in view
       setConsumptionOpen(false);
       setRouteDetailsOpen(false);
@@ -813,6 +825,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     <AnimatedNumber value={arrival} decimals={0} suffix="%" className={statusColor} />
                   </div>
                   <div className={`mt-1 text-xs font-semibold px-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{statusText}</div>
+                  <div className={`mt-1.5 text-[11px] leading-snug px-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    Ориентировочно — зависит от стиля езды и погоды
+                  </div>
                 </div>
 
                 <div className={`mt-4 h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>

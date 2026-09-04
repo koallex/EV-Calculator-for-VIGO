@@ -42,6 +42,7 @@ import {
   ConsumptionForecast,
 } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
+import { consumeMatchingRouteForecast } from '../utils/routeForecastBridge';
 import { geocodeAddress, buildRouteElevation } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute } from '../services/weatherForecast';
 
@@ -1146,6 +1147,17 @@ export const HudTab: React.FC<HudTabProps> = ({
         ? 'city'
         : 'mixed';
 
+    // If a Calculator route forecast was computed shortly before this trip and covers roughly
+    // the same distance, attach predicted-vs-actual so History can show the comparison without
+    // a separate accuracy-tracking screen yet.
+    const matchedForecast = consumeMatchingRouteForecast(completedTripSummary.distanceKm);
+    let forecastNote = '';
+    if (matchedForecast) {
+      const socDelta = Number((completedTripSummary.endSoc - matchedForecast.arrivalSoc).toFixed(1));
+      const socDeltaText = `${socDelta > 0 ? '+' : ''}${socDelta}`;
+      forecastNote = ` | Прогноз: ${matchedForecast.arrivalSoc}% SoC (Δ${socDeltaText}п.п., ${matchedForecast.consumptionPer100Km}→${completedTripSummary.estimatedCons} кВт⋅ч/100)`;
+    }
+
     onSaveToHistory({
       date: new Date().toISOString().split('T')[0],
       title: `GPS Трек: ${completedTripSummary.distanceKm} км (${completedTripSummary.avgSpeedKmH} км/ч)`,
@@ -1168,7 +1180,15 @@ export const HudTab: React.FC<HudTabProps> = ({
       passengers,
       note: `GPS HUD: ${completedTripSummary.durationMinutes} мин, ${completedTripSummary.avgSpeedKmH} км/ч, стиль поездки: x${completedTripSummary.styleFactor || 1.0} (${completedTripSummary.styleLabel || 'Сбалансированный'}), t=${completedTripSummary.temp}°C${
         completedTripSummary.windStatus ? `, ветер: ${completedTripSummary.windStatus}` : ''
-      }`,
+      }${forecastNote}`,
+      ...(matchedForecast && {
+        forecastArrivalSoc: matchedForecast.arrivalSoc,
+        forecastConsumptionPer100Km: matchedForecast.consumptionPer100Km,
+        forecastEnergyKwh: matchedForecast.energyKwh,
+        forecastPlannedSpeedKmH: matchedForecast.plannedSpeedKmH,
+        forecastPlannedMaxSpeedKmH: matchedForecast.plannedMaxSpeedKmH,
+        forecastSpeedProfile: matchedForecast.speedProfile,
+      }),
     });
 
     setCompletedTripSummary(null);
