@@ -115,6 +115,19 @@ interface GpsWeather {
 const MAX_VALID_SPEED_KMH = 160;
 // Maximum GPS accuracy error radius in meters to accept for distance tracking
 const MAX_ACCURACY_THRESHOLD_M = 45;
+// Maximum vertical (altitude) accuracy error in meters to accept an altitude sample. Phone GPS
+// altitude is typically 2-3x noisier than horizontal position, especially at speed/under
+// overpasses, so this is intentionally looser than MAX_ACCURACY_THRESHOLD_M but still rejects
+// clearly unreliable fixes. Samples with no altitudeAccuracy reported (common on some browsers)
+// fall through to the noise-threshold and grade-plausibility checks instead.
+const ALT_ACCURACY_THRESHOLD_M = 20;
+// Minimum smoothed-altitude change (m) before counting it as real elevation gain/loss. Raised
+// from an earlier 2m to be more tolerant of residual GPS noise after smoothing.
+const ALT_NOISE_THRESHOLD_M = 4;
+// Steepest road grade treated as physically plausible (15% covers essentially any real road in
+// Belarus). A counted delta implying a steeper grade over the distance actually driven since the
+// last checkpoint is almost always GPS altitude noise, not real elevation change.
+const MAX_PLAUSIBLE_GRADE = 0.15;
 
 export const HudTab: React.FC<HudTabProps> = ({
   settings,
@@ -226,6 +239,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   const lastHeadingRef = useRef<number>(0);
   const smoothedAltitudeRef = useRef<number | null>(null);
   const lastCountedAltitudeRef = useRef<number | null>(null);
+  const lastCountedAltitudeDistanceKmRef = useRef(0);
   const elevationGainRef = useRef(0);
   const elevationLossRef = useRef(0);
 
@@ -498,31 +512,6 @@ export const HudTab: React.FC<HudTabProps> = ({
         lastHeadingRef.current = bearing;
       }
 
-      // === ELEVATION TRACKING (Рельеф и рекуперация) ===
-      // Device altitude is often noisy (±5-10m), so we exponentially smooth it and only count a
-      // change once it clears a noise threshold, similar to how we filter GPS speed glitches.
-      const rawAltitude = pos.coords.altitude;
-      if (isTracking && rawAltitude !== null && !isNaN(rawAltitude)) {
-        setAltitudeAvailable(true);
-        if (smoothedAltitudeRef.current === null) {
-          smoothedAltitudeRef.current = rawAltitude;
-          lastCountedAltitudeRef.current = rawAltitude;
-        } else {
-          smoothedAltitudeRef.current = smoothedAltitudeRef.current * 0.7 + rawAltitude * 0.3;
-          const countedDelta = smoothedAltitudeRef.current - (lastCountedAltitudeRef.current ?? smoothedAltitudeRef.current);
-          if (Math.abs(countedDelta) >= 2) {
-            if (countedDelta > 0) {
-              elevationGainRef.current += countedDelta;
-            } else {
-              elevationLossRef.current += Math.abs(countedDelta);
-            }
-            lastCountedAltitudeRef.current = smoothedAltitudeRef.current;
-            setElevationGainM(Math.round(elevationGainRef.current));
-            setElevationLossM(Math.round(elevationLossRef.current));
-          }
-        }
-      }
-
       // === ACCUMULATE TRIP DISTANCE (with strict glitch checks) ===
       if (isTracking && prevPositionRef.current && isPlausibleReading) {
         const timeDeltaSec = (now - prevPositionRef.current.time) / 1000;
@@ -579,6 +568,64 @@ export const HudTab: React.FC<HudTabProps> = ({
           }
           setMaxSpeed((prev) => Math.max(prev, smoothedSpeed));
         }
+      }
+
+      // === ELEVATION TRACKING (Рельеф и рекуперация) ===
+      // Device altitude is often noisy (±5-10m, worse without a barometric assist), so a change
+      // is only counted once it (a) has an acceptable vertical accuracy, (b) clears a noise
+      // threshold after EMA smoothing, and (c) implies a physically plausible road grade for the
+      // distance actually driven since the last counted checkpoint (checked here, after distance
+      // accumulation above, so distanceRef.current already reflects this tick).
+      //
+      // (c) matters because climb energy is divided by DRIVETRAIN_EFFICIENCY (0.90) while
+      // descent is credited back at only REGEN_EFFICIENCY (0.65) in estimateTripConsumption —
+      // so pure altitude noise (equal spurious gain and loss) has a net *cost* rather than
+      // cancelling out, and gets worse at higher speed / weaker vertical GPS fix (e.g. highway).
+      const rawAltitude = pos.coords.altitude;
+      const rawAltitudeAccuracy = pos.coords.altitudeAccuracy;
+      const altitudeAccuracyOk = rawAltitudeAccuracy == null || rawAltitudeAccuracy <= ALT_ACCURACY_THRESHOLD_M;
+
+      if (isTracking && rawAltitude !== null && !isNaN(rawAltitude)) {
+        setAltitudeAvailable(true);
+
+        if (altitudeAccuracyOk) {
+          if (smoothedAltitudeRef.current === null) {
+            smoothedAltitudeRef.current = rawAltitude;
+            lastCountedAltitudeRef.current = rawAltitude;
+            lastCountedAltitudeDistanceKmRef.current = distanceRef.current;
+          } else {
+            smoothedAltitudeRef.current = smoothedAltitudeRef.current * 0.7 + rawAltitude * 0.3;
+            const countedDelta = smoothedAltitudeRef.current - (lastCountedAltitudeRef.current ?? smoothedAltitudeRef.current);
+
+            if (Math.abs(countedDelta) >= ALT_NOISE_THRESHOLD_M) {
+              const distanceSinceCheckpointKm = distanceRef.current - lastCountedAltitudeDistanceKmRef.current;
+              const impliedGrade = distanceSinceCheckpointKm > 0.005
+                ? Math.abs(countedDelta) / (distanceSinceCheckpointKm * 1000)
+                : Infinity; // not enough distance yet to judge plausibility — treat as noise for now
+
+              if (distanceSinceCheckpointKm > 0.005 && impliedGrade <= MAX_PLAUSIBLE_GRADE) {
+                if (countedDelta > 0) {
+                  elevationGainRef.current += countedDelta;
+                } else {
+                  elevationLossRef.current += Math.abs(countedDelta);
+                }
+                setElevationGainM(Math.round(elevationGainRef.current));
+                setElevationLossM(Math.round(elevationLossRef.current));
+                lastCountedAltitudeRef.current = smoothedAltitudeRef.current;
+                lastCountedAltitudeDistanceKmRef.current = distanceRef.current;
+              } else if (distanceSinceCheckpointKm > 0.005) {
+                // Implausibly steep for the distance covered — almost certainly noise. Re-anchor
+                // the checkpoint here without crediting/debiting energy, so the next genuine
+                // change is measured from a fresh baseline instead of silently carrying an
+                // ever-growing, never-counted offset.
+                lastCountedAltitudeRef.current = smoothedAltitudeRef.current;
+                lastCountedAltitudeDistanceKmRef.current = distanceRef.current;
+              }
+            }
+          }
+        }
+        // If altitude accuracy is too poor, skip folding this sample into the smoothed altitude
+        // or checkpoint entirely — better to wait for a trustworthy fix than smooth in noise.
       }
 
       prevPositionRef.current = {
@@ -993,6 +1040,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     smoothSpeedBufferRef.current = [];
     smoothedAltitudeRef.current = null;
     lastCountedAltitudeRef.current = null;
+    lastCountedAltitudeDistanceKmRef.current = 0;
     elevationGainRef.current = 0;
     elevationLossRef.current = 0;
     setElevationGainM(0);
@@ -1066,6 +1114,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     smoothSpeedBufferRef.current = [];
     smoothedAltitudeRef.current = null;
     lastCountedAltitudeRef.current = null;
+    lastCountedAltitudeDistanceKmRef.current = 0;
     elevationGainRef.current = 0;
     elevationLossRef.current = 0;
     setElevationGainM(0);
