@@ -831,11 +831,28 @@ export function computeFlatRoadConsumptionRate(
     // Calibration (owner feedback: wind impact felt overstated at city/moderate speeds):
     // the previous curve had a hard 28% floor even at ~20 km/h, where real-world aero drag
     // is a minor contributor next to rolling resistance and drivetrain/aux load. The share
-    // now starts near ~6% at low speed and ramps up to the 55% ceiling only around
-    // 140-150 km/h, where aerodynamics genuinely dominates the road-load. This roughly
-    // halves the wind sensitivity at typical city/highway speeds (60-100 km/h) while
-    // preserving a strong effect for genuine highway-speed storms.
-    const aeroShare = Math.min(0.55, Math.max(0.06, 0.06 + (effectiveSpeed - 15) * 0.0038));
+    // now starts near ~6% at low speed and ramps up only gently up to AERO_SHARE_BREAKPOINT_KMH,
+    // preserving that low/moderate-speed calibration exactly as before.
+    //
+    // Calibration (owner feedback, 2026-09: highway trips at 80-90 km/h showed a bigger
+    // predicted-vs-actual gap under strong tailwind/headwind than city trips did, and the
+    // Dongfeng Vigo is a boxier, less aerodynamic shape than the generic curve this was
+    // originally tuned against). Aero drag scales with v^2, so a worse Cd*A should show up
+    // increasingly above typical highway cruising speed, not as a uniform bump across the whole
+    // curve. Rather than raise the low-speed floor again (which was deliberately lowered), the
+    // slope is only steepened above the breakpoint, leaving city/moderate-speed behaviour
+    // untouched. These specific slope/ceiling numbers are a physically-motivated estimate, not
+    // yet fit to logged data — revisit once a few hudWindLog trips give a real per-km
+    // predicted-vs-actual comparison across a range of wind conditions.
+    const AERO_SHARE_MIN = 0.06;
+    const AERO_SHARE_BREAKPOINT_KMH = 70;
+    const AERO_SHARE_LOW_SLOPE = 0.0038; // unchanged below the breakpoint
+    const AERO_SHARE_HIGH_SLOPE = 0.0062; // steeper above it
+    const AERO_SHARE_MAX = 0.60; // was 0.55 — raised slightly for the same reason
+    const aeroShareAtBreakpoint = AERO_SHARE_MIN + (AERO_SHARE_BREAKPOINT_KMH - 15) * AERO_SHARE_LOW_SLOPE;
+    const aeroShare = effectiveSpeed <= AERO_SHARE_BREAKPOINT_KMH
+      ? Math.min(AERO_SHARE_MAX, Math.max(AERO_SHARE_MIN, AERO_SHARE_MIN + (effectiveSpeed - 15) * AERO_SHARE_LOW_SLOPE))
+      : Math.min(AERO_SHARE_MAX, aeroShareAtBreakpoint + (effectiveSpeed - AERO_SHARE_BREAKPOINT_KMH) * AERO_SHARE_HIGH_SLOPE);
     const aeroBase = baseSpeedConsumption * aeroShare;
     const nonAeroBase = baseSpeedConsumption - aeroBase;
     const aeroWindFactor = Math.pow(relativeAirSpeed / effectiveSpeed, 2);
