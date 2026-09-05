@@ -1502,7 +1502,8 @@ export function exportSessionsCSV(sessions: TripSession[], currency: string): vo
     `Экономия vs бензин (${currency})`,
     'Тип дороги',
     'Климат',
-    'Заметка'
+    'Заметка',
+    'Лог ветра (JSON)'
   ];
 
   const rows = sessions.map(s => [
@@ -1517,7 +1518,8 @@ export function exportSessionsCSV(sessions: TripSession[], currency: string): vo
     s.moneySaved,
     s.roadType,
     s.climateOn ? 'Вкл' : 'Выкл',
-    `"${(s.note || '').replace(/"/g, '""')}"`
+    `"${(s.note || '').replace(/"/g, '""')}"`,
+    `"${(s.hudWindLog || '').replace(/"/g, '""')}"`
   ]);
 
   const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
