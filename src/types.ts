@@ -99,6 +99,10 @@ export interface TripSession {
   forecastPlannedSpeedKmH?: number;
   forecastPlannedMaxSpeedKmH?: number;
   forecastSpeedProfile?: Array<{ distanceKm: number; speedKmH: number }>;
+  // Compact JSON trail of {d,v,w,a,m,e} checkpoints (distanceKm, speedKmH, windSpeedKmH,
+  // relativeWindAngleDeg, windMultiplier, cumulativeEnergyKwh) sampled ~every 1km during HUD
+  // live tracking — see HudTab's windLogRef. Captured before any manual endSoc correction.
+  hudWindLog?: string;
   createdAt: number;
 }
 
