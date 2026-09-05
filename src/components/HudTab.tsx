@@ -243,6 +243,19 @@ export const HudTab: React.FC<HudTabProps> = ({
   const lastCountedAltitudeDistanceKmRef = useRef(0);
   const elevationGainRef = useRef(0);
   const elevationLossRef = useRef(0);
+  // Compact trail of wind/energy checkpoints sampled roughly every WIND_LOG_INTERVAL_KM, kept
+  // for later diagnosis. Captured live during tracking, independent of any later manual SoC
+  // correction (handleUpdateSessionEndSoc only rewrites endSoc/energyUsedKwh/consumptionPer100Km,
+  // never this log), so it preserves what the model actually saw at each point along the route.
+  const windLogRef = useRef<Array<{
+    d: number; // distanceKm
+    v: number; // speedKmH
+    w: number; // windSpeedKmH
+    a: number; // relativeWindAngleDeg (0=headwind, 180=tailwind)
+    m: number; // windMultiplier applied to that segment
+    e: number; // cumulative segment-accumulated energyKwh at this point
+  }>>([]);
+  const lastWindLogDistanceKmRef = useRef(0);
 
   // Latest GPS state used by the low-frequency weather refresh while tracking.
   const latestGpsPositionRef = useRef<{ lat: number; lon: number } | null>(null);
@@ -563,6 +576,24 @@ export const HudTab: React.FC<HudTabProps> = ({
             segRate.precipMultiplier;
           segmentEnergyKwhRef.current += (deltaKm / 100) * segConsumptionPer100;
           setLiveSegmentEnergyKwh(Number(segmentEnergyKwhRef.current.toFixed(3)));
+
+          // Sample a compact checkpoint roughly every 1 km so wind/energy behaviour along the
+          // route can be audited after the fact, instead of relying on what was glanced at on
+          // screen mid-drive.
+          const WIND_LOG_INTERVAL_KM = 1;
+          if (distanceRef.current - lastWindLogDistanceKmRef.current >= WIND_LOG_INTERVAL_KM) {
+            lastWindLogDistanceKmRef.current = distanceRef.current;
+            windLogRef.current.push({
+              d: Number(distanceRef.current.toFixed(1)),
+              v: Math.round(smoothedSpeed),
+              w: weatherRef.current.isLoaded ? Math.round(weatherRef.current.windSpeed) : 0,
+              a: Math.round(relativeWindAngleRef.current),
+              m: Number(segRate.windMultiplier.toFixed(3)),
+              e: Number(segmentEnergyKwhRef.current.toFixed(2)),
+            });
+            // Defensive cap — a very long trip shouldn't grow this unboundedly.
+            if (windLogRef.current.length > 400) windLogRef.current.shift();
+          }
 
           if (smoothedSpeed > 0) {
             speedHistoryRef.current.push(smoothedSpeed);
@@ -1042,6 +1073,8 @@ export const HudTab: React.FC<HudTabProps> = ({
     smoothedAltitudeRef.current = null;
     lastCountedAltitudeRef.current = null;
     lastCountedAltitudeDistanceKmRef.current = 0;
+    windLogRef.current = [];
+    lastWindLogDistanceKmRef.current = 0;
     elevationGainRef.current = 0;
     elevationLossRef.current = 0;
     setElevationGainM(0);
@@ -1116,6 +1149,8 @@ export const HudTab: React.FC<HudTabProps> = ({
     smoothedAltitudeRef.current = null;
     lastCountedAltitudeRef.current = null;
     lastCountedAltitudeDistanceKmRef.current = 0;
+    windLogRef.current = [];
+    lastWindLogDistanceKmRef.current = 0;
     elevationGainRef.current = 0;
     elevationLossRef.current = 0;
     setElevationGainM(0);
@@ -1189,6 +1224,9 @@ export const HudTab: React.FC<HudTabProps> = ({
         forecastPlannedMaxSpeedKmH: matchedForecast.plannedMaxSpeedKmH,
         forecastSpeedProfile: matchedForecast.speedProfile,
       }),
+      // Raw per-km wind/energy trail from live tracking, captured before any manual SoC
+      // correction — see windLogRef above.
+      hudWindLog: windLogRef.current.length ? JSON.stringify(windLogRef.current) : undefined,
     });
 
     setCompletedTripSummary(null);
