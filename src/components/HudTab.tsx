@@ -129,6 +129,13 @@ const ALT_NOISE_THRESHOLD_M = 4;
 // Belarus). A counted delta implying a steeper grade over the distance actually driven since the
 // last checkpoint is almost always GPS altitude noise, not real elevation change.
 const MAX_PLAUSIBLE_GRADE = 0.15;
+// A GPS altitude fix can jump several metres for a few seconds even when its reported
+// vertical accuracy looks acceptable. Never turn such a short-lived disturbance directly
+// into battery energy. Elevation must persist over distance before it is committed.
+const MIN_ELEVATION_COMMIT_DISTANCE_KM = 0.25;
+const MIN_ELEVATION_COMMIT_DELTA_M = 5;
+const ELEVATION_CONFIRMATION_SAMPLES = 3;
+const MAX_ELEVATION_DELTA_PER_COMMIT_M = 30;
 
 export const HudTab: React.FC<HudTabProps> = ({
   settings,
@@ -241,6 +248,9 @@ export const HudTab: React.FC<HudTabProps> = ({
   const smoothedAltitudeRef = useRef<number | null>(null);
   const lastCountedAltitudeRef = useRef<number | null>(null);
   const lastCountedAltitudeDistanceKmRef = useRef(0);
+  const elevationTrendDirectionRef = useRef<1 | -1 | 0>(0);
+  const elevationTrendSamplesRef = useRef(0);
+  const previousSmoothedAltitudeRef = useRef<number | null>(null);
   const elevationGainRef = useRef(0);
   const elevationLossRef = useRef(0);
   // Elevation energy accumulated incrementally, in kWh, at the vehicle mass that applied at the
@@ -663,40 +673,73 @@ export const HudTab: React.FC<HudTabProps> = ({
             lastCountedAltitudeDistanceKmRef.current = distanceRef.current;
           } else {
             smoothedAltitudeRef.current = smoothedAltitudeRef.current * 0.7 + rawAltitude * 0.3;
+            const previousSmoothedAltitude = previousSmoothedAltitudeRef.current;
             const countedDelta = smoothedAltitudeRef.current - (lastCountedAltitudeRef.current ?? smoothedAltitudeRef.current);
+            const sampleDelta = previousSmoothedAltitude === null
+              ? 0
+              : smoothedAltitudeRef.current - previousSmoothedAltitude;
+            previousSmoothedAltitudeRef.current = smoothedAltitudeRef.current;
 
             if (Math.abs(countedDelta) >= ALT_NOISE_THRESHOLD_M) {
               const distanceSinceCheckpointKm = distanceRef.current - lastCountedAltitudeDistanceKmRef.current;
-              const impliedGrade = distanceSinceCheckpointKm > 0.005
-                ? Math.abs(countedDelta) / (distanceSinceCheckpointKm * 1000)
-                : Infinity; // not enough distance yet to judge plausibility — treat as noise for now
+              const direction: 1 | -1 = countedDelta > 0 ? 1 : -1;
+              const sampleDirection: 1 | -1 | 0 = Math.abs(sampleDelta) >= 0.5 ? (sampleDelta > 0 ? 1 : -1) : 0;
 
-              if (distanceSinceCheckpointKm > 0.005 && impliedGrade <= MAX_PLAUSIBLE_GRADE) {
-                // Cost this specific delta at the vehicle mass that applies right now (passenger
-                // count at call-time via passengersRef), not retroactively at whatever mass
-                // applies when the trip is later saved/rendered — see elevationEnergyKwhRef.
+              // Never confirm an elevation change merely because the smoothed altitude jumped
+              // once and then stayed at the new (possibly wrong) GPS level. The individual
+              // smoothed samples must continue moving in the same direction as the candidate.
+              if (sampleDirection === direction) {
+                if (elevationTrendDirectionRef.current === direction) {
+                  elevationTrendSamplesRef.current += 1;
+                } else {
+                  elevationTrendDirectionRef.current = direction;
+                  elevationTrendSamplesRef.current = 1;
+                }
+              } else if (sampleDirection !== 0) {
+                elevationTrendDirectionRef.current = 0;
+                elevationTrendSamplesRef.current = 0;
+              }
+
+              const impliedGrade = distanceSinceCheckpointKm > 0
+                ? Math.abs(countedDelta) / (distanceSinceCheckpointKm * 1000)
+                : Infinity;
+
+              const enoughDistance = distanceSinceCheckpointKm >= MIN_ELEVATION_COMMIT_DISTANCE_KM;
+              const enoughConfirmation = elevationTrendSamplesRef.current >= ELEVATION_CONFIRMATION_SAMPLES;
+              const enoughDelta = Math.abs(countedDelta) >= MIN_ELEVATION_COMMIT_DELTA_M;
+
+              if (enoughDistance && enoughConfirmation && enoughDelta && impliedGrade <= MAX_PLAUSIBLE_GRADE) {
+                // Hard-limit one committed elevation chunk. At 30 m this is far below the energy
+                // required for a multi-percent SoC jump, while genuine longer climbs can still be
+                // accumulated over multiple confirmed chunks. A short GPS excursion cannot cross
+                // the confirmation + distance gates, so it contributes zero battery energy.
+                const committedDelta = Math.sign(countedDelta) * Math.min(
+                  Math.abs(countedDelta),
+                  MAX_ELEVATION_DELTA_PER_COMMIT_M
+                );
                 const VEHICLE_MASS_KG = 1600 + (Math.max(1, Math.min(5, Math.round(passengersRef.current))) - 1) * 75;
                 const G = 9.80665;
                 const DRIVETRAIN_EFFICIENCY = 0.90;
                 const REGEN_EFFICIENCY = 0.65;
-                if (countedDelta > 0) {
-                  elevationGainRef.current += countedDelta;
-                  elevationEnergyKwhRef.current += (VEHICLE_MASS_KG * G * countedDelta) / 3.6e6 / DRIVETRAIN_EFFICIENCY;
+                if (committedDelta > 0) {
+                  elevationGainRef.current += committedDelta;
+                  elevationEnergyKwhRef.current += (VEHICLE_MASS_KG * G * committedDelta) / 3.6e6 / DRIVETRAIN_EFFICIENCY;
                 } else {
-                  elevationLossRef.current += Math.abs(countedDelta);
-                  elevationEnergyKwhRef.current -= (VEHICLE_MASS_KG * G * Math.abs(countedDelta)) / 3.6e6 * REGEN_EFFICIENCY;
+                  elevationLossRef.current += Math.abs(committedDelta);
+                  elevationEnergyKwhRef.current -= (VEHICLE_MASS_KG * G * Math.abs(committedDelta)) / 3.6e6 * REGEN_EFFICIENCY;
                 }
                 setElevationGainM(Math.round(elevationGainRef.current));
                 setElevationLossM(Math.round(elevationLossRef.current));
+                lastCountedAltitudeRef.current = (lastCountedAltitudeRef.current ?? smoothedAltitudeRef.current) + committedDelta;
+                lastCountedAltitudeDistanceKmRef.current = distanceRef.current;
+                elevationTrendDirectionRef.current = 0;
+                elevationTrendSamplesRef.current = 0;
+              } else if (distanceSinceCheckpointKm >= MIN_ELEVATION_COMMIT_DISTANCE_KM && impliedGrade > MAX_PLAUSIBLE_GRADE) {
+                // Impossible grade: re-anchor without charging or crediting the battery.
                 lastCountedAltitudeRef.current = smoothedAltitudeRef.current;
                 lastCountedAltitudeDistanceKmRef.current = distanceRef.current;
-              } else if (distanceSinceCheckpointKm > 0.005) {
-                // Implausibly steep for the distance covered — almost certainly noise. Re-anchor
-                // the checkpoint here without crediting/debiting energy, so the next genuine
-                // change is measured from a fresh baseline instead of silently carrying an
-                // ever-growing, never-counted offset.
-                lastCountedAltitudeRef.current = smoothedAltitudeRef.current;
-                lastCountedAltitudeDistanceKmRef.current = distanceRef.current;
+                elevationTrendDirectionRef.current = 0;
+                elevationTrendSamplesRef.current = 0;
               }
             }
           }
@@ -1127,6 +1170,9 @@ export const HudTab: React.FC<HudTabProps> = ({
     smoothedAltitudeRef.current = null;
     lastCountedAltitudeRef.current = null;
     lastCountedAltitudeDistanceKmRef.current = 0;
+    elevationTrendDirectionRef.current = 0;
+    elevationTrendSamplesRef.current = 0;
+    previousSmoothedAltitudeRef.current = null;
     windLogRef.current = [];
     lastAltitudeAccuracyRef.current = null;
     lastWindLogDistanceKmRef.current = 0;
@@ -1205,6 +1251,9 @@ export const HudTab: React.FC<HudTabProps> = ({
     smoothedAltitudeRef.current = null;
     lastCountedAltitudeRef.current = null;
     lastCountedAltitudeDistanceKmRef.current = 0;
+    elevationTrendDirectionRef.current = 0;
+    elevationTrendSamplesRef.current = 0;
+    previousSmoothedAltitudeRef.current = null;
     windLogRef.current = [];
     lastAltitudeAccuracyRef.current = null;
     lastWindLogDistanceKmRef.current = 0;
