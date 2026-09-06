@@ -260,8 +260,17 @@ export const HudTab: React.FC<HudTabProps> = ({
     a: number; // relativeWindAngleDeg (0=headwind, 180=tailwind)
     m: number; // windMultiplier applied to that segment
     e: number; // cumulative segment-accumulated energyKwh at this point
+    g: number; // cumulative elevationGainM
+    l: number; // cumulative elevationLossM
+    ee: number; // cumulative elevationEnergyKwh (mass-aware, incremental)
+    alt: number | null; // smoothed altitude reading (m), for eyeballing raw trend/noise
+    aa: number | null; // latest raw altitudeAccuracy (m) seen from GPS, whether or not it passed the gate
   }>>([]);
   const lastWindLogDistanceKmRef = useRef(0);
+  // Latest raw altitudeAccuracy seen from the GPS, regardless of whether it passed the
+  // ALT_ACCURACY_THRESHOLD_M gate — logged alongside wind checkpoints purely to find out what
+  // values this device/browser actually reports (some browsers never report it at all).
+  const lastAltitudeAccuracyRef = useRef<number | null>(null);
 
   // Latest GPS state used by the low-frequency weather refresh while tracking.
   const latestGpsPositionRef = useRef<{ lat: number; lon: number } | null>(null);
@@ -593,9 +602,12 @@ export const HudTab: React.FC<HudTabProps> = ({
           segmentEnergyKwhRef.current += (deltaKm / 100) * segConsumptionPer100;
           setLiveSegmentEnergyKwh(Number(segmentEnergyKwhRef.current.toFixed(3)));
 
-          // Sample a compact checkpoint roughly every 1 km so wind/energy behaviour along the
-          // route can be audited after the fact, instead of relying on what was glanced at on
-          // screen mid-drive.
+          // Sample a compact checkpoint roughly every 1 km so wind/energy/elevation behaviour
+          // along the route can be audited after the fact, instead of relying on what was
+          // glanced at on screen mid-drive or inferred backwards from the final totals.
+          // Elevation/accuracy fields read from refs updated by the ELEVATION TRACKING block
+          // below, so they reflect the most recent tick that block ran on (negligible lag at
+          // 1km sampling granularity).
           const WIND_LOG_INTERVAL_KM = 1;
           if (distanceRef.current - lastWindLogDistanceKmRef.current >= WIND_LOG_INTERVAL_KM) {
             lastWindLogDistanceKmRef.current = distanceRef.current;
@@ -606,6 +618,13 @@ export const HudTab: React.FC<HudTabProps> = ({
               a: Math.round(relativeWindAngleRef.current),
               m: Number(segRate.windMultiplier.toFixed(3)),
               e: Number(segmentEnergyKwhRef.current.toFixed(2)),
+              g: Math.round(elevationGainRef.current),
+              l: Math.round(elevationLossRef.current),
+              ee: Number(elevationEnergyKwhRef.current.toFixed(2)),
+              alt: smoothedAltitudeRef.current !== null ? Math.round(smoothedAltitudeRef.current) : null,
+              aa: lastAltitudeAccuracyRef.current !== null && lastAltitudeAccuracyRef.current !== undefined
+                ? Math.round(lastAltitudeAccuracyRef.current)
+                : null,
             });
             // Defensive cap — a very long trip shouldn't grow this unboundedly.
             if (windLogRef.current.length > 400) windLogRef.current.shift();
@@ -631,6 +650,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       // cancelling out, and gets worse at higher speed / weaker vertical GPS fix (e.g. highway).
       const rawAltitude = pos.coords.altitude;
       const rawAltitudeAccuracy = pos.coords.altitudeAccuracy;
+      lastAltitudeAccuracyRef.current = rawAltitudeAccuracy;
       const altitudeAccuracyOk = rawAltitudeAccuracy == null || rawAltitudeAccuracy <= ALT_ACCURACY_THRESHOLD_M;
 
       if (isTracking && rawAltitude !== null && !isNaN(rawAltitude)) {
@@ -1020,9 +1040,14 @@ export const HudTab: React.FC<HudTabProps> = ({
   // passengers mid-trip retroactively re-costed elevation already banked earlier in the trip and
   // showed up as a sudden multi-percent SoC jump.
   //
-  // HVAC energy has no such history-dependence (power × elapsed time, independent of when in the
-  // trip it ran), so it's fine to keep computing it from the aggregate forecast each render.
-  const climateEnergyKwh = (tripDistanceKm / 100) * (forecast.climateDeltaKwh100 ?? 0);
+  // HVAC energy has no history-dependence like elevation (power × elapsed time, independent of
+  // when in the trip it ran), but it does need the trip's REAL elapsed time — not a distance
+  // proxy. climateDeltaKwh100 (kWh/100km) is only a legacy equivalent defined at an implicit
+  // 60 km/h (see calculateClimateImpact); multiplying it by tripDistanceKm/100 silently assumes
+  // the whole trip was driven at 60 km/h. At this trip's actual 74 km/h average that overstated
+  // elapsed climate run-time by ~23% (59 min implied vs 48 min real). Using climatePowerKw
+  // directly against elapsedSeconds fixes that regardless of actual speed.
+  const climateEnergyKwh = (forecast.climatePowerKw ?? 0) * (elapsedSeconds / 3600);
   const energySpentKwh = isTracking
     ? Math.max(0, liveSegmentEnergyKwh + elevationEnergyKwhRef.current + climateEnergyKwh)
     : 0;
@@ -1103,6 +1128,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     lastCountedAltitudeRef.current = null;
     lastCountedAltitudeDistanceKmRef.current = 0;
     windLogRef.current = [];
+    lastAltitudeAccuracyRef.current = null;
     lastWindLogDistanceKmRef.current = 0;
     elevationGainRef.current = 0;
     elevationEnergyKwhRef.current = 0;
@@ -1180,6 +1206,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     lastCountedAltitudeRef.current = null;
     lastCountedAltitudeDistanceKmRef.current = 0;
     windLogRef.current = [];
+    lastAltitudeAccuracyRef.current = null;
     lastWindLogDistanceKmRef.current = 0;
     elevationGainRef.current = 0;
     elevationEnergyKwhRef.current = 0;
