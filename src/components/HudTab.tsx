@@ -243,6 +243,12 @@ export const HudTab: React.FC<HudTabProps> = ({
   const lastCountedAltitudeDistanceKmRef = useRef(0);
   const elevationGainRef = useRef(0);
   const elevationLossRef = useRef(0);
+  // Elevation energy accumulated incrementally, in kWh, at the vehicle mass that applied at the
+  // moment each metre was actually gained/lost — see the ELEVATION TRACKING block below. This
+  // replaces recomputing net elevation kWh from aggregate gainM/lossM at the CURRENT passenger
+  // count on every render, which retroactively re-priced the whole trip's climb/descent history
+  // whenever passengers changed mid-trip.
+  const elevationEnergyKwhRef = useRef(0);
   // Compact trail of wind/energy checkpoints sampled roughly every WIND_LOG_INTERVAL_KM, kept
   // for later diagnosis. Captured live during tracking, independent of any later manual SoC
   // correction (handleUpdateSessionEndSoc only rewrites endSoc/energyUsedKwh/consumptionPer100Km,
@@ -286,6 +292,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   // call-time without forcing the GPS watch to be torn down and resubscribed on every change.
   const weatherRef = useRef(weather);
   const relativeWindAngleRef = useRef(0);
+  const passengersRef = useRef(passengers);
 
   const isDark = settings.theme !== 'light';
   const batteryCap = settings.batteryCapacityKwh || 51.87;
@@ -316,6 +323,15 @@ export const HudTab: React.FC<HudTabProps> = ({
   useEffect(() => {
     weatherRef.current = weather;
   }, [weather]);
+
+  // Same reasoning for passenger count: read at call-time so adding passengers mid-trip only
+  // affects elevation energy accrued from that point forward (see elevationEnergyKwhRef below),
+  // instead of retroactively re-costing the whole trip's already-accumulated climb/descent at
+  // the new mass, which previously showed up as a sudden multi-percent SoC jump the moment
+  // passengers changed.
+  useEffect(() => {
+    passengersRef.current = passengers;
+  }, [passengers]);
 
   // Haversine distance formula between two GPS coordinates (in km)
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -636,10 +652,19 @@ export const HudTab: React.FC<HudTabProps> = ({
                 : Infinity; // not enough distance yet to judge plausibility — treat as noise for now
 
               if (distanceSinceCheckpointKm > 0.005 && impliedGrade <= MAX_PLAUSIBLE_GRADE) {
+                // Cost this specific delta at the vehicle mass that applies right now (passenger
+                // count at call-time via passengersRef), not retroactively at whatever mass
+                // applies when the trip is later saved/rendered — see elevationEnergyKwhRef.
+                const VEHICLE_MASS_KG = 1600 + (Math.max(1, Math.min(5, Math.round(passengersRef.current))) - 1) * 75;
+                const G = 9.80665;
+                const DRIVETRAIN_EFFICIENCY = 0.90;
+                const REGEN_EFFICIENCY = 0.65;
                 if (countedDelta > 0) {
                   elevationGainRef.current += countedDelta;
+                  elevationEnergyKwhRef.current += (VEHICLE_MASS_KG * G * countedDelta) / 3.6e6 / DRIVETRAIN_EFFICIENCY;
                 } else {
                   elevationLossRef.current += Math.abs(countedDelta);
+                  elevationEnergyKwhRef.current -= (VEHICLE_MASS_KG * G * Math.abs(countedDelta)) / 3.6e6 * REGEN_EFFICIENCY;
                 }
                 setElevationGainM(Math.round(elevationGainRef.current));
                 setElevationLossM(Math.round(elevationLossRef.current));
@@ -986,16 +1011,20 @@ export const HudTab: React.FC<HudTabProps> = ({
   // per-GPS-segment at each segment's own instantaneous speed (see geolocation handler above) —
   // NOT the previous approach of applying the whole-trip average speed to the whole distance,
   // which under-costs mixed city/highway trips because the speed→consumption curve is convex.
-  // Elevation and HVAC energy are physically additive regardless of driving order (elevation is
-  // pure m·g·h from total gain/loss; HVAC is power × elapsed time), so they're still taken from
-  // the aggregate forecast and added once for the whole trip.
-  const elevationEnergyKwh =
-    forecast.elevationDeltaKwh100 !== undefined
-      ? (tripDistanceKm / 100) * forecast.elevationDeltaKwh100
-      : 0;
+  //
+  // Elevation energy (elevationEnergyKwhRef) is accumulated the same incremental way, in the
+  // same geolocation handler, at the vehicle mass in effect at the moment each metre of gain/loss
+  // was counted (see passengersRef above). It is deliberately NOT recomputed here from aggregate
+  // gainM/lossM at the CURRENT passenger count — doing so priced the entire trip's already-driven
+  // climb/descent at whatever mass happened to apply when this line last ran, so adding
+  // passengers mid-trip retroactively re-costed elevation already banked earlier in the trip and
+  // showed up as a sudden multi-percent SoC jump.
+  //
+  // HVAC energy has no such history-dependence (power × elapsed time, independent of when in the
+  // trip it ran), so it's fine to keep computing it from the aggregate forecast each render.
   const climateEnergyKwh = (tripDistanceKm / 100) * (forecast.climateDeltaKwh100 ?? 0);
   const energySpentKwh = isTracking
-    ? Math.max(0, liveSegmentEnergyKwh + elevationEnergyKwh + climateEnergyKwh)
+    ? Math.max(0, liveSegmentEnergyKwh + elevationEnergyKwhRef.current + climateEnergyKwh)
     : 0;
 
   // Percentage drop of battery based on energy spent and battery capacity
@@ -1076,6 +1105,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     windLogRef.current = [];
     lastWindLogDistanceKmRef.current = 0;
     elevationGainRef.current = 0;
+    elevationEnergyKwhRef.current = 0;
     elevationLossRef.current = 0;
     setElevationGainM(0);
     setElevationLossM(0);
@@ -1152,6 +1182,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     windLogRef.current = [];
     lastWindLogDistanceKmRef.current = 0;
     elevationGainRef.current = 0;
+    elevationEnergyKwhRef.current = 0;
     elevationLossRef.current = 0;
     setElevationGainM(0);
     setElevationLossM(0);
