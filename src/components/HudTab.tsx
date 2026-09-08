@@ -235,6 +235,13 @@ export const HudTab: React.FC<HudTabProps> = ({
     energyUsedKwh: number;
     styleFactor?: number;
     styleLabel?: string;
+    // Exact energySpentKwh breakdown at the moment tracking stopped — logged so the three
+    // components can be checked directly against the saved total instead of reconstructed
+    // afterward from the 1km-interval hudWindLog (which necessarily lags by up to 1km/a few
+    // GPS ticks and can't fully account for the very last partial segment before stopping).
+    segmentEnergyKwhAtStop?: number;
+    elevationEnergyKwhAtStop?: number;
+    climateEnergyKwhAtStop?: number;
   } | null>(null);
   const [trackingStopMessage, setTrackingStopMessage] = useState('');
 
@@ -301,11 +308,6 @@ export const HudTab: React.FC<HudTabProps> = ({
   // × consumption-at-that-segment's-actual-speed to this running total. See computeFlatRoadConsumptionRate.
   const segmentEnergyKwhRef = useRef(0);
   const [liveSegmentEnergyKwh, setLiveSegmentEnergyKwh] = useState(0);
-
-  // Monotonic floor for current SoC during a trip: once the displayed live SoC drops,
-  // it must never rise again until tracking is stopped. Prevents small upward jumps from
-  // regen recalculation, elevation profile updates, or climate forecast changes.
-  const minLiveSocRef = useRef<number | null>(null);
 
   // Mirrors of render-scope values the geolocation watchPosition callback needs to read at
   // call-time without forcing the GPS watch to be torn down and resubscribed on every change.
@@ -1098,21 +1100,12 @@ export const HudTab: React.FC<HudTabProps> = ({
   // Percentage drop of battery based on energy spent and battery capacity
   const socSpentPercent = (energySpentKwh / batteryCap) * 100;
 
-  // Raw live dynamic remaining SoC % (can theoretically rise slightly due to regen /
-  // elevation / climate recalculations). We enforce a monotonic floor below.
-  const rawLiveDynamicSoc = Math.max(0, Number((startTripSoc - socSpentPercent).toFixed(1)));
-
-  // Monotonic current SoC: never allow the displayed value to increase during one trip.
-  if (isTracking) {
-    if (minLiveSocRef.current === null) {
-      minLiveSocRef.current = rawLiveDynamicSoc;
-    } else {
-      minLiveSocRef.current = Math.min(minLiveSocRef.current, rawLiveDynamicSoc);
-    }
-  }
-  const liveDynamicSoc = isTracking && minLiveSocRef.current !== null
-    ? minLiveSocRef.current
-    : rawLiveDynamicSoc;
+  // Live dynamic remaining SoC % — a direct read of the current energy balance, not clamped
+  // to a running minimum. It can rise slightly mid-trip: braking before a turn, coasting, and
+  // descents all genuinely give regen credit (elevationEnergyKwhRef can decrease), and with the
+  // display now rounded to whole percent, small honest upward ticks read as real recuperation
+  // rather than as a confusing flicker.
+  const liveDynamicSoc = Math.max(0, Number((startTripSoc - socSpentPercent).toFixed(1)));
 
   // Live SoC-at-destination: always derived from the *current* liveDynamicSoc + last
   // calculated remaining energy. This makes the big "SOC на финише" number move in real time
@@ -1186,7 +1179,6 @@ export const HudTab: React.FC<HudTabProps> = ({
     setTrackingStopMessage('');
     segmentEnergyKwhRef.current = 0;
     setLiveSegmentEnergyKwh(0);
-    minLiveSocRef.current = null; // reset monotonic SoC floor for the new trip
   };
 
   // STOP tracking
@@ -1200,7 +1192,6 @@ export const HudTab: React.FC<HudTabProps> = ({
     lastDestRecalcAtRef.current = 0;
     lastDestRecalcDistanceRef.current = 0;
     destRecalcInFlightRef.current = false;
-    minLiveSocRef.current = null;
     setTrackingStopMessage('Расчёт остановлен');
 
     const finalDistance = Number(distanceRef.current.toFixed(1));
@@ -1233,6 +1224,9 @@ export const HudTab: React.FC<HudTabProps> = ({
       energyUsedKwh: finalEnergyKwh,
       styleFactor: currentTripStyle.factor,
       styleLabel: currentTripStyle.label,
+      segmentEnergyKwhAtStop: Number(liveSegmentEnergyKwh.toFixed(3)),
+      elevationEnergyKwhAtStop: Number(elevationEnergyKwhRef.current.toFixed(3)),
+      climateEnergyKwhAtStop: Number(climateEnergyKwh.toFixed(3)),
     });
   };
 
@@ -1266,7 +1260,6 @@ export const HudTab: React.FC<HudTabProps> = ({
     setCompletedTripSummary(null);
     segmentEnergyKwhRef.current = 0;
     setLiveSegmentEnergyKwh(0);
-    minLiveSocRef.current = null;
   };
 
   // Save tracked trip directly to history
@@ -1300,6 +1293,13 @@ export const HudTab: React.FC<HudTabProps> = ({
       forecastNote = ` | Прогноз: ${matchedForecast.arrivalSoc}% SoC (Δ${socDeltaText}п.п., ${matchedForecast.consumptionPer100Km}→${completedTripSummary.estimatedCons} кВт⋅ч/100)`;
     }
 
+    // Exact breakdown of the saved total, captured at the moment tracking stopped — lets the
+    // three components (segment/elevation/climate) be checked directly against energyUsedKwh
+    // without reconstructing them from the 1km-interval hudWindLog.
+    const breakdownNote = completedTripSummary.segmentEnergyKwhAtStop !== undefined
+      ? ` | Состав: сегмент=${completedTripSummary.segmentEnergyKwhAtStop}, рельеф=${completedTripSummary.elevationEnergyKwhAtStop}, климат=${completedTripSummary.climateEnergyKwhAtStop} кВт⋅ч`
+      : '';
+
     onSaveToHistory({
       date: new Date().toISOString().split('T')[0],
       title: `GPS Трек: ${completedTripSummary.distanceKm} км (${completedTripSummary.avgSpeedKmH} км/ч)`,
@@ -1322,7 +1322,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       passengers,
       note: `GPS HUD: ${completedTripSummary.durationMinutes} мин, ${completedTripSummary.avgSpeedKmH} км/ч, стиль поездки: x${completedTripSummary.styleFactor || 1.0} (${completedTripSummary.styleLabel || 'Сбалансированный'}), t=${completedTripSummary.temp}°C${
         completedTripSummary.windStatus ? `, ветер: ${completedTripSummary.windStatus}` : ''
-      }${forecastNote}`,
+      }${forecastNote}${breakdownNote}`,
       ...(matchedForecast && {
         forecastArrivalSoc: matchedForecast.arrivalSoc,
         forecastConsumptionPer100Km: matchedForecast.consumptionPer100Km,
