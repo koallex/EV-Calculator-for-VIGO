@@ -242,6 +242,12 @@ export const HudTab: React.FC<HudTabProps> = ({
     segmentEnergyKwhAtStop?: number;
     elevationEnergyKwhAtStop?: number;
     climateEnergyKwhAtStop?: number;
+    // Raw climatePowerKw (kW) that fed climateEnergyKwhAtStop, logged directly rather than
+    // inferred from climateEnergyKwhAtStop/elapsedHours — at 22°C, calculateClimateImpact's
+    // comfort-zone branch should return exactly 0.40 kW; if this logs something much higher
+    // (implying the model is treating the trip as if it were deep in the cold-weather branch),
+    // that pinpoints the bug directly instead of it being inferred indirectly after the fact.
+    climatePowerKwAtStop?: number;
   } | null>(null);
   const [trackingStopMessage, setTrackingStopMessage] = useState('');
 
@@ -1227,6 +1233,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       segmentEnergyKwhAtStop: Number(liveSegmentEnergyKwh.toFixed(3)),
       elevationEnergyKwhAtStop: Number(elevationEnergyKwhRef.current.toFixed(3)),
       climateEnergyKwhAtStop: Number(climateEnergyKwh.toFixed(3)),
+      climatePowerKwAtStop: Number((forecast.climatePowerKw ?? 0).toFixed(3)),
     });
   };
 
@@ -1297,7 +1304,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     // three components (segment/elevation/climate) be checked directly against energyUsedKwh
     // without reconstructing them from the 1km-interval hudWindLog.
     const breakdownNote = completedTripSummary.segmentEnergyKwhAtStop !== undefined
-      ? ` | Состав: сегмент=${completedTripSummary.segmentEnergyKwhAtStop}, рельеф=${completedTripSummary.elevationEnergyKwhAtStop}, климат=${completedTripSummary.climateEnergyKwhAtStop} кВт⋅ч`
+      ? ` | Состав: сегмент=${completedTripSummary.segmentEnergyKwhAtStop}, рельеф=${completedTripSummary.elevationEnergyKwhAtStop}, климат=${completedTripSummary.climateEnergyKwhAtStop} кВт⋅ч (мощность климата=${completedTripSummary.climatePowerKwAtStop} кВт при t=${completedTripSummary.temp}°C)`
       : '';
 
     onSaveToHistory({
