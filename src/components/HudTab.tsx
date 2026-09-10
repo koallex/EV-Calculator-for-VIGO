@@ -1049,6 +1049,16 @@ export const HudTab: React.FC<HudTabProps> = ({
       ? { gainM: elevationGainM, lossM: elevationLossM, distanceKm: tripDistanceKm }
       : undefined,
     undefined,
+    // Bug fix (found 2026-09-10): this call was missing the tripDurationHours/
+    // climatePowerOverrideKw argument pair's second slot, so `passengers` landed in the
+    // climatePowerOverrideKw parameter instead of its own — and since that override always wins
+    // over the real temperature-based HVAC calc, live climate energy was silently being computed
+    // as passengerCount kW (e.g. 3 passengers -> a flat 3kW "climate" load) regardless of actual
+    // temperature. Confirmed by cross-checking five recent trips: logged climate power matched
+    // passenger count almost exactly in every one, independent of temperature. The explicit
+    // `undefined` here fills climatePowerOverrideKw (position 13) so passengers correctly lands
+    // in position 14.
+    undefined,
     passengers
   );
 
@@ -1069,6 +1079,10 @@ export const HudTab: React.FC<HudTabProps> = ({
     isTracking && tripDistanceKm > 0.3
       ? { gainM: elevationGainM, lossM: elevationLossM, distanceKm: tripDistanceKm }
       : undefined,
+    undefined,
+    // Same missing-argument bug as the forecast call above — without this extra `undefined`,
+    // the trailing `1` below lands in climatePowerOverrideKw (forcing a flat 1kW "climate" load
+    // regardless of temperature) instead of passengers.
     undefined,
     1
   );
