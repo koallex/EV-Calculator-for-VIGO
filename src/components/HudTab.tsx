@@ -272,6 +272,13 @@ export const HudTab: React.FC<HudTabProps> = ({
   // count on every render, which retroactively re-priced the whole trip's climb/descent history
   // whenever passengers changed mid-trip.
   const elevationEnergyKwhRef = useRef(0);
+  // Climate energy accumulated incrementally, once per second, at whatever climateOn/outdoor
+  // temperature was in effect at that second — see the 1Hz timer below. Replaces computing
+  // climatePowerKw × total-elapsed-time on every render, which (like the old elevation
+  // aggregate-recompute bug) re-prices the WHOLE trip's climate at the CURRENT toggle state:
+  // switching climate off for the last few km would have silently zeroed out climate energy for
+  // the entire trip, not just the remainder.
+  const climateEnergyKwhRef = useRef(0);
   // Compact trail of wind/energy checkpoints sampled roughly every WIND_LOG_INTERVAL_KM, kept
   // for later diagnosis. Captured live during tracking, independent of any later manual SoC
   // correction (handleUpdateSessionEndSoc only rewrites endSoc/energyUsedKwh/consumptionPer100Km,
@@ -320,6 +327,11 @@ export const HudTab: React.FC<HudTabProps> = ({
   const weatherRef = useRef(weather);
   const relativeWindAngleRef = useRef(0);
   const passengersRef = useRef(passengers);
+  // Same reasoning, for the climate toggle and outdoor temp: the 1Hz timer below (not the GPS
+  // callback) needs the current value at call-time so tapping the climate on/off button
+  // mid-trip only changes energy accrual from that second forward.
+  const climateOnRef = useRef(climateOn);
+  const outdoorTempRef = useRef(outdoorTemp);
 
   const isDark = settings.theme !== 'light';
   const batteryCap = settings.batteryCapacityKwh || 51.87;
@@ -450,6 +462,10 @@ export const HudTab: React.FC<HudTabProps> = ({
     if (isTracking && tripStartTime) {
       interval = setInterval(() => {
         setElapsedSeconds(Math.floor((Date.now() - tripStartTime) / 1000));
+        // Accrue climate energy for exactly this one second, at the climate on/off state and
+        // outdoor temperature in effect right now — see climateEnergyKwhRef above.
+        const currentClimatePowerKw = calculateClimateImpact(outdoorTempRef.current, climateOnRef.current).powerKw;
+        climateEnergyKwhRef.current += currentClimatePowerKw / 3600;
       }, 1000);
     }
     return () => {
@@ -908,6 +924,14 @@ export const HudTab: React.FC<HudTabProps> = ({
   const outdoorTemp = weather.isLoaded ? weather.temperature : 20;
   const liveClimate = calculateClimateImpact(outdoorTemp, climateOn);
 
+  // Keep the 1Hz timer's climate refs in sync without restarting the interval on every toggle.
+  useEffect(() => {
+    climateOnRef.current = climateOn;
+  }, [climateOn]);
+  useEffect(() => {
+    outdoorTempRef.current = outdoorTemp;
+  }, [outdoorTemp]);
+
   // Precipitation & Road Surface Impact calculation
   const livePrecipitation = calculatePrecipitationImpact(
     weather.isLoaded ? weather.weatherCode : undefined,
@@ -1105,16 +1129,11 @@ export const HudTab: React.FC<HudTabProps> = ({
   // passengers mid-trip retroactively re-costed elevation already banked earlier in the trip and
   // showed up as a sudden multi-percent SoC jump.
   //
-  // HVAC energy has no history-dependence like elevation (power × elapsed time, independent of
-  // when in the trip it ran), but it does need the trip's REAL elapsed time — not a distance
-  // proxy. climateDeltaKwh100 (kWh/100km) is only a legacy equivalent defined at an implicit
-  // 60 km/h (see calculateClimateImpact); multiplying it by tripDistanceKm/100 silently assumes
-  // the whole trip was driven at 60 km/h. At this trip's actual 74 km/h average that overstated
-  // elapsed climate run-time by ~23% (59 min implied vs 48 min real). Using climatePowerKw
-  // directly against elapsedSeconds fixes that regardless of actual speed.
-  const climateEnergyKwh = (forecast.climatePowerKw ?? 0) * (elapsedSeconds / 3600);
+  // HVAC energy is now accumulated incrementally every second (climateEnergyKwhRef, set in the
+  // 1Hz timer above) rather than climatePowerKw × total-elapsed-time, so toggling climate
+  // on/off mid-trip only affects energy from that second forward — not the whole trip retroactively.
   const energySpentKwh = isTracking
-    ? Math.max(0, liveSegmentEnergyKwh + elevationEnergyKwhRef.current + climateEnergyKwh)
+    ? Math.max(0, liveSegmentEnergyKwh + elevationEnergyKwhRef.current + climateEnergyKwhRef.current)
     : 0;
 
   // Percentage drop of battery based on energy spent and battery capacity
@@ -1191,6 +1210,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     lastWindLogDistanceKmRef.current = 0;
     elevationGainRef.current = 0;
     elevationEnergyKwhRef.current = 0;
+    climateEnergyKwhRef.current = 0;
     elevationLossRef.current = 0;
     setElevationGainM(0);
     setElevationLossM(0);
@@ -1246,8 +1266,8 @@ export const HudTab: React.FC<HudTabProps> = ({
       styleLabel: currentTripStyle.label,
       segmentEnergyKwhAtStop: Number(liveSegmentEnergyKwh.toFixed(3)),
       elevationEnergyKwhAtStop: Number(elevationEnergyKwhRef.current.toFixed(3)),
-      climateEnergyKwhAtStop: Number(climateEnergyKwh.toFixed(3)),
-      climatePowerKwAtStop: Number((forecast.climatePowerKw ?? 0).toFixed(3)),
+      climateEnergyKwhAtStop: Number(climateEnergyKwhRef.current.toFixed(3)),
+      climatePowerKwAtStop: Number(calculateClimateImpact(outdoorTempRef.current, climateOnRef.current).powerKw.toFixed(3)),
     });
   };
 
@@ -1274,6 +1294,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     lastWindLogDistanceKmRef.current = 0;
     elevationGainRef.current = 0;
     elevationEnergyKwhRef.current = 0;
+    climateEnergyKwhRef.current = 0;
     elevationLossRef.current = 0;
     setElevationGainM(0);
     setElevationLossM(0);
