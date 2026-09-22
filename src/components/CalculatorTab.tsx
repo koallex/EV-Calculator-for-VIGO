@@ -32,6 +32,7 @@ import { saveLastRouteForecast } from '../utils/routeForecastBridge';
 import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
 import { RouteMap } from './RouteMap';
+import { LocationPickerModal } from './LocationPickerModal';
 import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts';
 import { CollapsibleDetails, SecondaryStatRow, ChipRow } from './ui/CollapsibleDetails';
 import { AnimatedNumber } from './ui/AnimatedNumber';
@@ -105,6 +106,13 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [startMode, setStartMode] = useState<'gps' | 'address'>('gps');
   const [startAddress, setStartAddress] = useState('');
   const [destinationAddress, setDestinationAddress] = useState('');
+  // Exact coordinates when A/B was picked by tapping the interactive map, rather than typed
+  // as free-text. When set, these are used directly instead of re-geocoding the text — a tap
+  // is already precise, so routing through Nominatim's text search again could drift to a
+  // different nearby match. Cleared as soon as the corresponding text field is edited by hand.
+  const [startPin, setStartPin] = useState<{ lat: number; lon: number } | null>(null);
+  const [destinationPin, setDestinationPin] = useState<{ lat: number; lon: number } | null>(null);
+  const [pickerFor, setPickerFor] = useState<'start' | 'destination' | null>(null);
   const [routeStatus, setRouteStatus] = useState('');
   const [routeElevation, setRouteElevation] = useState<RouteElevationData | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
@@ -114,6 +122,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [routeWeather, setRouteWeather] = useState<{ temperature:number; windSpeed:number; windDirection:number; weatherCode:number; precipitation:number; routeBearing:number; etaMinutes:number; arrivalDate: Date; samples: RouteWeatherSample[] } | null>(null);
   const [routeForecast, setRouteForecast] = useState<{ consumption:number; energyKwh:number; arrivalSoc:number; windLabel:string; weatherLabel:string; precipitationLabel:string; relativeWindAngle:number; driverStyleFactor:number; driverStyleSource:string; climateLabel:string; climateImpactPct:number; climateDeltaKwh100:number; speedImpactPct:number; breakdown?: any } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<'searching' | 'ok' | 'error'>('searching');
+  // Last known device position, kept only to center the map-picker modal near the user
+  // instead of defaulting to Minsk when they open it (weather fetch above already has this
+  // fix rate, this just also remembers the coordinate).
+  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [quickWeather, setQuickWeather] = useState<{ temperature:number; weatherCode:number; windSpeed:number } | null>(null);
   const [routeMapOpen, setRouteMapOpen] = useState(false);
   const [elevationOpen, setElevationOpen] = useState(false);
@@ -153,6 +165,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     const id = navigator.geolocation.watchPosition(
       async (position) => {
         setGpsStatus('ok');
+        setGpsCoords({ lat: position.coords.latitude, lon: position.coords.longitude });
         try {
           const { latitude, longitude } = position.coords;
           const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude.toFixed(4)}&longitude=${longitude.toFixed(4)}&current=temperature_2m,weather_code,wind_speed_10m&timezone=auto`);
@@ -226,9 +239,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         setRouteStatus('Получаем текущую геопозицию…');
         const pos = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy:true, timeout:15000, maximumAge:30000 }));
         start = { lat:pos.coords.latitude, lon:pos.coords.longitude, displayName:'Текущая геопозиция' };
-      } else { setRouteStatus('Ищем начальный адрес…'); start = await geocodeAddress(startAddress.trim()); }
-      setRouteStatus('Ищем адрес назначения…');
-      const destination = await geocodeAddress(destinationAddress.trim());
+      } else if (startPin) { start = { lat: startPin.lat, lon: startPin.lon, displayName: startAddress.trim() }; }
+      else { setRouteStatus('Ищем начальный адрес…'); start = await geocodeAddress(startAddress.trim()); }
+      let destination: { lat:number; lon:number; displayName:string };
+      if (destinationPin) { destination = { lat: destinationPin.lat, lon: destinationPin.lon, displayName: destinationAddress.trim() }; }
+      else { setRouteStatus('Ищем адрес назначения…'); destination = await geocodeAddress(destinationAddress.trim()); }
       const data = await buildRouteElevation(start.lat,start.lon,destination.lat,destination.lon,destination.displayName,onProgress);
       setRouteElevation(data); setDistanceKm(data.distanceKm);
       const etaMinutes=Math.max(1,Math.round((data.distanceKm/Math.max(10,plannedSpeedKmH))*60));
@@ -711,7 +726,15 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         {startMode === 'address' && (
           <div className="relative">
             <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input value={startAddress} onChange={e => setStartAddress(e.target.value)} placeholder="Откуда? Город, улица, дом" className={`w-full rounded-xl border py-3 pl-9 pr-3 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`} />
+            <input value={startAddress} onChange={e => { setStartAddress(e.target.value); setStartPin(null); }} placeholder="Откуда? Город, улица, дом" className={`w-full rounded-xl border py-3 pl-9 pr-12 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`} />
+            <button
+              type="button"
+              onClick={() => { triggerHaptic('light', settings.hapticFeedback); setPickerFor('start'); }}
+              aria-label="Выбрать точку А на карте"
+              className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg ${startPin ? 'text-amber-500' : 'text-slate-400'} ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}
+            >
+              <Map className="w-4 h-4" />
+            </button>
           </div>
         )}
 
@@ -722,8 +745,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               onClick={() => {
                 triggerHaptic('light', settings.hapticFeedback);
                 const from = startAddress;
+                const fromPin = startPin;
                 setStartAddress(destinationAddress);
                 setDestinationAddress(from);
+                setStartPin(destinationPin);
+                setDestinationPin(fromPin);
               }}
               aria-label="Поменять местами А и Б"
               className={`p-1.5 rounded-full border transition-all active:scale-90 ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-white border-slate-300 text-slate-500 hover:text-slate-800 shadow-xs'}`}
@@ -735,8 +761,34 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
         <div className="relative">
           <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input value={destinationAddress} onChange={e => setDestinationAddress(e.target.value)} placeholder="Куда? Город, улица, дом" className={`w-full rounded-xl border py-3 pl-9 pr-3 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`} />
+          <input value={destinationAddress} onChange={e => { setDestinationAddress(e.target.value); setDestinationPin(null); }} placeholder="Куда? Город, улица, дом" className={`w-full rounded-xl border py-3 pl-9 pr-12 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`} />
+          <button
+            type="button"
+            onClick={() => { triggerHaptic('light', settings.hapticFeedback); setPickerFor('destination'); }}
+            aria-label="Выбрать точку Б на карте"
+            className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg ${destinationPin ? 'text-amber-500' : 'text-slate-400'} ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}
+          >
+            <Map className="w-4 h-4" />
+          </button>
         </div>
+
+        <LocationPickerModal
+          isOpen={pickerFor !== null}
+          isDark={isDark}
+          title={pickerFor === 'start' ? 'Точка А — откуда' : 'Точка Б — куда'}
+          initialCenter={
+            (pickerFor === 'start' ? destinationPin : startPin) // pick near the other end of the route, if set
+            ?? gpsCoords // else near the device
+            ?? undefined // else the modal's own Minsk fallback
+          }
+          hapticFeedback={settings.hapticFeedback}
+          onClose={() => setPickerFor(null)}
+          onConfirm={({ lat, lon, displayName }) => {
+            if (pickerFor === 'start') { setStartAddress(displayName); setStartPin({ lat, lon }); }
+            else if (pickerFor === 'destination') { setDestinationAddress(displayName); setDestinationPin({ lat, lon }); }
+            setPickerFor(null);
+          }}
+        />
 
         <CollapsibleDetails
           isDark={isDark}
