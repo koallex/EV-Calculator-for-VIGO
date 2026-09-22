@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Pane, useMapEvents } from 'react-leaflet';
 import { X, MapPin, Check, Loader2, LocateFixed } from 'lucide-react';
 import { Icon } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { reverseGeocode } from '../services/routeElevation';
 import { triggerHaptic } from '../utils/haptics';
+import { getBaseTileUrl, getLabelsTileUrl, MAP_TILE_ATTRIBUTION, LABELS_PANE_NAME, LABELS_PANE_Z_INDEX } from '../utils/mapTiles';
 
 // Default Leaflet marker assets don't resolve correctly under Vite's bundling; build an
 // explicit icon from the CDN-hosted images (same approach used nowhere else yet in this
@@ -125,12 +126,14 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
 
             <div className="relative flex-1 min-h-0">
               <MapContainer center={center} zoom={12} zoomControl={false} attributionControl={false} className="w-full h-full">
-                <TileLayer
-                  url={isDark ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png' : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'}
-                  attribution={isDark ? '&copy; OpenStreetMap &copy; CARTO' : '&copy; OpenStreetMap contributors'}
-                />
+                <TileLayer url={getBaseTileUrl(isDark)} attribution={MAP_TILE_ATTRIBUTION} />
                 <ClickCatcher onPick={handlePick} />
                 {point && <Marker position={[point.lat, point.lon]} icon={pinIcon} />}
+                {/* Place-name labels above the pin marker, on their own pane, so city names
+                    stay legible under/near the marker instead of being covered by it. */}
+                <Pane name={LABELS_PANE_NAME} style={{ zIndex: LABELS_PANE_Z_INDEX, pointerEvents: 'none' }}>
+                  <TileLayer url={getLabelsTileUrl(isDark)} pane={LABELS_PANE_NAME} />
+                </Pane>
               </MapContainer>
 
               <button
