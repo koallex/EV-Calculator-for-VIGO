@@ -15,6 +15,26 @@ const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 class ElevationLimitError extends Error { constructor(msg:string){ super(msg); this.name='ElevationLimitError'; } }
 
 export const geocodeAddress=async(query:string)=>{const res=await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=0&q=${encodeURIComponent(query)}`,{headers:{Accept:'application/json'}});if(!res.ok)throw new Error(`Не удалось найти адрес (${res.status})`);const d=await res.json();if(!Array.isArray(d)||!d[0])throw new Error('Адрес не найден');return{lat:Number(d[0].lat),lon:Number(d[0].lon),displayName:String(d[0].display_name||query)}};
+
+// Reverse geocoding: turn a lat/lon (e.g. from a tap on the interactive map) into a short
+// human-readable label. Falls back to raw coordinates if Nominatim has nothing nearby or
+// the request fails, so map-picked points always have *some* displayable name.
+export const reverseGeocode=async(lat:number,lon:number):Promise<string>=>{
+  try{
+    const res=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=16&addressdetails=1`,{headers:{Accept:'application/json'}});
+    if(!res.ok) throw new Error(String(res.status));
+    const d=await res.json();
+    if(d && d.address){
+      const a=d.address;
+      const line=[a.road||a.pedestrian||a.suburb,a.house_number].filter(Boolean).join(' ');
+      const city=a.city||a.town||a.village||a.municipality;
+      const label=[line,city].filter(Boolean).join(', ');
+      if(label) return label;
+    }
+    if(d && d.display_name) return String(d.display_name);
+  }catch{/* fall through to coordinate label */}
+  return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+};
 export const fetchDrivingRoute=async(aLat:number,aLon:number,bLat:number,bLon:number)=>{
   const res=await fetch(`https://router.project-osrm.org/route/v1/driving/${aLon},${aLat};${bLon},${bLat}?overview=full&geometries=geojson&steps=true`);
   if(!res.ok)throw new Error(`Не удалось построить маршрут (${res.status})`);
