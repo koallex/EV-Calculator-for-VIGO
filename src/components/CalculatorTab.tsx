@@ -221,18 +221,68 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
   // Searches stations along the current route. It is invoked automatically only when the
   // unassisted arrival SoC is below 20%, or manually from the button shown for safer routes.
-  const yandexRouteRtext = (() => {
-    if (!routeElevation?.points?.length) return '';
+  // Separate Yandex Maps vs Navigator destinations.
+  // On phones both https://yandex.ru/maps and /navi are often claimed by the Navigator app
+  // via Universal Links — so both buttons appear to "open Navigator". We use distinct
+  // app URL-schemes (yandexmaps:// vs yandexnavi://) with HTTPS fallbacks.
+  const yandexRouteLinks = (() => {
+    if (!routeElevation?.points?.length) {
+      return { rtext: '', mapsHttps: '#', mapsApp: '#', naviHttps: '#', naviApp: '#' };
+    }
     const pts = routeElevation.points;
     const a = pts[0];
     const b = pts[pts.length - 1];
+    const via =
+      chargingSuggestionStatus === 'ready' && chargingSuggestion
+        ? { lat: chargingSuggestion.station.lat, lon: chargingSuggestion.station.lon }
+        : null;
     const parts = [`${a.lat},${a.lon}`];
-    if (chargingSuggestionStatus === 'ready' && chargingSuggestion) {
-      parts.push(`${chargingSuggestion.station.lat},${chargingSuggestion.station.lon}`);
-    }
+    if (via) parts.push(`${via.lat},${via.lon}`);
     parts.push(`${b.lat},${b.lon}`);
-    return parts.join('~');
+    const rtext = parts.join('~');
+    const mapsHttpsRaw = `https://maps.yandex.ru/?mode=routes&rtext=${rtext}&rtt=auto`;
+    const mapsApp = `yandexmaps://maps.yandex.ru/?rtext=${rtext}&rtt=auto`;
+    const naviHttpsRaw = `https://yandex.ru/navi/?rtext=${rtext}&rtt=auto`;
+    let naviApp = `yandexnavi://build_route_on_map?lat_from=${a.lat}&lon_from=${a.lon}&lat_to=${b.lat}&lon_to=${b.lon}`;
+    if (via) {
+      naviApp += `&lat_via_0=${via.lat}&lon_via_0=${via.lon}`;
+    }
+    return {
+      rtext,
+      mapsHttps: mapsHttpsRaw,
+      mapsApp,
+      naviHttps: naviHttpsRaw,
+      naviApp,
+    };
   })();
+
+  const openAppWithHttpsFallback = (appUrl: string, httpsUrl: string) => {
+    let cancelled = false;
+    const cancel = () => {
+      cancelled = true;
+    };
+    // If the app opens, the page usually hides/blurs — cancel the web fallback.
+    window.addEventListener('pagehide', cancel, { once: true });
+    window.addEventListener('blur', cancel, { once: true });
+    window.location.href = appUrl;
+    window.setTimeout(() => {
+      window.removeEventListener('pagehide', cancel);
+      window.removeEventListener('blur', cancel);
+      if (!cancelled) {
+        window.location.href = httpsUrl;
+      }
+    }, 600);
+  };
+
+  const openYandexMaps = (e: React.MouseEvent) => {
+    e.preventDefault();
+    openAppWithHttpsFallback(yandexRouteLinks.mapsApp, yandexRouteLinks.mapsHttps);
+  };
+
+  const openYandexNavi = (e: React.MouseEvent) => {
+    e.preventDefault();
+    openAppWithHttpsFallback(yandexRouteLinks.naviApp, yandexRouteLinks.naviHttps);
+  };
 
   const searchChargingStations = useCallback(async () => {
 
@@ -1145,7 +1195,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   />
                   <div className={`flex gap-2 p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
                     <a
-                      href={`https://yandex.ru/maps/?rtext=${yandexRouteRtext}&rtt=auto`}
+                      href={yandexRouteLinks.mapsHttps}
+                      onClick={openYandexMaps}
                       target="_blank"
                       rel="noreferrer"
                       className={`flex-1 rounded-lg border px-3 py-2 text-center text-[11px] font-bold ${isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
@@ -1153,7 +1204,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       Яндекс Карты
                     </a>
                     <a
-                      href={`https://yandex.ru/navi/?rtext=${yandexRouteRtext}&rtt=auto`}
+                      href={yandexRouteLinks.naviHttps}
+                      onClick={openYandexNavi}
                       target="_blank"
                       rel="noreferrer"
                       className={`flex-1 rounded-lg border px-3 py-2 text-center text-[11px] font-bold ${isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
