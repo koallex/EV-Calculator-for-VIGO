@@ -19,10 +19,31 @@
 // refresh so the cache should, in steady state, never need to fall back to a blocking fetch.
 import { Redis } from '@upstash/redis';
 
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN,
-});
+// Lazy/optional Redis initialization. A missing or temporarily malformed Redis
+// configuration must never crash the entire EVRACE serverless module at import time.
+// EVRACE can still answer from the live source (or return an empty cache-miss result),
+// while the authentication subsystem keeps its own Redis configuration unchanged.
+let redis: Redis | null = null;
+let redisInitAttempted = false;
+
+const getRedis = (): Redis | null => {
+  if (redisInitAttempted) return redis;
+  redisInitAttempted = true;
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) {
+    console.warn('[evrace] Upstash Redis env vars are not configured; using non-persistent EVRACE cache');
+    return null;
+  }
+  try {
+    redis = new Redis({ url, token });
+    return redis;
+  } catch (e) {
+    console.error('[evrace] Redis initialization failed; continuing without Redis:', e);
+    redis = null;
+    return null;
+  }
+};
 
 const EVRACE_API = 'https://evrace.by/api/stations-page';
 
@@ -191,8 +212,10 @@ const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
   });
 
 const readRedisCache = async (): Promise<CachedRegistry | null> => {
+  const client = getRedis();
+  if (!client) return null;
   try {
-    const cached = await withTimeout(redis.get<CachedRegistry>(CACHE_KEY), REDIS_READ_TIMEOUT_MS);
+    const cached = await withTimeout(client.get<CachedRegistry>(CACHE_KEY), REDIS_READ_TIMEOUT_MS);
     return cached ?? null;
   } catch (e) {
     console.error('[evrace] Redis read failed:', e);
@@ -201,8 +224,10 @@ const readRedisCache = async (): Promise<CachedRegistry | null> => {
 };
 
 const writeRedisCache = async (data: CachedRegistry) => {
+  const client = getRedis();
+  if (!client) return;
   try {
-    await redis.set(CACHE_KEY, data);
+    await client.set(CACHE_KEY, data);
   } catch (e) {
     // A Redis write failure shouldn't break the response — the caller already has the data
     // in hand, we just won't have persisted it for the next invocation.
@@ -211,8 +236,10 @@ const writeRedisCache = async (data: CachedRegistry) => {
 };
 
 const tryAcquireLock = async (): Promise<boolean> => {
+  const client = getRedis();
+  if (!client) return false;
   try {
-    const ok = await redis.set(LOCK_KEY, '1', { nx: true, ex: LOCK_TTL_SECONDS });
+    const ok = await client.set(LOCK_KEY, '1', { nx: true, ex: LOCK_TTL_SECONDS });
     return ok === 'OK';
   } catch {
     return false;
@@ -220,7 +247,9 @@ const tryAcquireLock = async (): Promise<boolean> => {
 };
 
 const releaseLock = async () => {
-  try { await redis.del(LOCK_KEY); } catch { /* best-effort */ }
+  const client = getRedis();
+  if (!client) return;
+  try { await client.del(LOCK_KEY); } catch { /* best-effort */ }
 };
 
 // Fire-and-forget refresh, guarded by a Redis lock so multiple warm instances that all decide
