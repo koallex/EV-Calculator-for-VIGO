@@ -19,25 +19,10 @@
 // refresh so the cache should, in steady state, never need to fall back to a blocking fetch.
 import { Redis } from '@upstash/redis';
 
-// Keep Redis optional at module load time. A missing/temporarily absent Vercel env var
-// must never turn /api/evrace/stations into a platform-level 500 before the handler runs.
-let redisClient: Redis | null = null;
-const getRedis = (): Redis | null => {
-  if (redisClient) return redisClient;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) {
-    console.warn('[evrace] Upstash Redis env vars are missing; EVRACE cache is unavailable');
-    return null;
-  }
-  try {
-    redisClient = new Redis({ url, token });
-    return redisClient;
-  } catch (e) {
-    console.error('[evrace] Failed to initialize Upstash Redis:', e);
-    return null;
-  }
-};
+const redisConfig = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+  ? { url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN }
+  : null;
+const redis = redisConfig ? new Redis(redisConfig) : null;
 
 const EVRACE_API = 'https://evrace.by/api/stations-page';
 
@@ -206,9 +191,8 @@ const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
   });
 
 const readRedisCache = async (): Promise<CachedRegistry | null> => {
-  const redis = getRedis();
-  if (!redis) return null;
   try {
+    if (!redis) return null;
     const cached = await withTimeout(redis.get<CachedRegistry>(CACHE_KEY), REDIS_READ_TIMEOUT_MS);
     return cached ?? null;
   } catch (e) {
@@ -218,9 +202,8 @@ const readRedisCache = async (): Promise<CachedRegistry | null> => {
 };
 
 const writeRedisCache = async (data: CachedRegistry) => {
-  const redis = getRedis();
-  if (!redis) return;
   try {
+    if (!redis) return;
     await redis.set(CACHE_KEY, data);
   } catch (e) {
     // A Redis write failure shouldn't break the response — the caller already has the data
@@ -230,9 +213,8 @@ const writeRedisCache = async (data: CachedRegistry) => {
 };
 
 const tryAcquireLock = async (): Promise<boolean> => {
-  const redis = getRedis();
-  if (!redis) return false;
   try {
+    if (!redis) return false;
     const ok = await redis.set(LOCK_KEY, '1', { nx: true, ex: LOCK_TTL_SECONDS });
     return ok === 'OK';
   } catch {
@@ -241,9 +223,7 @@ const tryAcquireLock = async (): Promise<boolean> => {
 };
 
 const releaseLock = async () => {
-  const redis = getRedis();
-  if (!redis) return;
-  try { await redis.del(LOCK_KEY); } catch { /* best-effort */ }
+  try { if (redis) await redis.del(LOCK_KEY); } catch { /* best-effort */ }
 };
 
 // Fire-and-forget refresh, guarded by a Redis lock so multiple warm instances that all decide

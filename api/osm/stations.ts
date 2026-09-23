@@ -13,11 +13,11 @@ export const config = { maxDuration: 15 };
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
-  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.openstreetmap.ru/api/interpreter',
 ];
 
-const REQUEST_TIMEOUT_MS = 7500; // One bounded attempt. Endpoints are raced in parallel so
-                                 // a dead first mirror cannot consume the whole Vercel budget.
+const REQUEST_TIMEOUT_MS = 7000;
 
 const numberParam = (value: unknown): number | undefined => {
   if (Array.isArray(value)) value = value[0];
@@ -41,39 +41,33 @@ export default async function handler(req: any, res: any) {
 
   const query = `[out:json][timeout:20];(nwr["amenity"="charging_station"](${south},${west},${north},${east});nwr["man_made"="charge_point"](${south},${west},${north},${east});nwr["amenity"="fuel"]["fuel:electricity"="yes"](${south},${west},${north},${east}););out center tags;`;
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
   const attempt = async (endpoint: string) => {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'VIGO-EV-Calculator/1.01 (charging-stations; OSM Overpass proxy)',
-      },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
-    });
-    if (!response.ok) throw new Error(`Overpass ${response.status}`);
-    return response.json();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Overpass ${response.status}`);
+      return await response.json();
+    } finally {
+      clearTimeout(timer);
+    }
   };
 
   try {
-    // Race the public mirrors. The first healthy response wins; one stalled mirror
-    // therefore cannot make the Vercel function wait for another 7.5s sequentially.
-    const data = await Promise.any(OVERPASS_ENDPOINTS.map(attempt));
+    const result = await Promise.any(OVERPASS_ENDPOINTS.map(async endpoint => {
+      try { return await attempt(endpoint); }
+      catch (e) { console.error(`[osm-proxy] endpoint ${endpoint} failed:`, e); throw e; }
+    }));
     res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
-    return res.status(200).json(data);
+    return res.status(200).json(result);
   } catch (e) {
-    const reasons = e instanceof AggregateError
-      ? e.errors.map((reason: unknown) => reason instanceof Error ? reason.message : String(reason)).join('; ')
-      : (e instanceof Error ? e.message : String(e));
-    console.error('[osm-proxy] all Overpass endpoints failed:', reasons);
-    return res.status(502).json({
-      error: 'OSM/Overpass unavailable',
-      message: reasons,
-    });
-  } finally {
-    clearTimeout(timer);
+    const errors = e instanceof AggregateError ? e.errors : [e];
+    const message = errors.map(x => x instanceof Error ? x.message : String(x)).join('; ');
+    return res.status(502).json({ error: 'OSM/Overpass unavailable', message });
   }
 }
