@@ -21,10 +21,12 @@ export default async function handler(req: any, res: any) {
     const maxLon = numberParam(req.query.maxLon);
     const hasBbox = [minLat, maxLat, minLon, maxLon].every(v => v !== undefined);
 
-    const groups = await getEvraceGroups(hasBbox ? { minLat: minLat!, maxLat: maxLat!, minLon: minLon!, maxLon: maxLon! } : undefined);
+    const groups = await getEvraceGroups(hasBbox ? {
+      minLat: minLat!, maxLat: maxLat!, minLon: minLon!, maxLon: maxLon!,
+    } : undefined);
     const stats = await getEvraceStats();
 
-    res.setHeader('Cache-Control', 'public, s-maxage=21600, stale-while-revalidate=86400');
+    res.setHeader('Cache-Control', 'public, s-maxage=1800, stale-while-revalidate=86400');
     return res.status(200).json({
       source: 'evrace',
       groups,
@@ -38,6 +40,7 @@ export default async function handler(req: any, res: any) {
       },
     });
   } catch (error) {
+    console.error('[evrace-proxy] request failed:', error);
     return res.status(502).json({
       error: 'EVRACE unavailable',
       message: error instanceof Error ? error.message : String(error),
