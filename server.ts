@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
-import { getEvraceGroups, getEvraceStats, forceRefreshEvraceCache } from "./api/_lib/evrace";
+import { getEvraceGroups, getEvraceStats, forceRefreshEvraceCache } from "./api/_lib/evrace.js";
 
 async function startServer() {
   const app = express();
