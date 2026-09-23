@@ -39,13 +39,15 @@ export const RouteMap: React.FC<RouteMapProps> = ({ points, isDark, chargingStop
   useEffect(() => {
     if (positions.length < 2) return;
     setDrawCount(2);
-    const step = Math.max(1, Math.ceil(positions.length / 45));
+    // ~1.8–2.2s Tesla-style draw along the polyline
+    const frames = 70;
+    const step = Math.max(1, Math.ceil(positions.length / frames));
     let count = 2;
     const timer = window.setInterval(() => {
       count = Math.min(positions.length, count + step);
       setDrawCount(count);
       if (count >= positions.length) window.clearInterval(timer);
-    }, 22);
+    }, 28);
     return () => window.clearInterval(timer);
   }, [points]);
   const animatedPositions = positions.slice(0, drawCount);
@@ -54,14 +56,14 @@ export const RouteMap: React.FC<RouteMapProps> = ({ points, isDark, chargingStop
     <div className={`overflow-hidden rounded-2xl border ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'}`}>
       <div className="flex items-center justify-between px-3 py-2">
         <span className="text-xs font-bold">Маршрут</span>
-        <span className="text-[10px] text-slate-500">Панорамирование и масштабирование</span>
+        <span className="text-[10px] text-slate-500">А → Б · жестом масштаб</span>
       </div>
       <div className="route-map">
         <MapContainer center={start} zoom={12} scrollWheelZoom={false} zoomControl={false} attributionControl={false}>
           {/* Roads/terrain base, below the route line and markers. */}
           <TileLayer url={getBaseTileUrl(isDark)} attribution={MAP_TILE_ATTRIBUTION} />
           <FitRoute positions={positions} extra={stopPos} />
-          <Polyline positions={animatedPositions} pathOptions={{ color: '#10b981', weight: 5, opacity: 0.9 }} />
+          <Polyline positions={animatedPositions} pathOptions={{ color: '#10b981', weight: 6, opacity: 0.95 }} />
           <CircleMarker center={start} radius={7} pathOptions={{ color: '#ffffff', weight: 3, fillColor: '#10b981', fillOpacity: 1 }} />
           <CircleMarker center={end} radius={7} pathOptions={{ color: '#ffffff', weight: 3, fillColor: '#ef4444', fillOpacity: 1 }} />
           {stopPos && (

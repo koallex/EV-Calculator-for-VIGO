@@ -82,7 +82,7 @@ input[type=range]::-moz-range-thumb {
 /* Compact interactive route map */
 .route-map {
   position: relative;
-  height: 220px;
+  height: 280px;
 }
 .route-map .leaflet-container {
   height: 100%;
@@ -142,7 +142,7 @@ input[type=range]::-moz-range-thumb {
   .calculator-minimal-shell { gap: .5rem; }
   .calculator-minimal-shell > section { border-radius: 1rem; }
   .calculator-minimal-shell .text-5xl { font-size: 2.75rem; line-height: 1; }
-  .calculator-minimal-shell .route-map { height: 180px; }
+  .calculator-minimal-shell .route-map { height: 260px; }
 }
 
 /* HUD hierarchy */

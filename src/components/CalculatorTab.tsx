@@ -221,7 +221,21 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
   // Searches stations along the current route. It is invoked automatically only when the
   // unassisted arrival SoC is below 20%, or manually from the button shown for safer routes.
+  const yandexRouteRtext = (() => {
+    if (!routeElevation?.points?.length) return '';
+    const pts = routeElevation.points;
+    const a = pts[0];
+    const b = pts[pts.length - 1];
+    const parts = [`${a.lat},${a.lon}`];
+    if (chargingSuggestionStatus === 'ready' && chargingSuggestion) {
+      parts.push(`${chargingSuggestion.station.lat},${chargingSuggestion.station.lon}`);
+    }
+    parts.push(`${b.lat},${b.lon}`);
+    return parts.join('~');
+  })();
+
   const searchChargingStations = useCallback(async () => {
+
     if (!routeElevation || !routeForecast) return;
     let cancelled = false;
     setChargingSuggestionStatus('loading');
@@ -236,23 +250,30 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       const socAtDistance = (distanceKm: number) =>
         startSoc - (totalEnergyKwh * (distanceKm / Math.max(0.001, totalDistanceKm)) / batteryCap) * 100;
 
+      // Ideal stop: arrive at the charger around 25–40% SOC and take a meaningful charge
+      // toward ~80%. Tiny top-ups while the pack is still high (e.g. 74%→78% at km 52) look
+      // "fast" by session minutes but are the wrong plan for a long trip.
+      const IDEAL_ARRIVAL_SOC = 30;
+      const PREFERRED_TARGET_SOC = 80;
+
       const candidates = vigoStations
         .map((station) => ({
           station,
           socAtStation: socAtDistance(station.distanceAlongRouteKm),
         }))
         .filter(({ station, socAtStation }) => {
-          // A station is useful only if it actually requires charging. This explicitly removes
-          // the old "97% -> 97%" case where a station near A won because its session was 0 min.
           const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
           const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
           const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + ARRIVAL_RESERVE_SOC);
           const chargeNeeded = minRequiredSoc - socAtStation;
           if (socAtStation < ARRIVAL_RESERVE_SOC) return false;
           if (chargeNeeded < 2) return false;
-          // A stop in the first few kilometres is allowed only when it solves a genuinely
-          // large deficit; this prevents a zero/near-zero top-up at A from winning.
           if (station.distanceAlongRouteKm < 5 && chargeNeeded < 5) return false;
+          // Reject micro top-ups while SOC is still comfortable — better to stop later.
+          if (socAtStation >= 70 && chargeNeeded < 20) return false;
+          if (socAtStation >= 55 && chargeNeeded < 12) return false;
+          // Leave enough road after the stop to use the charge (not a stop at the finish line).
+          if (remainingKm < Math.min(25, totalDistanceKm * 0.15) && chargeNeeded < 15) return false;
           return true;
         })
         .map(({ station, socAtStation }) => {
@@ -263,16 +284,33 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
           const stationPowerAssumed = rawStationMaxPowerKw === undefined;
           const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
+          // Aim for a real session toward ~80%, not the smallest top-up that barely meets reserve.
+          const desiredTarget = Math.max(minRequiredSoc, Math.min(90, PREFERRED_TARGET_SOC));
           const targetSoc = findOptimalChargeTargetSoc(
             socAtStation,
-            minRequiredSoc,
+            desiredTarget,
             connector,
             stationMaxPowerKw,
-            { maxTargetSoc: 90, marginalRateThreshold: 0.5 },
+            { maxTargetSoc: 90, marginalRateThreshold: 0.45 },
           );
           const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
           const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
           const finishSocAfterCharge = Math.min(100, routeForecast.arrivalSoc + chargeAddedSoc);
+
+          // Lower score is better.
+          const socWindowPenalty = Math.abs(socAtStation - IDEAL_ARRIVAL_SOC) * 1.8;
+          const highSocPenalty = socAtStation > 50 ? (socAtStation - 50) * 2.5 : 0;
+          const smallChargePenalty = chargeAddedSoc < 15 ? (15 - chargeAddedSoc) * 2 : 0;
+          const detourPenalty = station.distanceFromRouteKm * 5;
+          // Mild preference for later stops when other factors are equal (use more of the pack).
+          const earlyStopPenalty = Math.max(0, 0.35 * totalDistanceKm - station.distanceAlongRouteKm) * 0.15;
+          const score =
+            session.minutes +
+            detourPenalty +
+            socWindowPenalty +
+            highSocPenalty +
+            smallChargePenalty +
+            earlyStopPenalty;
 
           return {
             station,
@@ -284,19 +322,17 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             chargeAddedSoc,
             finishSocAfterCharge,
             stationPowerAssumed,
+            score,
           };
         })
         .filter(candidate => candidate.chargeAddedSoc >= 2 && candidate.session.minutes > 0)
         .sort((a, b) => {
-          // Optimize the actual stop, not proximity to A. Charging time is the primary cost;
-          // a small off-route penalty prevents a station requiring a detour from beating an
-          // essentially equivalent on-route station.
-          const scoreA = a.session.minutes + a.station.distanceFromRouteKm * 4;
-          const scoreB = b.session.minutes + b.station.distanceFromRouteKm * 4;
-          if (Math.abs(scoreA - scoreB) >= 2) return scoreA - scoreB;
-          // Prefer a later stop when the charging session is effectively equal: the car then
-          // arrives at the station with more SOC and needs less early-route charging.
-          return b.station.distanceAlongRouteKm - a.station.distanceAlongRouteKm;
+          if (Math.abs(a.score - b.score) >= 3) return a.score - b.score;
+          // Tie-break: later stop, then larger useful charge.
+          if (Math.abs(a.station.distanceAlongRouteKm - b.station.distanceAlongRouteKm) >= 15) {
+            return b.station.distanceAlongRouteKm - a.station.distanceAlongRouteKm;
+          }
+          return b.chargeAddedSoc - a.chargeAddedSoc;
         });
 
       if (!candidates.length) {
@@ -1096,6 +1132,38 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   </div>
                 )}
 
+                    {/* Карта маршрута — сразу под результатом SOC / зарядкой */}
+                <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                  <RouteMap
+                    points={routeElevation.points}
+                    isDark={isDark}
+                    chargingStop={
+                      chargingSuggestionStatus === 'ready' && chargingSuggestion
+                        ? { lat: chargingSuggestion.station.lat, lon: chargingSuggestion.station.lon, name: chargingSuggestion.station.name, address: chargingSuggestion.station.address }
+                        : null
+                    }
+                  />
+                  <div className={`flex gap-2 p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
+                    <a
+                      href={`https://yandex.ru/maps/?rtext=${yandexRouteRtext}&rtt=auto`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={`flex-1 rounded-lg border px-3 py-2 text-center text-[11px] font-bold ${isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
+                    >
+                      Яндекс Карты
+                    </a>
+                    <a
+                      href={`https://yandex.ru/navi/?rtext=${yandexRouteRtext}&rtt=auto`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={`flex-1 rounded-lg border px-3 py-2 text-center text-[11px] font-bold ${isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
+                    >
+                      Яндекс Навигатор
+                    </a>
+                  </div>
+                </div>
+
+
                 {/* Low-reserve action banner */}
                 {statusTone === 'low' && (
                   <div className={`mt-3 rounded-xl border p-3 ${isDark ? 'bg-rose-950/40 border-rose-700/50' : 'bg-rose-50 border-rose-300'}`}>
@@ -1282,37 +1350,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 Вести в HUD
               </button>
             )}
-
-            {/* Route map is visible immediately after calculation. */}
-            <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-              <RouteMap
-                points={routeElevation.points}
-                isDark={isDark}
-                chargingStop={
-                  chargingSuggestionStatus === 'ready' && chargingSuggestion
-                    ? { lat: chargingSuggestion.station.lat, lon: chargingSuggestion.station.lon, name: chargingSuggestion.station.name, address: chargingSuggestion.station.address }
-                    : null
-                }
-              />
-              <div className={`flex gap-2 p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
-                <a
-                  href={`https://yandex.ru/maps/?rtext=${routeElevation.points[0].lat},${routeElevation.points[0].lon}~${routeElevation.points[routeElevation.points.length - 1].lat},${routeElevation.points[routeElevation.points.length - 1].lon}&rtt=auto`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={`flex-1 rounded-lg border px-3 py-2 text-center text-[11px] font-bold ${isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
-                >
-                  Яндекс Карты
-                </a>
-                <a
-                  href={`https://yandex.ru/navi/?rtext=${routeElevation.points[0].lat},${routeElevation.points[0].lon}~${routeElevation.points[routeElevation.points.length - 1].lat},${routeElevation.points[routeElevation.points.length - 1].lon}&rtt=auto`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={`flex-1 rounded-lg border px-3 py-2 text-center text-[11px] font-bold ${isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
-                >
-                  Яндекс Навигатор
-                </a>
-              </div>
-            </div>
 
             {/* All secondary route info behind one control */}
             <CollapsibleDetails
