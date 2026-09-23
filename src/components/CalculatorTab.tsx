@@ -299,7 +299,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       setNearbyFreeList(results);
       setNearbyFreeStatus('ready');
       if (!results.length) {
-        setNearbyFreeError('Сейчас нет свободных CCS в радиусе ~40 км (или нет live-данных у оператора).');
+        setNearbyFreeError('Свободных CCS рядом не найдено.');
       }
     } catch (e) {
       setNearbyFreeStatus('error');
@@ -1181,9 +1181,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               <><PlugZap className="w-4 h-4" /> Ближайшая свободная зарядка</>
             )}
           </button>
-          <p className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-            Live-статус портов EVRace (CCS для VIGO) в радиусе ~40 км от вас
-          </p>
           {nearbyFreeStatus === 'error' && (
             <p className="text-[11px] text-rose-500">{nearbyFreeError}</p>
           )}
@@ -1211,9 +1208,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       {' · '}CCS свободно {item.freeCcs}
                       {item.operator ? ` · ${item.operator}` : ''}
                     </div>
-                    <div className={`mt-1 text-[10px] font-medium ${isDark ? 'text-cyan-400/90' : 'text-cyan-700'}`}>
-                      Построить маршрут сюда
-                    </div>
                   </button>
                 </li>
               ))}
@@ -1238,10 +1232,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 statusTone === 'good'
                   ? '✓ Доедете с хорошим запасом'
                   : statusTone === 'ok'
-                  ? '⚠ Небольшой запас по прибытию'
+                  ? 'Небольшой запас'
                   : startSoc >= 99
-                  ? '⚠ Потребуется зарядка в пути'
-                  : '⚠ Недостаточно заряда — зарядка до поездки или в пути';
+                  ? 'Нужна зарядка в пути'
+                  : 'Недостаточно заряда';
               const statusColor =
                 statusTone === 'good'
                   ? isDark
@@ -1334,7 +1328,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       )}
                       {chargingSuggestionStatus === 'error' && (
                         <p className={`mt-1.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
-                          Не удалось получить список станций. Попробуйте ещё раз.
+                          Не удалось загрузить станции.
                         </p>
                       )}
                       {chargingSuggestionStatus === 'ready' && (chargingStops.length > 0 || chargingSuggestion) && (
@@ -1386,7 +1380,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             <div className={`rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-bold inline-flex items-center gap-2"><Gauge className="w-4 h-4 text-cyan-500" />А что если?</span>
-                <span className="text-[10px] text-slate-500">Без пересчёта маршрута</span>
               </div>
 
               {/* Climate on/off comparison */}
@@ -1453,7 +1446,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   })}
                 </div>
               </div>
-              <div className="mt-2 text-[10px] text-slate-500">Нажмите вариант — прогноз SOC обновится сразу, без нового запроса маршрута.</div>
             </div>
 
             {/* Send planned route to HUD for live tracking */}
@@ -1636,7 +1628,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             <button type="button" onClick={() => setWeatherMode('planning')} className={`rounded-lg py-2 text-xs font-semibold ${weatherMode === 'planning' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>Планирование</button>
           </div>
           {weatherMode === 'current' ? (
-            <div className="text-xs text-slate-500">Актуальная погода по маршруту и времени прибытия.</div>
           ) : (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">

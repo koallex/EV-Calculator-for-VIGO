@@ -236,7 +236,7 @@ const fetchEvraceStationsForRoute = async (points: RouteRefPoint[]): Promise<Cha
   const res = await fetch(`${EVRACE_API}?${params.toString()}`, {
     headers: { Accept: 'application/json' },
   });
-  if (!res.ok) throw new Error(`EVRACE proxy ${res.status}`);
+  if (!res.ok) throw new Error(`Станции недоступны (${res.status})`);
   const payload = await res.json();
   const records = extractStationRecords(payload);
   return records
@@ -395,7 +395,7 @@ const fetchOsmStationsAlongRoute = async (points: RouteRefPoint[], bufferKm: num
       const timeout = window.setTimeout(() => controller.abort(), OSM_PROXY_TIMEOUT_MS);
       try {
         const res = await fetch(`${OSM_PROXY_API}?${params.toString()}`, { headers: { Accept: 'application/json' }, signal: controller.signal });
-        if (!res.ok) throw new Error(`OSM proxy ${res.status}`);
+        if (!res.ok) throw new Error(`Станции недоступны (${res.status})`);
         const data = await res.json();
         successfulRequests++;
         for (const el of data.elements || []) {
@@ -409,7 +409,7 @@ const fetchOsmStationsAlongRoute = async (points: RouteRefPoint[], bufferKm: num
     }
   };
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  if (!successfulRequests && chunks.length) throw new Error(`Не удалось получить данные OSM: ${String(lastError)}`);
+  if (!successfulRequests && chunks.length) throw new Error('Не удалось получить станции');
   return Array.from(results.values());
 };
 
