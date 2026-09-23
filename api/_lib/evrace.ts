@@ -34,6 +34,16 @@ const REQUEST_TIMEOUT_MS = 4500;
 const PAGE_RETRIES = 1; // one retry before a page is treated as failed, instead of silently
                          // dropping ~100 stations on a single flaky request.
 
+// v1.06 fix: a live fetch used to have no overall time budget — with PAGE_RETRIES it could take
+// up to ~9s just for a single page (2 attempts x 4.5s) before even starting the rest, which on
+// Vercel Hobby's 10s hard execution limit got the function killed mid-request. That surfaces to
+// the browser as a bare 500 with no body (FUNCTION_INVOCATION_FAILED), not our own 502 handler.
+// Every live fetch is now bounded by a wall-clock deadline: individual request timeouts shrink
+// to whatever time is left, and once the deadline passes we stop and return whatever pages we
+// already have instead of risking the whole function. See loadRegistry() below for the other
+// half of the fix — the common request path no longer blocks on a live fetch at all.
+const LIVE_FETCH_DEADLINE_MS = 8000;
+
 const CACHE_KEY = 'vigo:evrace:groups';
 const LOCK_KEY = 'vigo:evrace:refresh-lock';
 const LOCK_TTL_SECONDS = 90;
@@ -50,15 +60,21 @@ let memoryCache: CachedRegistry | null = null;
 const MEMORY_TTL_MS = 5 * 60 * 1000;
 let memoryCachedAt = 0;
 
-let inflightLive: Promise<CachedRegistry> | null = null;
+let inflightBackgroundRefresh: Promise<void> | null = null;
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const fetchPage = async (offset: number): Promise<{ groups: any[]; totalGroups?: number }> => {
+const fetchPage = async (offset: number, deadline: number): Promise<{ groups: any[]; totalGroups?: number }> => {
   let lastError: unknown = null;
   for (let attempt = 0; attempt <= PAGE_RETRIES; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 300) {
+      lastError = lastError ?? new Error('EVRACE page fetch skipped: out of time budget');
+      break;
+    }
+    const timeoutMs = Math.min(REQUEST_TIMEOUT_MS, remaining);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetch(`${EVRACE_API}?limit=${PAGE_SIZE}&offset=${offset}`, {
         headers: {
@@ -98,7 +114,8 @@ const fetchPage = async (offset: number): Promise<{ groups: any[]; totalGroups?:
       return { groups, totalGroups: Number.isFinite(totalGroups) ? totalGroups : undefined };
     } catch (e) {
       lastError = e;
-      if (attempt < PAGE_RETRIES) await sleep(300);
+      const remainingAfter = deadline - Date.now();
+      if (attempt < PAGE_RETRIES && remainingAfter > 800) await sleep(Math.min(300, remainingAfter - 500));
     } finally {
       clearTimeout(timer);
     }
@@ -107,10 +124,14 @@ const fetchPage = async (offset: number): Promise<{ groups: any[]; totalGroups?:
   throw lastError;
 };
 
-// Live paginated fetch of the whole registry. Only hit directly when there is no usable cache
-// at all (first-ever run) or from the dedicated refresh endpoint/cron.
+// Live paginated fetch of the whole registry. Bounded by LIVE_FETCH_DEADLINE_MS so a single
+// invocation can never run long enough to risk the platform killing the function (see the
+// comment on LIVE_FETCH_DEADLINE_MS above). If the deadline is hit, whatever pages were already
+// fetched are kept and the rest are counted as failed — the caller (loadRegistry /
+// refreshInBackground) will simply try again on the next refresh rather than lose the request.
 const fetchAllGroupsLive = async (): Promise<CachedRegistry> => {
-  const first = await fetchPage(0);
+  const deadline = Date.now() + LIVE_FETCH_DEADLINE_MS;
+  const first = await fetchPage(0, deadline);
   const totalGroups = first.totalGroups ?? first.groups.length;
   if (!first.groups.length) throw new Error('EVRACE returned no station groups');
 
@@ -120,10 +141,15 @@ const fetchAllGroupsLive = async (): Promise<CachedRegistry> => {
   const pages: any[][] = [];
   let failedPages = 0;
   for (let i = 0; i < offsets.length; i += MAX_CONCURRENCY) {
+    if (Date.now() >= deadline) {
+      failedPages += offsets.length - i;
+      console.error(`[evrace] live fetch hit its time budget with ${offsets.length - i} page(s) still unfetched`);
+      break;
+    }
     const batch = offsets.slice(i, i + MAX_CONCURRENCY);
     const result = await Promise.all(batch.map(async offset => {
       try {
-        return (await fetchPage(offset)).groups;
+        return (await fetchPage(offset, deadline)).groups;
       } catch {
         failedPages++;
         return [];
@@ -140,7 +166,7 @@ const fetchAllGroupsLive = async (): Promise<CachedRegistry> => {
   }
 
   if (failedPages > 0) {
-    console.error(`[evrace] live fetch finished with ${failedPages} failed page(s) out of ${offsets.length + 1}`);
+    console.error(`[evrace] live fetch finished with ${failedPages} failed/skipped page(s) out of ${offsets.length + 1}`);
   }
 
   return { groups: Array.from(unique.values()), totalGroups, fetchedAt: Date.now(), failedPages };
@@ -180,9 +206,11 @@ const releaseLock = async () => {
 };
 
 // Fire-and-forget refresh, guarded by a Redis lock so multiple warm instances that all decide
-// the cache is stale at the same time don't all hammer evrace.by in parallel.
-const refreshInBackground = () => {
-  (async () => {
+// the cache is stale at the same time don't all hammer evrace.by in parallel. Also deduped
+// within this instance so several concurrent requests on the same warm Lambda share one attempt.
+const refreshInBackground = (): Promise<void> => {
+  if (inflightBackgroundRefresh) return inflightBackgroundRefresh;
+  inflightBackgroundRefresh = (async () => {
     if (!(await tryAcquireLock())) return;
     try {
       const fresh = await fetchAllGroupsLive();
@@ -194,7 +222,8 @@ const refreshInBackground = () => {
     } finally {
       await releaseLock();
     }
-  })();
+  })().finally(() => { inflightBackgroundRefresh = null; });
+  return inflightBackgroundRefresh;
 };
 
 // Used by the cron/admin refresh endpoint: always does a live fetch and persists it, regardless
@@ -219,14 +248,17 @@ const loadRegistry = async (): Promise<CachedRegistry> => {
     return cached;
   }
 
-  // Nothing cached anywhere yet (first-ever call). This is the one path that still has to wait
-  // on a live fetch; dedupe concurrent callers within this instance so they share one fetch.
-  if (!inflightLive) {
-    inflightLive = fetchAllGroupsLive()
-      .then(async fresh => { await writeRedisCache(fresh); memoryCache = fresh; memoryCachedAt = Date.now(); return fresh; })
-      .finally(() => { inflightLive = null; });
-  }
-  return inflightLive;
+  // Nothing cached anywhere yet (first request since a fresh deploy / empty Redis). Do NOT
+  // block this request on a live fetch — even the deadline-bounded version can take several
+  // seconds, and doing that inline on every request until the cache fills would repeatedly eat
+  // into the platform's execution budget for no reason once one of them succeeds. Kick off a
+  // single lock-guarded background refresh and answer immediately with an explicitly-empty,
+  // labelled-as-uncached result. In steady state this is essentially never hit, because the
+  // cache is kept warm by stale-while-revalidate refreshes plus the daily cron — it's mainly
+  // reachable right after a fresh deploy, which is exactly why EVRACE_FIX.md recommends hitting
+  // /api/cron/evrace-refresh once manually right after deploying.
+  refreshInBackground();
+  return { groups: [], totalGroups: 0, fetchedAt: 0, failedPages: 0 };
 };
 
 const groupCoordinates = (group: any): { lat: number; lon: number } | null => {

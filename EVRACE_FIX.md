@@ -67,3 +67,41 @@ issued only after a browser passes Cloudflare's JS/Turnstile challenge. A plain 
   proxy (e.g. FlareSolverr or a scraping API) that solves the challenge and supplies a fresh
   `cf_clearance` periodically, or asking EVRACE for documented API access — a plain server fetch
   cannot solve an active JS challenge on its own.
+
+# EVRACE integration fix v1.06 — bare 500 from /api/evrace/stations
+
+**Symptom:** browser console showed `EVRACE proxy 500` (a raw HTTP 500 with no JSON body) plus,
+separately, `overpass-api.de` failing with a CORS error and the second Overpass mirror timing
+out — so both station sources came back empty at once.
+
+**Root cause of the 500:** a bug introduced by the v1.05 retry logic. `fetchPage` retried once
+on failure with its own 4.5s timeout each try — for the very first page of a cold cache that's
+up to ~9.3s *before even starting the rest of the registry*, which on Vercel Hobby's 10-second
+hard execution limit gets the function killed mid-request. A killed function returns a bare
+platform 500 (`FUNCTION_INVOCATION_FAILED`) with no body — not the `502` our own `catch` block
+returns — which is exactly what showed up in the browser as `EVRACE proxy 500`.
+
+**Fix:**
+- Every live fetch (`fetchAllGroupsLive`) is now bounded by a hard wall-clock deadline
+  (`LIVE_FETCH_DEADLINE_MS`, 8s): individual page timeouts shrink to whatever time is left, and
+  once the deadline passes the function stops and returns whatever pages it already has instead
+  of risking getting killed. Comfortably under the 10s Hobby limit either way.
+- More importantly, **the common request path (`/api/evrace/stations`) no longer blocks on a
+  live fetch at all.** If nothing is cached yet (fresh deploy, empty Redis), it now answers
+  immediately with an empty, explicitly-uncached result and kicks off a lock-guarded background
+  refresh — the same pattern already used for stale-cache refreshes. Only the dedicated
+  `/api/cron/evrace-refresh` endpoint (and the daily cron) still does a live fetch inline, and
+  that one is now deadline-bounded too.
+- Net effect: a user-facing request can no longer crash the function, no matter how slow or
+  blocked evrace.by is. Worst case it just returns an empty EVRACE result (OSM fallback still
+  applies) until the cache warms up — which is why hitting `/api/cron/evrace-refresh` once
+  right after deploying still matters, otherwise the first real users hit the empty-cache path.
+
+**Separate, not-yet-fixed issue:** the OSM/Overpass fallback (`fetchOsmStationsAlongRoute` in
+`src/services/chargingStations.ts`) calls `overpass-api.de` and `overpass.kumi.systems` directly
+from the browser. `overpass-api.de` is currently failing with a CORS error (no
+`Access-Control-Allow-Origin` header on its response) and the `kumi.systems` mirror is timing
+out — this looks like temporary trouble with those public mirrors rather than something in this
+codebase, but it means the OSM fallback can't currently cover for EVRACE being cold/blocked.
+Worth adding more mirrors and/or proxying Overpass through our own backend (same CORS-avoidance
+reasoning as the EVRACE proxy) if this keeps happening.
