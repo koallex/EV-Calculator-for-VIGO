@@ -102,7 +102,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         <div className="flex items-center gap-2 mb-1">
           <div
             className={`p-1.5 rounded-lg ${
-              isDark ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-50 text-emerald-600'
+              isDark ? 'bg-cyan-500/15 text-cyan-400' : 'bg-cyan-50 text-cyan-600'
             }`}
           >
             <Settings className="w-4 h-4" />
@@ -152,8 +152,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   className={`rounded-xl border px-3 py-2.5 text-left transition-all ${
                     active
                       ? isDark
-                        ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300'
-                        : 'bg-emerald-50 border-emerald-400 text-emerald-800'
+                        ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-300'
+                        : 'bg-cyan-50 border-cyan-400 text-cyan-800'
                       : isDark
                       ? 'bg-slate-950/50 border-slate-800 text-slate-300 hover:border-slate-600'
                       : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300'
@@ -225,7 +225,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               }`}
             >
               <div className="flex items-center justify-between">
-                <label className={`text-xs font-semibold ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
+                <label className={`text-xs font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
                   🔌 {getOperatorLabel('malanka_ac', form.regionPreset)}
                 </label>
                 <span className="text-[10px] text-slate-400">AC до 22 кВт</span>
@@ -238,8 +238,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 suffix={form.currency}
                 className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
                   isDark
-                    ? 'bg-slate-900 border-slate-700 text-teal-400 focus:border-teal-400'
-                    : 'bg-white border-slate-200 text-teal-700 focus:border-teal-500'
+                    ? 'bg-slate-900 border-slate-700 text-cyan-400 focus:border-cyan-400'
+                    : 'bg-white border-slate-200 text-cyan-700 focus:border-cyan-500'
                 }`}
               />
             </div>
@@ -251,7 +251,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               }`}
             >
               <div className="flex items-center justify-between">
-                <label className={`text-xs font-semibold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                <label className={`text-xs font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
                   🔌 {getOperatorLabel('evika', form.regionPreset)}
                 </label>
                 <span className="text-[10px] text-slate-400">AC станция</span>
@@ -262,8 +262,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 suffix={form.currency}
                 className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
                   isDark
-                    ? 'bg-slate-900 border-slate-700 text-emerald-400 focus:border-emerald-400'
-                    : 'bg-white border-slate-200 text-emerald-700 focus:border-emerald-500'
+                    ? 'bg-slate-900 border-slate-700 text-cyan-400 focus:border-cyan-400'
+                    : 'bg-white border-slate-200 text-cyan-700 focus:border-cyan-500'
                 }`}
               />
             </div>
@@ -347,7 +347,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               }`}
             >
               <div className="flex items-center justify-between">
-                <label className={`text-xs font-semibold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                <label className={`text-xs font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
                   🌙 Домашняя ночная (льготная)
                 </label>
                 <span className="text-[10px] text-slate-400">22:00 - 17:00</span>
@@ -358,8 +358,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 suffix={form.currency}
                 className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
                   isDark
-                    ? 'bg-slate-900 border-slate-700 text-emerald-400 focus:border-emerald-400'
-                    : 'bg-white border-slate-200 text-emerald-700 focus:border-emerald-500'
+                    ? 'bg-slate-900 border-slate-700 text-cyan-400 focus:border-cyan-400'
+                    : 'bg-white border-slate-200 text-cyan-700 focus:border-cyan-500'
                 }`}
               />
             </div>
@@ -371,7 +371,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               }`}
             >
               <div className="flex items-center justify-between">
-                <label className={`text-xs font-semibold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                <label className={`text-xs font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
                   🏠 Домашняя стандартная / дневная
                 </label>
                 <span className="text-[10px] text-slate-400">Одноставочный тариф</span>
@@ -382,8 +382,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 suffix={form.currency}
                 className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
                   isDark
-                    ? 'bg-slate-900 border-slate-700 text-emerald-400 focus:border-emerald-400'
-                    : 'bg-white border-slate-200 text-emerald-700 focus:border-emerald-500'
+                    ? 'bg-slate-900 border-slate-700 text-cyan-400 focus:border-cyan-400'
+                    : 'bg-white border-slate-200 text-cyan-700 focus:border-cyan-500'
                 }`}
               />
             </div>
@@ -403,7 +403,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               isDark ? 'text-slate-300' : 'text-slate-700'
             }`}
           >
-            <Battery className={`w-4 h-4 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
+            <Battery className={`w-4 h-4 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
             Батарея Dongfeng Vigo
           </h3>
 
@@ -412,7 +412,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               <label className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
                 Полезная емкость батареи:
               </label>
-              <span className={`font-mono font-bold ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>
+              <span className={`font-mono font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
                 {form.batteryCapacityKwh} кВт⋅ч
               </span>
             </div>
@@ -422,8 +422,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               suffix="кВт⋅ч"
               className={`w-full border px-3 py-2 rounded-xl text-sm font-mono font-bold focus:outline-none transition-colors ${
                 isDark
-                  ? 'bg-slate-950 border-slate-700 text-white focus:border-teal-500'
-                  : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-teal-500'
+                  ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                  : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
               }`}
             />
             <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -445,7 +445,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               isDark ? 'text-slate-300' : 'text-slate-700'
             }`}
           >
-            <Fuel className={`w-4 h-4 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
+            <Fuel className={`w-4 h-4 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
             Аналог с ДВС (для расчета экономии)
           </h3>
 
@@ -460,8 +460,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 suffix="л"
                 className={`w-full border px-3 py-2 rounded-xl text-sm font-mono font-bold focus:outline-none transition-colors ${
                   isDark
-                    ? 'bg-slate-950 border-slate-700 text-white focus:border-teal-500'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-teal-500'
+                    ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
                 }`}
               />
             </div>
@@ -476,8 +476,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 suffix={form.currency}
                 className={`w-full border px-3 py-2 rounded-xl text-sm font-mono font-bold focus:outline-none transition-colors ${
                   isDark
-                    ? 'bg-slate-950 border-slate-700 text-white focus:border-teal-500'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-teal-500'
+                    ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
                 }`}
               />
             </div>
@@ -497,7 +497,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               form.theme === 'light' ? 'text-slate-700' : 'text-slate-300'
             }`}
           >
-            <Sparkles className="w-4 h-4 text-emerald-500" />
+            <Sparkles className="w-4 h-4 text-cyan-500" />
             Интерфейс и валюта
           </h3>
 
@@ -518,7 +518,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                     }}
                     className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-all ${
                       form.currency === cur
-                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-xs'
+                        ? 'bg-cyan-600 text-white border-cyan-500 shadow-xs'
                         : form.theme === 'light'
                         ? 'bg-slate-100 text-slate-700 border-slate-200 hover:border-slate-300'
                         : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
@@ -548,7 +548,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 type="checkbox"
                 checked={form.hapticFeedback}
                 onChange={(e) => setForm({ ...form, hapticFeedback: e.target.checked })}
-                className="w-5 h-5 accent-emerald-500 rounded cursor-pointer"
+                className="w-5 h-5 accent-cyan-500 rounded cursor-pointer"
               />
             </div>
           </div>
@@ -557,7 +557,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         {/* Save Button */}
         <button
           type="submit"
-          className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-sm shadow-emerald-600/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2"
+          className="w-full py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-sm shadow-sm shadow-cyan-600/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2"
         >
           <Check className="w-4 h-4" />
           <span>{savedSuccess ? 'Настройки успешно сохранены!' : 'Сохранить настройки'}</span>
@@ -579,7 +579,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             isDark ? 'text-slate-300' : 'text-slate-700'
           }`}
         >
-          <Download className="w-4 h-4 text-emerald-500" />
+          <Download className="w-4 h-4 text-cyan-500" />
           Резервное копирование и экспорт
         </h3>
 
@@ -594,7 +594,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             }`}
           >
             <span className="flex items-center gap-2">
-              <Download className="w-4 h-4 text-emerald-500" /> JSON бэкап данных
+              <Download className="w-4 h-4 text-cyan-500" /> JSON бэкап данных
             </span>
           </button>
 
@@ -608,7 +608,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             }`}
           >
             <span className="flex items-center gap-2">
-              <Download className="w-4 h-4 text-teal-500" /> Экспорт поездок в CSV
+              <Download className="w-4 h-4 text-cyan-500" /> Экспорт поездок в CSV
             </span>
           </button>
         </div>

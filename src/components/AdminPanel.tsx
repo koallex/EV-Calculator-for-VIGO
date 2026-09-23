@@ -80,7 +80,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentLogin, onClose, o
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-emerald-400" />
+              <ShieldCheck className="w-5 h-5 text-cyan-400" />
               <h2 className="text-sm font-bold text-white">Админ-панель</h2>
             </div>
             <p className="mt-1 text-xs text-slate-400">Управление доступом пользователей</p>
@@ -95,16 +95,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentLogin, onClose, o
         <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">Добавить пользователя</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="Логин" autoComplete="off"
-            className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" required />
+            className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none focus:border-cyan-500" required />
           <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Пароль (мин. 8 символов)" type="password" autoComplete="new-password"
-            className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500" required minLength={8} />
+            className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none focus:border-cyan-500" required minLength={8} />
         </div>
-        <button disabled={busy} className="h-10 px-4 rounded-xl bg-emerald-600 text-white text-xs font-bold flex items-center gap-2 disabled:opacity-60">
+        <button disabled={busy} className="h-10 px-4 rounded-xl bg-cyan-600 text-white text-xs font-bold flex items-center gap-2 disabled:opacity-60">
           <Plus className="w-4 h-4" /> Создать
         </button>
       </form>
 
-      {message && <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-300">{message}</div>}
+      {message && <div className="rounded-xl border border-cyan-900/60 bg-cyan-950/30 px-3 py-2 text-xs text-cyan-300">{message}</div>}
       {error && <div className="rounded-xl border border-rose-900/60 bg-rose-950/30 px-3 py-2 text-xs text-rose-300">{error}</div>}
 
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
@@ -115,12 +115,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentLogin, onClose, o
           </button>
         </div>
         <div className="space-y-2">
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-900/50 bg-emerald-950/20 p-3">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-cyan-900/50 bg-cyan-950/20 p-3">
             <div className="flex items-center gap-3">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <ShieldCheck className="w-4 h-4 text-cyan-400" />
               <div>
                 <div className="text-sm font-semibold text-white">{currentLogin}</div>
-                <div className="text-[10px] text-emerald-400">Администратор</div>
+                <div className="text-[10px] text-cyan-400">Администратор</div>
               </div>
             </div>
           </div>

@@ -128,7 +128,7 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
           <div className="flex items-center gap-2">
             <div
               className={`p-1.5 rounded-lg ${
-                isDark ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-50 text-emerald-600'
+                isDark ? 'bg-cyan-500/15 text-cyan-400' : 'bg-cyan-50 text-cyan-600'
               }`}
             >
               <PlusCircle className="w-4 h-4" />
@@ -156,20 +156,20 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
             className={`p-3 rounded-xl border flex items-center justify-between transition-colors ${
               isDark
                 ? 'bg-slate-950/60 border-slate-800'
-                : 'bg-emerald-50/70 border-emerald-200'
+                : 'bg-cyan-50/70 border-cyan-200'
             }`}
           >
             <div>
               <span
                 className={`text-[10px] uppercase tracking-wider font-bold ${
-                  isDark ? 'text-emerald-300' : 'text-emerald-700'
+                  isDark ? 'text-cyan-300' : 'text-cyan-700'
                 }`}
               >
                 Расчетный расход:
               </span>
               <div
                 className={`text-xl font-extrabold font-mono ${
-                  isDark ? 'text-emerald-400' : 'text-emerald-600'
+                  isDark ? 'text-cyan-400' : 'text-cyan-600'
                 }`}
               >
                 {consumptionPer100Km.toFixed(1)}{' '}
@@ -185,7 +185,7 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
               <span className={`text-xs font-bold font-mono ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
                 {totalCost.toFixed(2)} {settings.currency}
               </span>
-              <span className={`text-[10px] block font-semibold ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
+              <span className={`text-[10px] block font-semibold ${isDark ? 'text-cyan-400' : 'text-cyan-700'}`}>
                 Экономия: +{moneySaved.toFixed(2)} {settings.currency}
               </span>
             </div>
@@ -210,8 +210,8 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
                 onChange={(e) => setDate(e.target.value)}
                 className={`w-full border px-3 py-1.5 rounded-lg font-medium focus:outline-none transition-colors ${
                   isDark
-                    ? 'bg-slate-950 border-slate-700 text-white focus:border-emerald-500'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-emerald-500'
+                    ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
                 }`}
                 required
               />
@@ -225,8 +225,8 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
                 onChange={(e) => setTitle(e.target.value)}
                 className={`w-full border px-3 py-1.5 rounded-lg font-medium focus:outline-none transition-colors ${
                   isDark
-                    ? 'bg-slate-950 border-slate-700 text-white focus:border-emerald-500'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-emerald-500'
+                    ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
                 }`}
               />
             </div>
@@ -242,8 +242,8 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
                 suffix="%"
                 className={`w-full border px-2.5 py-1.5 rounded-lg font-mono font-bold text-sm focus:outline-none ${
                   isDark
-                    ? 'bg-slate-950 border-slate-700 text-teal-400 focus:border-teal-500'
-                    : 'bg-slate-50 border-slate-200 text-teal-600 focus:border-teal-500'
+                    ? 'bg-slate-950 border-slate-700 text-cyan-400 focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-cyan-600 focus:border-cyan-500'
                 }`}
               />
             </div>
@@ -255,8 +255,8 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
                 suffix="%"
                 className={`w-full border px-2.5 py-1.5 rounded-lg font-mono font-bold text-sm focus:outline-none ${
                   isDark
-                    ? 'bg-slate-950 border-slate-700 text-emerald-400 focus:border-emerald-500'
-                    : 'bg-slate-50 border-slate-200 text-emerald-600 focus:border-emerald-500'
+                    ? 'bg-slate-950 border-slate-700 text-cyan-400 focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-cyan-600 focus:border-cyan-500'
                 }`}
               />
             </div>
@@ -268,8 +268,8 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
                 suffix="км"
                 className={`w-full border px-2.5 py-1.5 rounded-lg font-mono font-bold text-sm focus:outline-none ${
                   isDark
-                    ? 'bg-slate-950 border-slate-700 text-white focus:border-emerald-500'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-emerald-500'
+                    ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
                 }`}
               />
             </div>
@@ -284,8 +284,8 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
                 onChange={(e) => setRoadType(e.target.value as RoadType)}
                 className={`w-full border px-3 py-1.5 rounded-lg font-medium focus:outline-none ${
                   isDark
-                    ? 'bg-slate-950 border-slate-700 text-slate-200 focus:border-emerald-500'
-                    : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-emerald-500'
+                    ? 'bg-slate-950 border-slate-700 text-slate-200 focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-cyan-500'
                 }`}
               >
                 <option value="city">🏙️ Городской режим</option>
@@ -301,8 +301,8 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
                 onChange={(e) => setChargingType(e.target.value as TripSession['chargingType'])}
                 className={`w-full border px-3 py-1.5 rounded-lg font-medium focus:outline-none ${
                   isDark
-                    ? 'bg-slate-950 border-slate-700 text-slate-200 focus:border-emerald-500'
-                    : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-emerald-500'
+                    ? 'bg-slate-950 border-slate-700 text-slate-200 focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-cyan-500'
                 }`}
               >
                 <option value="malanka_dc">⚡ {getOperatorLabel('malanka_dc', settings.regionPreset)} ({settings.malankaDcTariff ?? settings.fastDayTariff ?? 0.56} {settings.currency})</option>
@@ -329,7 +329,7 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
               id="climateToggle"
               checked={climateOn}
               onChange={(e) => setClimateOn(e.target.checked)}
-              className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
+              className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
             />
             <label
               htmlFor="climateToggle"
@@ -348,8 +348,8 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
               onChange={(e) => setNote(e.target.value)}
               className={`w-full border px-3 py-1.5 rounded-lg font-medium focus:outline-none ${
                 isDark
-                  ? 'bg-slate-950 border-slate-700 text-white focus:border-emerald-500'
-                  : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-emerald-500'
+                  ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                  : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
               }`}
             />
           </div>
@@ -357,7 +357,7 @@ export const AddTripModal: React.FC<AddTripModalProps> = ({
           {/* Submit */}
           <button
             type="submit"
-            className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm shadow-emerald-600/20 active:scale-[0.99] transition-all"
+            className="w-full py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-sm shadow-cyan-600/20 active:scale-[0.99] transition-all"
           >
             Сохранить поездку в журнал
           </button>

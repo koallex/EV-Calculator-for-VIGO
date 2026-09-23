@@ -103,7 +103,7 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className={`p-2 rounded-xl ${isDark ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+          <div className={`p-2 rounded-xl ${isDark ? 'bg-cyan-500/15 text-cyan-400' : 'bg-cyan-50 text-cyan-600'}`}>
             <Compass className="w-5 h-5" />
           </div>
           <div>
@@ -133,19 +133,19 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
       {/* Main Forecast Hero Panel */}
       <div className={`p-4 rounded-2xl border transition-all ${
         isDark
-          ? 'bg-gradient-to-br from-emerald-950/40 via-slate-950 to-slate-950 border-emerald-500/30 shadow-inner'
-          : 'bg-gradient-to-br from-emerald-50/80 to-teal-50/40 border-emerald-200 shadow-xs'
+          ? 'bg-gradient-to-br from-cyan-950/40 via-slate-950 to-slate-950 border-cyan-500/30 shadow-inner'
+          : 'bg-gradient-to-br from-cyan-50/80 to-teal-50/40 border-cyan-200 shadow-xs'
       }`}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <span className={`text-[11px] font-bold uppercase tracking-wider block mb-1 ${
-              isDark ? 'text-emerald-300' : 'text-emerald-800'
+              isDark ? 'text-cyan-300' : 'text-cyan-800'
             }`}>
               Прогнозируемый остаток хода:
             </span>
             <div className="flex items-baseline gap-2">
               <span className={`text-4xl sm:text-5xl font-black font-mono tracking-tight ${
-                isDark ? 'text-emerald-400' : 'text-emerald-600'
+                isDark ? 'text-cyan-400' : 'text-cyan-600'
               }`}>
                 {Math.round(calculatedRangeKm)}
               </span>
@@ -154,14 +154,14 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
               </span>
             </div>
             <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-              при расходе <span className="font-semibold text-emerald-500">{effectiveConsumption.toFixed(1)} кВт⋅ч/100км</span>
+              при расходе <span className="font-semibold text-cyan-500">{effectiveConsumption.toFixed(1)} кВт⋅ч/100км</span>
             </p>
           </div>
 
           {/* Quick info boxes on right */}
           <div className="grid grid-cols-2 sm:flex sm:flex-col gap-2 min-w-[170px]">
             <div className={`p-2.5 rounded-xl border ${
-              isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-emerald-200/80 shadow-xs'
+              isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-cyan-200/80 shadow-xs'
             }`}>
               <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-slate-400">
                 <Zap className="w-3.5 h-3.5 text-amber-400" />
@@ -173,13 +173,13 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
             </div>
 
             <div className={`p-2.5 rounded-xl border ${
-              isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-emerald-200/80 shadow-xs'
+              isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-cyan-200/80 shadow-xs'
             }`}>
               <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-slate-400">
-                <ShieldCheck className="w-3.5 h-3.5 text-teal-400" />
+                <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
                 <span>До буфера 10%:</span>
               </div>
-              <div className={`text-base font-extrabold font-mono mt-0.5 ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
+              <div className={`text-base font-extrabold font-mono mt-0.5 ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
                 {Math.round(safeRangeKm)} <span className="text-xs font-normal">км</span>
               </div>
             </div>
@@ -193,7 +193,7 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
           <span className={`font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
             Остаток заряда батареи (SoC):
           </span>
-          <span className={`font-mono font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+          <span className={`font-mono font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
             {Math.round(activeSoc)}% ({remainingEnergyKwh.toFixed(1)} кВт⋅ч)
           </span>
         </div>
@@ -208,7 +208,7 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
             setCustomSoc(Number(e.target.value));
             triggerHaptic('light', settings.hapticFeedback);
           }}
-          className="w-full accent-emerald-500 h-2 bg-slate-800 rounded-lg cursor-pointer"
+          className="w-full accent-cyan-500 h-2 bg-slate-800 rounded-lg cursor-pointer"
         />
 
         {/* SoC Quick Buttons */}
@@ -223,8 +223,8 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
               className={`px-2 py-1 rounded-lg text-xs font-mono font-semibold border shrink-0 active:scale-95 transition-all ${
                 activeSoc === soc
                   ? isDark
-                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-bold'
-                    : 'bg-emerald-600 text-white border-emerald-700 font-bold shadow-xs'
+                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 font-bold'
+                    : 'bg-cyan-600 text-white border-cyan-700 font-bold shadow-xs'
                   : isDark
                   ? 'bg-slate-950 hover:bg-slate-800 text-slate-300 border-slate-800'
                   : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
@@ -249,8 +249,8 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
               className={`p-3 rounded-2xl border flex items-center justify-between transition-all ${
                 sc.isCurrent
                   ? isDark
-                    ? 'bg-emerald-950/40 border-emerald-500/50 shadow-sm'
-                    : 'bg-emerald-50/70 border-emerald-300 shadow-xs'
+                    ? 'bg-cyan-950/40 border-cyan-500/50 shadow-sm'
+                    : 'bg-cyan-50/70 border-cyan-300 shadow-xs'
                   : isDark
                   ? 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700'
                   : 'bg-slate-50 border-slate-200 hover:bg-slate-100/80'
@@ -262,14 +262,14 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
                   <div className="flex items-center gap-1.5">
                     <span className={`text-xs font-bold truncate ${
                       sc.isCurrent
-                        ? isDark ? 'text-emerald-300' : 'text-emerald-800'
+                        ? isDark ? 'text-cyan-300' : 'text-cyan-800'
                         : isDark ? 'text-white' : 'text-slate-900'
                     }`}>
                       {sc.title}
                     </span>
                     {sc.isCurrent && (
                       <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
-                        isDark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-800'
+                        isDark ? 'bg-cyan-500/20 text-cyan-300' : 'bg-cyan-100 text-cyan-800'
                       }`}>
                         Текущий
                       </span>
@@ -284,14 +284,14 @@ export const RangeForecastCard: React.FC<RangeForecastCardProps> = ({
               <div className="text-right shrink-0 pl-2">
                 <div className={`text-lg font-black font-mono ${
                   sc.isCurrent
-                    ? isDark ? 'text-emerald-400' : 'text-emerald-600'
+                    ? isDark ? 'text-cyan-400' : 'text-cyan-600'
                     : isDark ? 'text-slate-200' : 'text-slate-800'
                 }`}>
                   ~{Math.round(sc.range)} <span className="text-xs font-normal">км</span>
                 </div>
                 <span className={`text-[10px] ${
                   sc.range >= calculatedRangeKm
-                    ? isDark ? 'text-emerald-400' : 'text-emerald-600'
+                    ? isDark ? 'text-cyan-400' : 'text-cyan-600'
                     : isDark ? 'text-rose-400' : 'text-rose-600'
                 }`}>
                   {sc.range >= calculatedRangeKm ? '+' : ''}

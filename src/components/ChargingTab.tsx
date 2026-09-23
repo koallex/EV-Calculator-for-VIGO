@@ -85,7 +85,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
           <div className="flex items-center gap-2 min-w-0">
             <div
               className={`p-2 rounded-xl shrink-0 ${
-                isDark ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-50 text-emerald-600'
+                isDark ? 'bg-cyan-500/15 text-cyan-400' : 'bg-cyan-50 text-cyan-600'
               }`}
             >
               <BatteryCharging className="w-5 h-5" />
@@ -113,7 +113,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
               }}
               className={`px-2.5 sm:px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                 calcMode === 'soc'
-                  ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                  ? 'bg-cyan-600 text-white shadow-xs font-bold'
                   : isDark
                   ? 'text-slate-400 hover:text-white'
                   : 'text-slate-600 hover:text-slate-900'
@@ -129,7 +129,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
               }}
               className={`px-2.5 sm:px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
                 calcMode === 'kwh'
-                  ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                  ? 'bg-cyan-600 text-white shadow-xs font-bold'
                   : isDark
                   ? 'text-slate-400 hover:text-white'
                   : 'text-slate-600 hover:text-slate-900'
@@ -152,18 +152,18 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 isDark ? 'text-slate-400' : 'text-slate-500'
               }`}
             >
-              <Zap className={`w-3.5 h-3.5 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
+              <Zap className={`w-3.5 h-3.5 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
               Энергия
             </span>
             <div className="mt-2">
-              <div className={`text-2xl sm:text-3xl font-extrabold font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+              <div className={`text-2xl sm:text-3xl font-extrabold font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
                 {grossEnergyKwh.toFixed(1)}
               </div>
               <span className={`text-[11px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 кВт⋅ч со счетчика ЭЗС
               </span>
               {lossPercent > 0 && (
-                <span className={`text-[10px] block mt-0.5 ${isDark ? 'text-emerald-400/80' : 'text-emerald-700'}`}>
+                <span className={`text-[10px] block mt-0.5 ${isDark ? 'text-cyan-400/80' : 'text-cyan-700'}`}>
                   (в батарею: {netEnergyKwh.toFixed(1)} + {lossKwh.toFixed(1)} потери)
                 </span>
               )}
@@ -203,15 +203,15 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
         <div
           className={`p-3 rounded-xl border flex items-center justify-between transition-colors ${
             isDark
-              ? 'bg-teal-950/25 border-teal-800/40 text-teal-300'
-              : 'bg-teal-50 border-teal-200 text-teal-900'
+              ? 'bg-cyan-950/25 border-cyan-800/40 text-cyan-300'
+              : 'bg-cyan-50 border-cyan-200 text-cyan-900'
           }`}
         >
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-teal-500 shrink-0" />
+            <Sparkles className="w-4 h-4 text-cyan-500 shrink-0" />
             <div>
               <div className="text-xs font-bold">Прибавит к запасу хода:</div>
-              <div className={`text-[10px] ${isDark ? 'text-teal-400/80' : 'text-teal-700'}`}>
+              <div className={`text-[10px] ${isDark ? 'text-cyan-400/80' : 'text-cyan-700'}`}>
                 при среднем расходе ~15.0 кВт⋅ч/100км
               </div>
             </div>
@@ -243,7 +243,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
               <span className={`font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                 Текущий процент (Старт):
               </span>
-              <span className={`font-bold font-mono ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>
+              <span className={`font-bold font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
                 {Math.round(currentSoc)}% ({((currentSoc / 100) * batteryCap).toFixed(1)} кВт⋅ч)
               </span>
             </div>
@@ -257,7 +257,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 setCurrentSoc(Number(e.target.value));
                 triggerHaptic('light', settings.hapticFeedback);
               }}
-              className="w-full accent-emerald-500 h-2 bg-slate-800 rounded-lg cursor-pointer"
+              className="w-full accent-cyan-500 h-2 bg-slate-800 rounded-lg cursor-pointer"
             />
 
             <div className="flex items-center justify-between gap-1.5 pt-1">
@@ -283,7 +283,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 }}
                 className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${
                   currentSoc === 10
-                    ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
+                    ? 'bg-cyan-600 text-white border-cyan-600 font-bold'
                     : isDark
                     ? 'bg-slate-900 text-slate-400 border-slate-800'
                     : 'bg-white text-slate-600 border-slate-200'
@@ -299,7 +299,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 }}
                 className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${
                   currentSoc === 20
-                    ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
+                    ? 'bg-cyan-600 text-white border-cyan-600 font-bold'
                     : isDark
                     ? 'bg-slate-900 text-slate-400 border-slate-800'
                     : 'bg-white text-slate-600 border-slate-200'
@@ -335,14 +335,14 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 Целевой заряд (Финиш):
               </span>
               <div className="flex items-center gap-1.5">
-                <span className={`font-bold font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                <span className={`font-bold font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
                   {Math.round(targetSoc)}% ({((targetSoc / 100) * batteryCap).toFixed(1)} кВт⋅ч)
                 </span>
                 {targetSoc === 80 && (
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-semibold ${
                     isDark
-                      ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
-                      : 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                      ? 'bg-cyan-950 text-cyan-300 border-cyan-800'
+                      : 'bg-cyan-50 text-cyan-700 border-cyan-300'
                   }`}>
                     80% Оптимум
                   </span>
@@ -359,7 +359,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 setTargetSoc(Number(e.target.value));
                 triggerHaptic('light', settings.hapticFeedback);
               }}
-              className="w-full accent-emerald-500 h-2 bg-slate-800 rounded-lg cursor-pointer"
+              className="w-full accent-cyan-500 h-2 bg-slate-800 rounded-lg cursor-pointer"
             />
 
             <div className="flex items-center justify-between gap-1.5 pt-1">
@@ -385,7 +385,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 }}
                 className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${
                   targetSoc === 80
-                    ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
+                    ? 'bg-cyan-600 text-white border-cyan-600 font-bold'
                     : isDark
                     ? 'bg-slate-900 text-slate-400 border-slate-800'
                     : 'bg-white text-slate-600 border-slate-200'
@@ -401,7 +401,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 }}
                 className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${
                   targetSoc === 100
-                    ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
+                    ? 'bg-cyan-600 text-white border-cyan-600 font-bold'
                     : isDark
                     ? 'bg-slate-900 text-slate-400 border-slate-800'
                     : 'bg-white text-slate-600 border-slate-200'
@@ -446,8 +446,8 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 suffix="кВт⋅ч"
                 className={`w-full text-right px-2 py-1 rounded-lg text-base font-bold font-mono focus:outline-none border ${
                   isDark
-                    ? 'bg-slate-950 border-slate-700 text-emerald-400'
-                    : 'bg-slate-50 border-slate-200 text-emerald-600'
+                    ? 'bg-slate-950 border-slate-700 text-cyan-400'
+                    : 'bg-slate-50 border-slate-200 text-cyan-600'
                 }`}
               />
             </div>
@@ -463,7 +463,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
               setManualKwh(parseFloat(e.target.value) || 1);
               triggerHaptic('light', settings.hapticFeedback);
             }}
-            className="w-full accent-emerald-500 h-2 bg-slate-800 rounded-lg cursor-pointer"
+            className="w-full accent-cyan-500 h-2 bg-slate-800 rounded-lg cursor-pointer"
           />
 
           <div className="grid grid-cols-5 gap-1.5 pt-1">
@@ -477,7 +477,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 }}
                 className={`py-1.5 rounded-lg text-xs font-semibold border transition-all ${
                   manualKwh === val
-                    ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
+                    ? 'bg-cyan-600 text-white border-cyan-600 font-bold'
                     : isDark
                     ? 'bg-slate-900 text-slate-400 border-slate-800'
                     : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
@@ -604,15 +604,15 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
             className={`p-2.5 rounded-xl border text-left transition-all ${
               selectedTariff === 'evika'
                 ? isDark
-                  ? 'bg-teal-950/60 border-teal-500/80 text-white shadow-xs'
-                  : 'bg-teal-50 border-teal-400 text-teal-900 shadow-xs font-semibold'
+                  ? 'bg-cyan-950/60 border-cyan-500/80 text-white shadow-xs'
+                  : 'bg-cyan-50 border-cyan-400 text-cyan-900 shadow-xs font-semibold'
                 : isDark
                 ? 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                 : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
             }`}
           >
             <span className="text-xs font-semibold block">🔌 {getOperatorLabel('evika', settings.regionPreset)}</span>
-            <span className={`text-sm font-bold font-mono ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>
+            <span className={`text-sm font-bold font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
               {settings.evikaTariff ?? settings.slowPublicTariff} {settings.currency}
             </span>
           </button>
@@ -696,15 +696,15 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
             className={`p-2.5 rounded-xl border text-left transition-all ${
               selectedTariff === 'home_night'
                 ? isDark
-                  ? 'bg-emerald-950/60 border-emerald-500/80 text-white shadow-xs'
-                  : 'bg-emerald-50 border-emerald-400 text-emerald-900 shadow-xs font-semibold'
+                  ? 'bg-cyan-950/60 border-cyan-500/80 text-white shadow-xs'
+                  : 'bg-cyan-50 border-cyan-400 text-cyan-900 shadow-xs font-semibold'
                 : isDark
                 ? 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                 : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
             }`}
           >
             <span className="text-xs font-semibold block">🌙 Дом Ночь</span>
-            <span className={`text-sm font-bold font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+            <span className={`text-sm font-bold font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
               {settings.homeNightTariff ?? 0.16} {settings.currency}
             </span>
           </button>
@@ -719,15 +719,15 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
             className={`p-2.5 rounded-xl border text-left transition-all ${
               selectedTariff === 'home'
                 ? isDark
-                  ? 'bg-emerald-950/60 border-emerald-500/80 text-white shadow-xs'
-                  : 'bg-emerald-50 border-emerald-400 text-emerald-900 shadow-xs font-semibold'
+                  ? 'bg-cyan-950/60 border-cyan-500/80 text-white shadow-xs'
+                  : 'bg-cyan-50 border-cyan-400 text-cyan-900 shadow-xs font-semibold'
                 : isDark
                 ? 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                 : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
             }`}
           >
             <span className="text-xs font-semibold block">🏠 Дом День</span>
-            <span className={`text-sm font-bold font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+            <span className={`text-sm font-bold font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
               {settings.homeTariff} {settings.currency}
             </span>
           </button>

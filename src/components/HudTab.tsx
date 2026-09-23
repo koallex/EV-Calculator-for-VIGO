@@ -874,8 +874,8 @@ export const HudTab: React.FC<HudTabProps> = ({
         label: 'Попутный',
         arrowRotation: dynamicRelativeWindArrowDeg,
         type: 'tailwind',
-        color: 'text-emerald-500',
-        badgeBg: isDark ? 'bg-emerald-950/70 border-emerald-800/80 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-700',
+        color: 'text-cyan-500',
+        badgeBg: isDark ? 'bg-cyan-950/70 border-cyan-800/80 text-cyan-300' : 'bg-cyan-50 border-cyan-200 text-cyan-700',
       };
     } else if (norm > 35 && norm < 145) {
       return {
@@ -1021,8 +1021,8 @@ export const HudTab: React.FC<HudTabProps> = ({
         subLabel: `Плавный темп (${diffPct > 0 ? `+${diffPct}` : diffPct}%)`,
         details: `Плавный разгон, минимум рывков`,
         diffPct,
-        color: 'text-emerald-500',
-        badgeBg: isDark ? 'bg-emerald-950/70 border-emerald-800 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800',
+        color: 'text-cyan-500',
+        badgeBg: isDark ? 'bg-cyan-950/70 border-cyan-800 text-cyan-300' : 'bg-cyan-50 border-cyan-200 text-cyan-800',
       };
     } else if (clamped <= 1.05) {
       return {
@@ -1681,7 +1681,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       <div className={`flex items-center justify-between gap-2 border-b pb-1.5 shrink-0 ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
         <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
           <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] border shrink-0 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
-            <span className={`w-2 h-2 rounded-full ${gpsAccuracy !== null && gpsAccuracy <= 15 ? 'bg-emerald-400 animate-pulse' : gpsAccuracy !== null ? 'bg-amber-400' : 'bg-rose-500'}`} />
+            <span className={`w-2 h-2 rounded-full ${gpsAccuracy !== null && gpsAccuracy <= 15 ? 'bg-cyan-400 animate-pulse' : gpsAccuracy !== null ? 'bg-amber-400' : 'bg-rose-500'}`} />
             <span className={`font-mono font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
               {gpsAccuracy !== null ? `±${gpsAccuracy}м` : 'GPS…'}
             </span>
@@ -1700,7 +1700,7 @@ export const HudTab: React.FC<HudTabProps> = ({
             <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>м/с</span>
           </div>
           {isTracking && (
-            <span className="text-[11px] font-bold text-emerald-400 shrink-0">● LIVE</span>
+            <span className="text-[11px] font-bold text-cyan-400 shrink-0">● LIVE</span>
           )}
         </div>
         <button
@@ -1712,7 +1712,7 @@ export const HudTab: React.FC<HudTabProps> = ({
           title="Зеркальный режим"
           className={`p-2 rounded-xl border shrink-0 ${
             isMirrored
-              ? 'bg-emerald-600 text-white border-emerald-500'
+              ? 'bg-cyan-600 text-white border-cyan-500'
               : isDark
               ? 'bg-slate-800 text-slate-300 border-slate-700'
               : 'bg-slate-100 text-slate-700 border-slate-300'
@@ -1761,8 +1761,8 @@ export const HudTab: React.FC<HudTabProps> = ({
                   : (isTracking ? liveDynamicSoc : startTripSoc) < 40
                   ? 'text-amber-500'
                   : isDark
-                  ? 'text-emerald-400'
-                  : 'text-emerald-600'
+                  ? 'text-cyan-400'
+                  : 'text-cyan-600'
               }`}
             >
               {Math.round(isTracking ? liveDynamicSoc : startTripSoc)}%
@@ -1793,7 +1793,7 @@ export const HudTab: React.FC<HudTabProps> = ({
             <div className={`w-28 h-2.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-950' : 'bg-slate-200'}`}>
               <div
                 className={`h-full transition-all duration-300 ${
-                  liveDynamicSoc < 20 ? 'bg-rose-500' : liveDynamicSoc < 40 ? 'bg-amber-500' : 'bg-emerald-500'
+                  liveDynamicSoc < 20 ? 'bg-rose-500' : liveDynamicSoc < 40 ? 'bg-amber-500' : 'bg-cyan-500'
                 }`}
                 style={{ width: `${Math.min(100, Math.max(0, liveDynamicSoc))}%` }}
               />
@@ -1808,7 +1808,7 @@ export const HudTab: React.FC<HudTabProps> = ({
             step={1}
             value={startTripSoc}
             onChange={(e) => setStartTripSoc(Number(e.target.value))}
-            className="w-full h-2 mt-2 accent-emerald-500 cursor-pointer touch-pan-x"
+            className="w-full h-2 mt-2 accent-cyan-500 cursor-pointer touch-pan-x"
             aria-label="SOC на старте поездки"
           />
         )}
@@ -1817,12 +1817,12 @@ export const HudTab: React.FC<HudTabProps> = ({
       {/* 4. Destination + result details */}
       <div
         className={`rounded-2xl border px-3.5 py-2.5 shrink-0 ${
-          isDark ? 'bg-slate-900/95 border-emerald-900/50' : 'bg-emerald-50/60 border-emerald-200'
+          isDark ? 'bg-slate-900/95 border-cyan-900/50' : 'bg-cyan-50/60 border-cyan-200'
         }`}
       >
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <Flag className={`w-5 h-5 shrink-0 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
+            <Flag className={`w-5 h-5 shrink-0 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
             <div className="min-w-0">
               <span className={`block text-[11px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                 SOC на финише
@@ -1841,8 +1841,8 @@ export const HudTab: React.FC<HudTabProps> = ({
                     : livePredictedSoc < 20
                     ? 'text-amber-500'
                     : isDark
-                    ? 'text-emerald-400'
-                    : 'text-emerald-600'
+                    ? 'text-cyan-400'
+                    : 'text-cyan-600'
                 }`}
               >
                 {Math.round(livePredictedSoc)}%
@@ -1901,7 +1901,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                 type="button"
                 onClick={handleStartWithLiveForecast}
                 disabled={destinationBusy}
-                className="px-3.5 py-2.5 rounded-xl bg-emerald-600 active:bg-emerald-500 text-white text-[12px] font-black disabled:opacity-60"
+                className="px-3.5 py-2.5 rounded-xl bg-cyan-600 active:bg-cyan-500 text-white text-[12px] font-black disabled:opacity-60"
               >
                 СТАРТ
               </button>
@@ -1912,7 +1912,7 @@ export const HudTab: React.FC<HudTabProps> = ({
               onClick={() => void handleCalculateDestination()}
               disabled={destinationBusy || !destinationQuery.trim()}
               className={`px-3.5 py-2.5 rounded-xl border text-[12px] font-bold shrink-0 disabled:opacity-50 ${
-                isDark ? 'bg-slate-950 border-emerald-800 text-emerald-300' : 'bg-white border-emerald-300 text-emerald-700'
+                isDark ? 'bg-slate-950 border-cyan-800 text-cyan-300' : 'bg-white border-cyan-300 text-cyan-700'
               }`}
             >
               {destinationBusy ? '…' : 'Обновить'}
@@ -1962,7 +1962,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                 </span>
               )}
               {destinationResult.regenEnergyKwh != null && destinationResult.regenEnergyKwh > 0 && (
-                <span className={`font-mono tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                <span className={`font-mono tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
                   рекуп. {destinationResult.regenEnergyKwh.toFixed(2)} кВт⋅ч
                 </span>
               )}
@@ -2116,7 +2116,7 @@ export const HudTab: React.FC<HudTabProps> = ({
         </div>
         <div className="py-1.5 text-center">
           <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Средняя</span>
-          <b className={`font-mono text-base tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+          <b className={`font-mono text-base tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
             {avgTripSpeedKmH}
             <small className="text-[10px]"> км/ч</small>
           </b>
@@ -2134,7 +2134,7 @@ export const HudTab: React.FC<HudTabProps> = ({
             }`}>
               <div className="flex items-center gap-2">
                 <div className={`p-2 rounded-xl ${
-                  isDark ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-100 text-emerald-700'
+                  isDark ? 'bg-cyan-500/20 text-cyan-400' : 'bg-cyan-100 text-cyan-700'
                 }`}>
                   <Check className="w-5 h-5" />
                 </div>
@@ -2180,7 +2180,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                   Средняя скорость
                 </span>
                 <span className={`text-xl font-bold font-mono ${
-                  isDark ? 'text-emerald-400' : 'text-emerald-600'
+                  isDark ? 'text-cyan-400' : 'text-cyan-600'
                 }`}>
                   {completedTripSummary.avgSpeedKmH} км/ч
                 </span>
@@ -2244,7 +2244,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                   (completedTripSummary.styleFactor ?? 1) > 1.05
                     ? 'text-rose-400'
                     : (completedTripSummary.styleFactor ?? 1) < 0.95
-                    ? 'text-emerald-400'
+                    ? 'text-cyan-400'
                     : isDark ? 'text-white' : 'text-slate-900'
                 }`}>
                   x{(completedTripSummary.styleFactor ?? 1).toFixed(2)} ({completedTripSummary.styleLabel || 'Сбалансированный'})
@@ -2268,7 +2268,7 @@ export const HudTab: React.FC<HudTabProps> = ({
             <div className="flex gap-2 pt-2">
               <button
                 onClick={handleSaveTrackedTrip}
-                className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/30 active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                className="flex-1 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md shadow-cyan-600/30 active:scale-95 transition-all flex items-center justify-center gap-1.5"
               >
                 <PlusCircle className="w-4 h-4" />
                 <span>Записать в журнал</span>

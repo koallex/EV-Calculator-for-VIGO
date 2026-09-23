@@ -55,7 +55,7 @@ export const Navigation: React.FC<NavigationProps> = ({
               }}
               className={`relative flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-all select-none active:scale-95 ${
                 isActive
-                  ? isDark ? 'text-emerald-400 font-bold' : 'text-emerald-600 font-bold'
+                  ? isDark ? 'text-cyan-400 font-bold' : 'text-cyan-600 font-bold'
                   : isDark ? 'text-slate-400 hover:text-slate-200 font-medium' : 'text-slate-500 hover:text-slate-800 font-medium'
               }`}
             >
@@ -66,8 +66,8 @@ export const Navigation: React.FC<NavigationProps> = ({
                   transition={{ type: 'spring', stiffness: 450, damping: 35 }}
                   className={`absolute -top-1.5 w-8 h-1 rounded-full ${
                     isDark 
-                      ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' 
-                      : 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]'
+                      ? 'bg-cyan-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' 
+                      : 'bg-cyan-500 shadow-[0_0_6px_rgba(34,211,238,0.5)]'
                   }`}
                 />
               )}
@@ -79,7 +79,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                 )}
                 {tab.id === 'history' && historyCount > 0 && (
                   <span className={`absolute -top-1 -right-2.5 px-1 min-w-[14px] h-3.5 rounded-full font-bold text-[9px] flex items-center justify-center ${
-                    isDark ? 'bg-emerald-500 text-slate-950' : 'bg-emerald-600 text-white'
+                    isDark ? 'bg-cyan-500 text-slate-950' : 'bg-cyan-600 text-white'
                   }`}>
                     {historyCount}
                   </span>

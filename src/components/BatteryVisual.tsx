@@ -23,18 +23,18 @@ export const BatteryVisual: React.FC<BatteryVisualProps> = ({
 
   // Color gradient according to battery percentage
   const getBatteryColor = (pct: number) => {
-    if (pct > 50) return 'from-emerald-500 to-teal-500 text-emerald-400';
+    if (pct > 50) return 'from-cyan-500 to-teal-500 text-cyan-400';
     if (pct > 25) return 'from-amber-500 to-yellow-400 text-amber-400';
     return 'from-rose-500 to-red-600 text-rose-400';
   };
 
   const getBorderGlow = (pct: number) => {
     if (isDark) {
-      if (pct > 50) return 'border-emerald-500/40 shadow-emerald-500/10';
+      if (pct > 50) return 'border-cyan-500/40 shadow-cyan-500/10';
       if (pct > 25) return 'border-amber-500/40 shadow-amber-500/10';
       return 'border-rose-500/40 shadow-rose-500/20';
     }
-    if (pct > 50) return 'border-emerald-300 shadow-sm';
+    if (pct > 50) return 'border-cyan-300 shadow-sm';
     if (pct > 25) return 'border-amber-300 shadow-sm';
     return 'border-rose-300 shadow-sm';
   };
@@ -81,7 +81,7 @@ export const BatteryVisual: React.FC<BatteryVisualProps> = ({
             <span
               className={`w-2 h-2 rounded-full shadow-sm ${
                 clampedCurrent > 50
-                  ? 'bg-emerald-400'
+                  ? 'bg-cyan-400'
                   : clampedCurrent > 25
                     ? 'bg-amber-400'
                     : 'bg-rose-400'

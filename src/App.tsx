@@ -104,7 +104,7 @@ export default function App() {
         particleCount: 40,
         spread: 60,
         origin: { y: 0.85 },
-        colors: ['#06b6d4', '#10b981', '#f59e0b'],
+        colors: ['#06b6d4', '#22d3ee', '#f59e0b'],
       });
     } catch {
       // Ignore
@@ -174,7 +174,7 @@ export default function App() {
   };
 
   if (authChecking) {
-    return <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center text-xs text-slate-400">Проверка авторизации…</div>;
+    return <div className="min-h-screen bg-[#0b1220] text-slate-100 flex items-center justify-center text-xs text-slate-400">Проверка авторизации…</div>;
   }
 
   if (!authUser) {
@@ -184,8 +184,8 @@ export default function App() {
   return (
     <div className={`min-h-screen transition-colors duration-200 flex flex-col font-sans ${
       settings.theme === 'light' 
-        ? 'bg-slate-50 text-slate-900 selection:bg-emerald-500 selection:text-white' 
-        : 'bg-slate-950 text-slate-100 selection:bg-emerald-500 selection:text-slate-950'
+        ? 'bg-[#f0f6fb] text-slate-900 selection:bg-cyan-400 selection:text-slate-950' 
+        : 'bg-[#0b1220] text-slate-100 selection:bg-cyan-500 selection:text-slate-950'
     }`}>
       {/* Top Header */}
       <Header

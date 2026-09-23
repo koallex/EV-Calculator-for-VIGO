@@ -19,8 +19,8 @@ html.light {
 }
 
 html.light body {
-  background-color: #f8fafc;
-  color: #0f172a;
+  background-color: #f0f6fb;
+  color: #0b1220;
 }
 
 html.dark {
@@ -28,8 +28,8 @@ html.dark {
 }
 
 html.dark body {
-  background-color: #020617;
-  color: #f8fafc;
+  background-color: #0b1220;
+  color: #e8eef7;
 }
 
 .pb-safe {
@@ -62,9 +62,9 @@ input[type=range]::-webkit-slider-thumb {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #10b981;
+  background: #22d3ee;
   cursor: pointer;
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.4);
   border: 2px solid #ffffff;
 }
 
@@ -72,9 +72,9 @@ input[type=range]::-moz-range-thumb {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #10b981;
+  background: #22d3ee;
   cursor: pointer;
-  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.4);
   border: 2px solid #ffffff;
 }
 
@@ -107,7 +107,7 @@ input[type=range]::-moz-range-thumb {
 }
 .route-map-legend span { display: inline-flex; align-items: center; gap: 4px; }
 .route-dot { width: 7px; height: 7px; border-radius: 9999px; display: inline-block; }
-.route-dot-start { background: #10b981; }
+.route-dot-start { background: #22d3ee; }
 .route-dot-end { background: #ef4444; }
 .route-map-charge-pin {
   width: 28px; height: 28px; border-radius: 9999px;

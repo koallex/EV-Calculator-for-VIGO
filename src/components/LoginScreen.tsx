@@ -53,7 +53,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
 
       <form onSubmit={submit} className="relative w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900/90 backdrop-blur-sm p-6 shadow-2xl">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-cyan-500 to-teal-600 flex items-center justify-center text-white">
             <Zap className="w-5 h-5 fill-current" />
           </div>
           <div>
@@ -69,7 +69,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               autoComplete="username"
               value={login}
               onChange={(e) => setLogin(e.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+              className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm outline-none focus:border-cyan-500"
               placeholder="Введите логин"
               required
             />
@@ -84,7 +84,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 py-2.5 text-sm outline-none focus:border-emerald-500"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 py-2.5 text-sm outline-none focus:border-cyan-500"
                 placeholder="Введите пароль"
                 required
               />
@@ -101,7 +101,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         <button
           type="submit"
           disabled={busy}
-          className="mt-5 w-full h-11 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-sm font-bold flex items-center justify-center gap-2"
+          className="mt-5 w-full h-11 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-60 text-white text-sm font-bold flex items-center justify-center gap-2"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
           {busy ? 'Вход…' : 'Войти'}

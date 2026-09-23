@@ -230,13 +230,13 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   const getConsumptionBadge = (cons: number) => {
     if (cons < 14) {
       return isDark
-        ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/80'
-        : 'bg-emerald-50 text-emerald-700 border-emerald-300';
+        ? 'bg-cyan-950/80 text-cyan-300 border-cyan-800/80'
+        : 'bg-cyan-50 text-cyan-700 border-cyan-300';
     }
     if (cons < 17) {
       return isDark
-        ? 'bg-teal-950/80 text-teal-300 border-teal-800/80'
-        : 'bg-teal-50 text-teal-700 border-teal-300';
+        ? 'bg-cyan-950/80 text-cyan-300 border-cyan-800/80'
+        : 'bg-cyan-50 text-cyan-700 border-cyan-300';
     }
     if (cons < 20) {
       return isDark
@@ -258,7 +258,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
           isDark ? 'border-slate-800/80' : 'border-slate-100'
         }`}>
           <div className="flex items-center gap-2">
-            <div className={`p-1.5 rounded-lg ${isDark ? 'bg-teal-500/10 text-teal-400' : 'bg-teal-50 text-teal-600'}`}>
+            <div className={`p-1.5 rounded-lg ${isDark ? 'bg-cyan-500/10 text-cyan-400' : 'bg-cyan-50 text-cyan-600'}`}>
               <History className="w-4 h-4" />
             </div>
             <div>
@@ -276,7 +276,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               triggerHaptic('medium', settings.hapticFeedback);
               onOpenAddModal();
             }}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold active:scale-95 transition-all shadow-md shadow-emerald-500/20"
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-600 text-white text-xs font-bold active:scale-95 transition-all shadow-md shadow-cyan-500/20"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Добавить</span>
@@ -291,7 +291,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
           }`}>
             <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Средний расход</span>
             <div className="mt-1">
-              <span className={`text-2xl font-mono font-extrabold ${isDark ? 'text-teal-400' : 'text-teal-600'}`}>
+              <span className={`text-2xl font-mono font-extrabold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
                 {stats.avgConsumption > 0 ? stats.avgConsumption.toFixed(1) : '—'}
               </span>
               <span className={`text-[10px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>кВт⋅ч / 100 км</span>
@@ -311,7 +311,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
           }`}>
             <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Общий пробег</span>
             <div className="mt-1">
-              <span className={`text-2xl font-mono font-extrabold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+              <span className={`text-2xl font-mono font-extrabold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
                 {Math.round(stats.totalKm)}
               </span>
               <span className={`text-[10px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>км зафиксировано</span>
@@ -347,13 +347,13 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
           }`}>
             <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Экономия vs ДВС</span>
             <div className="mt-1">
-              <span className={`text-2xl font-mono font-extrabold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+              <span className={`text-2xl font-mono font-extrabold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
                 +{stats.totalSaved.toFixed(0)}
               </span>
               <span className={`text-[10px] block ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{settings.currency} в кармане</span>
             </div>
             <span className={`text-[10px] mt-1 border-t pt-1 ${
-              isDark ? 'text-emerald-400/80 border-slate-800/60' : 'text-emerald-700 border-slate-200'
+              isDark ? 'text-cyan-400/80 border-slate-800/60' : 'text-cyan-700 border-slate-200'
             }`}>
               ДВС: {((stats.totalKm / 100) * settings.gasEquivalentL100km * settings.gasPricePerLiter).toFixed(0)} {settings.currency}
             </span>
@@ -368,7 +368,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             <div className="flex items-center gap-3">
               {stats.cityAvg > 0 && (
                 <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>
-                  🏙️ Город средний: <b className={`font-mono ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>{stats.cityAvg.toFixed(1)}</b> кВт⋅ч
+                  🏙️ Город средний: <b className={`font-mono ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>{stats.cityAvg.toFixed(1)}</b> кВт⋅ч
                 </span>
               )}
               {stats.highwayAvg > 0 && (
@@ -378,7 +378,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               )}
             </div>
             {stats.bestTripConsumption > 0 && (
-              <span className={`text-[11px] font-medium ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
+              <span className={`text-[11px] font-medium ${isDark ? 'text-cyan-400' : 'text-cyan-700'}`}>
                 🏆 Рекорд: {stats.bestTripConsumption.toFixed(1)} кВт⋅ч/100км
               </span>
             )}
@@ -396,8 +396,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               driverStyle.factor > 1.05
                 ? isDark ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-amber-50 border-amber-200 text-amber-600'
                 : driverStyle.factor < 0.95
-                ? isDark ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-600'
-                : isDark ? 'bg-teal-500/10 border-teal-500/30 text-teal-400' : 'bg-teal-50 border-teal-200 text-teal-600'
+                ? isDark ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-cyan-50 border-cyan-200 text-cyan-600'
+                : isDark ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' : 'bg-cyan-50 border-cyan-200 text-cyan-600'
             }`}>
               <Gauge className="w-5 h-5" />
             </div>
@@ -410,8 +410,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                   driverStyle.factor > 1.05
                     ? isDark ? 'bg-amber-950/80 text-amber-300 border-amber-800' : 'bg-amber-50 text-amber-700 border-amber-200'
                     : driverStyle.factor < 0.95
-                    ? isDark ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    : isDark ? 'bg-teal-950/80 text-teal-300 border-teal-800' : 'bg-teal-50 text-teal-700 border-teal-200'
+                    ? isDark ? 'bg-cyan-950/80 text-cyan-300 border-cyan-800' : 'bg-cyan-50 text-cyan-700 border-cyan-200'
+                    : isDark ? 'bg-cyan-950/80 text-cyan-300 border-cyan-800' : 'bg-cyan-50 text-cyan-700 border-cyan-200'
                 }`}>
                   {driverStyle.label}
                 </span>
@@ -422,12 +422,12 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               <div className={`flex flex-wrap items-center gap-3 pt-0.5 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 <span>Анализ по <b className={isDark ? 'text-slate-200' : 'text-slate-800'}>{driverStyle.validTripsCount}</b> поездкам</span>
                 <span>•</span>
-                <span>Ср. расход: <b className={`font-mono ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>{driverStyle.avgConsumption.toFixed(1)} кВт⋅ч/100км</b></span>
+                <span>Ср. расход: <b className={`font-mono ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>{driverStyle.avgConsumption.toFixed(1)} кВт⋅ч/100км</b></span>
                 <span>•</span>
                 <span>
                   Отклонение стиля:{' '}
                   <b className={`font-mono ${
-                    driverStyle.diffPct < 0 ? 'text-emerald-500' : driverStyle.diffPct > 0 ? 'text-amber-500' : isDark ? 'text-slate-200' : 'text-slate-800'
+                    driverStyle.diffPct < 0 ? 'text-cyan-500' : driverStyle.diffPct > 0 ? 'text-amber-500' : isDark ? 'text-slate-200' : 'text-slate-800'
                   }`}>
                     {driverStyle.diffPct <= 0 ? `${driverStyle.diffPct}%` : `+${driverStyle.diffPct}%`}
                   </b>
@@ -444,8 +444,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               driverStyle.factor > 1.05
                 ? 'text-amber-400'
                 : driverStyle.factor < 0.95
-                ? 'text-emerald-400'
-                : isDark ? 'text-teal-300' : 'text-teal-600'
+                ? 'text-cyan-400'
+                : isDark ? 'text-cyan-300' : 'text-cyan-600'
             }`}>
               x{driverStyle.factor.toFixed(2)}
             </span>
@@ -462,7 +462,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${
               isDark ? 'text-slate-300' : 'text-slate-700'
             }`}>
-              <TrendingUp className={`w-3.5 h-3.5 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
+              <TrendingUp className={`w-3.5 h-3.5 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
               Плавный график расхода (кВт⋅ч/100 км)
             </span>
             <div className="flex items-center gap-2">
@@ -479,8 +479,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="consumptionGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={isDark ? '#10b981' : '#059669'} stopOpacity={0.4} />
-                    <stop offset="95%" stopColor={isDark ? '#10b981' : '#059669'} stopOpacity={0.0} />
+                    <stop offset="5%" stopColor={isDark ? '#22d3ee' : '#06b6d4'} stopOpacity={0.4} />
+                    <stop offset="95%" stopColor={isDark ? '#22d3ee' : '#06b6d4'} stopOpacity={0.0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid
@@ -519,7 +519,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                           <div className="pt-1 space-y-0.5">
                             <p className="flex justify-between gap-3 font-semibold">
                               <span>Расход:</span>
-                              <span className="font-mono text-emerald-500">{data.consumption} кВт⋅ч/100км</span>
+                              <span className="font-mono text-cyan-500">{data.consumption} кВт⋅ч/100км</span>
                             </p>
                             <p className="flex justify-between gap-3">
                               <span className="text-slate-400">Пробег:</span>
@@ -542,13 +542,13 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                 />
                 <ReferenceLine
                   y={14.5}
-                  stroke="#10b981"
+                  stroke="#22d3ee"
                   strokeDasharray="4 4"
                   strokeWidth={1.5}
                   label={{
                     value: '14.5 эталон',
                     position: 'insideTopRight',
-                    fill: isDark ? '#10b981' : '#059669',
+                    fill: isDark ? '#22d3ee' : '#06b6d4',
                     fontSize: 10,
                   }}
                 />
@@ -569,11 +569,11 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                 <Area
                   type="monotone"
                   dataKey="consumption"
-                  stroke={isDark ? '#10b981' : '#059669'}
+                  stroke={isDark ? '#22d3ee' : '#06b6d4'}
                   strokeWidth={2.5}
                   fillOpacity={1}
                   fill="url(#consumptionGradient)"
-                  dot={{ r: 3.5, fill: isDark ? '#10b981' : '#059669', strokeWidth: 1 }}
+                  dot={{ r: 3.5, fill: isDark ? '#22d3ee' : '#06b6d4', strokeWidth: 1 }}
                   activeDot={{ r: 6, fill: '#34d399', stroke: isDark ? '#064e3b' : '#a7f3d0', strokeWidth: 2 }}
                 />
               </AreaChart>
@@ -594,8 +594,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             onChange={(e) => setSearchQuery(e.target.value)}
             className={`w-full border pl-9 pr-3 py-2 rounded-xl text-xs focus:outline-none transition-colors ${
               isDark
-                ? 'bg-slate-900 border-slate-800 text-slate-200 placeholder-slate-500 focus:border-teal-500'
-                : 'bg-white border-slate-200 text-slate-800 placeholder-slate-400 focus:border-teal-500 shadow-xs'
+                ? 'bg-slate-900 border-slate-800 text-slate-200 placeholder-slate-500 focus:border-cyan-500'
+                : 'bg-white border-slate-200 text-slate-800 placeholder-slate-400 focus:border-cyan-500 shadow-xs'
             }`}
           />
         </div>
@@ -607,8 +607,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
               filterRoad === 'all'
                 ? isDark
-                  ? 'bg-emerald-500 text-slate-950 font-bold'
-                  : 'bg-emerald-500 text-white font-bold'
+                  ? 'bg-cyan-500 text-slate-950 font-bold'
+                  : 'bg-cyan-500 text-white font-bold'
                 : isDark
                 ? 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
                 : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
@@ -621,8 +621,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
               filterRoad === 'city'
                 ? isDark
-                  ? 'bg-emerald-500 text-slate-950 font-bold'
-                  : 'bg-emerald-500 text-white font-bold'
+                  ? 'bg-cyan-500 text-slate-950 font-bold'
+                  : 'bg-cyan-500 text-white font-bold'
                 : isDark
                 ? 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
                 : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
@@ -635,8 +635,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
               filterRoad === 'highway'
                 ? isDark
-                  ? 'bg-emerald-500 text-slate-950 font-bold'
-                  : 'bg-emerald-500 text-white font-bold'
+                  ? 'bg-cyan-500 text-slate-950 font-bold'
+                  : 'bg-cyan-500 text-white font-bold'
                 : isDark
                 ? 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
                 : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
@@ -656,8 +656,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             title="Экспорт в Excel / CSV"
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold active:scale-95 transition-all ${
               isDark
-                ? 'bg-slate-900 hover:bg-slate-800 text-emerald-400 border-slate-800'
-                : 'bg-white hover:bg-slate-100 text-emerald-700 border-slate-200 shadow-xs'
+                ? 'bg-slate-900 hover:bg-slate-800 text-cyan-400 border-slate-800'
+                : 'bg-white hover:bg-slate-100 text-cyan-700 border-slate-200 shadow-xs'
             }`}
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
@@ -672,8 +672,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
             title="Скачать JSON бэкап"
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold active:scale-95 transition-all ${
               isDark
-                ? 'bg-slate-900 hover:bg-slate-800 text-teal-400 border-slate-800'
-                : 'bg-white hover:bg-slate-100 text-teal-700 border-slate-200 shadow-xs'
+                ? 'bg-slate-900 hover:bg-slate-800 text-cyan-400 border-slate-800'
+                : 'bg-white hover:bg-slate-100 text-cyan-700 border-slate-200 shadow-xs'
             }`}
           >
             <Download className="w-3.5 h-3.5" />
@@ -749,7 +749,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                     </div>
 
                     <div className={`flex items-center gap-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      <span className={`font-mono font-semibold ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
+                      <span className={`font-mono font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
                         {Math.round(trip.startSoc)}% → {Math.round(trip.endSoc)}%
                       </span>
                       <span>•</span>
@@ -805,13 +805,13 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                       </div>
                       <div>
                         <span className={`text-[10px] block ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Сэкономлено vs ДВС</span>
-                        <span className={`font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                        <span className={`font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
                           +{trip.moneySaved.toFixed(1)} {settings.currency}
                         </span>
                       </div>
                       <div>
                         <span className={`text-[10px] block ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Эффективность</span>
-                        <span className={`font-bold ${isDark ? 'text-teal-300' : 'text-teal-700'}`}>
+                        <span className={`font-bold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
                           {trip.kmPerKwh.toFixed(2)} км / кВт⋅ч
                         </span>
                       </div>
@@ -823,7 +823,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                       {(trip.drivingStyleFactor !== undefined || trip.avgSpeedKmH !== undefined) && (() => {
                         const factor = trip.drivingStyleFactor ?? deriveDrivingStyleFactor(trip.avgSpeedKmH, trip.maxSpeedKmH);
                         return <span className={`px-2 py-0.5 rounded-md border font-semibold ${
-                          factor < 0.95 ? isDark ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800' : 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                          factor < 0.95 ? isDark ? 'bg-cyan-950/70 text-cyan-300 border-cyan-800' : 'bg-cyan-50 text-cyan-700 border-cyan-200' :
                           factor <= 1.05 ? isDark ? 'bg-slate-900 text-slate-300 border-slate-700' : 'bg-slate-50 text-slate-700 border-slate-200' :
                           factor <= 1.15 ? isDark ? 'bg-amber-950/70 text-amber-300 border-amber-800' : 'bg-amber-50 text-amber-700 border-amber-200' :
                           isDark ? 'bg-rose-950/70 text-rose-300 border-rose-800' : 'bg-rose-50 text-rose-700 border-rose-200'
@@ -881,7 +881,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                             <span className={`text-[10px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                               Корректировка SOC на финише
                             </span>
-                            <span className={`font-mono text-sm font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                            <span className={`font-mono text-sm font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
                               {Math.round(editingSoc)}%
                             </span>
                           </div>
@@ -892,7 +892,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                             step={1}
                             value={editingSoc}
                             onChange={(e) => setEditingSoc(Number(e.target.value))}
-                            className="w-full accent-emerald-500"
+                            className="w-full accent-cyan-500"
                           />
                           <div className="flex items-center gap-1.5">
                             <button
@@ -927,7 +927,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                                 onUpdateSessionEndSoc(trip.id, editingSoc);
                                 setEditingSocId(null);
                               }}
-                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold"
+                              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-cyan-600 text-white text-xs font-semibold"
                             >
                               <Check className="w-3.5 h-3.5" /> Сохранить
                             </button>
@@ -940,7 +940,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                             <div className={`text-xs mt-0.5 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                               {Math.round(trip.endSoc)}%
                               {trip.endSocAdjustedManually && (
-                                <span className={`ml-1.5 text-[9px] ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>· изменено вручную</span>
+                                <span className={`ml-1.5 text-[9px] ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>· изменено вручную</span>
                               )}
                             </div>
                           </div>

@@ -862,7 +862,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   // Efficiency Rating
   const getEfficiencyRating = (cons: number) => {
     if (cons <= 0) return { label: 'Ожидание ввода', color: 'text-slate-400', bg: 'bg-slate-800' };
-    if (cons < 13.5) return { label: 'Супер экономно', color: 'text-emerald-400', bg: 'bg-emerald-950/80 border-emerald-800/60' };
+    if (cons < 13.5) return { label: 'Супер экономно', color: 'text-cyan-400', bg: 'bg-cyan-950/80 border-cyan-800/60' };
     if (cons < 16.5) return { label: 'Отличный расход', color: 'text-cyan-400', bg: 'bg-cyan-950/80 border-cyan-800/60' };
     if (cons < 19.5) return { label: 'Умеренный расход', color: 'text-amber-400', bg: 'bg-amber-950/80 border-amber-800/60' };
     return { label: 'Повышенный расход', color: 'text-rose-400', bg: 'bg-rose-950/80 border-rose-800/60' };
@@ -917,8 +917,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       <section className={`calculator-status rounded-2xl border px-4 py-2.5 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs min-w-0">
-            <span className={`inline-flex h-2 w-2 shrink-0 rounded-full ${gpsStatus === 'ok' ? 'bg-emerald-500' : gpsStatus === 'error' ? 'bg-rose-500' : 'bg-amber-500 animate-pulse'}`} />
-            <LocateFixed className={`w-4 h-4 shrink-0 ${gpsStatus === 'ok' ? 'text-emerald-500' : gpsStatus === 'error' ? 'text-rose-500' : 'text-amber-500'}`} />
+            <span className={`inline-flex h-2 w-2 shrink-0 rounded-full ${gpsStatus === 'ok' ? 'bg-cyan-500' : gpsStatus === 'error' ? 'bg-rose-500' : 'bg-amber-500 animate-pulse'}`} />
+            <LocateFixed className={`w-4 h-4 shrink-0 ${gpsStatus === 'ok' ? 'text-cyan-500' : gpsStatus === 'error' ? 'text-rose-500' : 'text-amber-500'}`} />
             <span className="font-semibold">GPS</span>
             <span className="text-slate-500 truncate">
               {gpsStatus === 'ok' ? 'Сигнал есть' : gpsStatus === 'error' ? 'Недоступен' : 'Поиск…'}
@@ -963,11 +963,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       <section className={`rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center justify-between gap-2">
           <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Старт</span>
-          <span className={`text-xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{Math.round(startSoc)}%</span>
+          <span className={`text-xl font-black font-mono tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(startSoc)}%</span>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => updateRouteStartSoc(startSoc - 5)} className={`w-10 h-9 rounded-lg font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>
-          <input type="range" min={1} max={100} value={startSoc} onChange={(e) => updateRouteStartSoc(Number(e.target.value))} className="flex-1 accent-emerald-500 h-1.5 rounded-lg cursor-pointer" />
+          <input type="range" min={1} max={100} value={startSoc} onChange={(e) => updateRouteStartSoc(Number(e.target.value))} className="flex-1 accent-cyan-500 h-1.5 rounded-lg cursor-pointer" />
           <button type="button" onClick={() => updateRouteStartSoc(startSoc + 5)} className={`w-10 h-9 rounded-lg font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+5</button>
         </div>
         <div className="flex items-center gap-2">
@@ -984,7 +984,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             onClick={() => { triggerHaptic('light', settings.hapticFeedback); setClimateOn(v => !v); }}
             className={`shrink-0 rounded-xl px-3 py-2 text-xs font-bold border transition-colors ${
               climateOn
-                ? isDark ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60' : 'bg-emerald-600 text-white border-emerald-700'
+                ? isDark ? 'bg-cyan-950/70 text-cyan-300 border-cyan-500/60' : 'bg-cyan-600 text-white border-cyan-700'
                 : isDark ? 'bg-slate-950 text-slate-400 border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'
             }`}
           >
@@ -1003,7 +1003,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             {calculatorMode === 'route' && (
               <motion.div
                 layoutId="calculatorModePill"
-                className="absolute inset-0 rounded-xl bg-emerald-600 shadow-sm"
+                className="absolute inset-0 rounded-xl bg-cyan-600 shadow-sm"
                 transition={{ type: 'spring', stiffness: 420, damping: 34 }}
               />
             )}
@@ -1018,7 +1018,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             {calculatorMode === 'manual' && (
               <motion.div
                 layoutId="calculatorModePill"
-                className="absolute inset-0 rounded-xl bg-emerald-600 shadow-sm"
+                className="absolute inset-0 rounded-xl bg-cyan-600 shadow-sm"
                 transition={{ type: 'spring', stiffness: 420, damping: 34 }}
               />
             )}
@@ -1156,14 +1156,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         <button
           onClick={calculateRouteProfile}
           disabled={routeLoading}
-          className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-500 py-3.5 text-sm font-bold text-white disabled:opacity-60 flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-sm shadow-emerald-600/20"
+          className="w-full rounded-xl bg-cyan-600 hover:bg-cyan-500 py-3.5 text-sm font-bold text-white disabled:opacity-60 flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-sm shadow-cyan-600/20"
         >
           {routeLoading
             ? <><Loader2 className="w-5 h-5 animate-spin" /> Считаем маршрут…</>
             : <><Navigation className="w-5 h-5" /> Рассчитать маршрут</>}
         </button>
 
-        {routeLoading && <div className="text-xs text-emerald-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />{routeStatus || 'Подготавливаем расчёт…'}</div>}
+        {routeLoading && <div className="text-xs text-cyan-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />{routeStatus || 'Подготавливаем расчёт…'}</div>}
         {routeError && <div className="text-xs text-rose-500">{routeError}</div>}
 
         <div className={`rounded-xl border p-3 space-y-2 ${isDark ? 'border-slate-800 bg-slate-950/50' : 'border-slate-200 bg-slate-50'}`}>
@@ -1211,7 +1211,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       {' · '}CCS свободно {item.freeCcs}
                       {item.operator ? ` · ${item.operator}` : ''}
                     </div>
-                    <div className={`mt-1 text-[10px] font-medium ${isDark ? 'text-emerald-400/90' : 'text-emerald-700'}`}>
+                    <div className={`mt-1 text-[10px] font-medium ${isDark ? 'text-cyan-400/90' : 'text-cyan-700'}`}>
                       Построить маршрут сюда
                     </div>
                   </button>
@@ -1245,8 +1245,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               const statusColor =
                 statusTone === 'good'
                   ? isDark
-                    ? 'text-emerald-400'
-                    : 'text-emerald-600'
+                    ? 'text-cyan-400'
+                    : 'text-cyan-600'
                   : statusTone === 'ok'
                   ? 'text-amber-500'
                   : 'text-rose-500';
@@ -1362,11 +1362,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                                 {stop.connector === 'ccs2' ? 'CCS' : 'Type2'} · ~{Math.round(stop.socAtStation)}% → {Math.round(stop.targetSoc)}% · {stop.session.minutes} мин
                               </p>
                               {idx === arr.length - 1 && (
-                                <div className={`mt-2 flex items-baseline justify-between gap-2 rounded-lg px-3 py-2 ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-50'}`}>
-                                  <span className={`text-[10px] ${isDark ? 'text-emerald-400/80' : 'text-emerald-700/70'}`}>
+                                <div className={`mt-2 flex items-baseline justify-between gap-2 rounded-lg px-3 py-2 ${isDark ? 'bg-cyan-500/10' : 'bg-cyan-50'}`}>
+                                  <span className={`text-[10px] ${isDark ? 'text-cyan-400/80' : 'text-cyan-700/70'}`}>
                                     {arr.length > 1 ? 'После всех остановок на финише' : 'После зарядки на финише'}
                                   </span>
-                                  <span className={`text-2xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                                  <span className={`text-2xl font-black font-mono tabular-nums ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
                                     {Math.round(stop.finishSocAfterCharge)}%
                                   </span>
                                 </div>
@@ -1385,7 +1385,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             {/* Primary post-calc UI: SOC (above) → What if → HUD → Details */}
             <div className={`rounded-xl border p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-bold inline-flex items-center gap-2"><Gauge className="w-4 h-4 text-emerald-500" />А что если?</span>
+                <span className="text-xs font-bold inline-flex items-center gap-2"><Gauge className="w-4 h-4 text-cyan-500" />А что если?</span>
                 <span className="text-[10px] text-slate-500">Без пересчёта маршрута</span>
               </div>
 
@@ -1403,14 +1403,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                         onClick={() => applyClimateScenario(withClimate)}
                         className={`rounded-lg border px-2 py-2 text-left transition-colors ${
                           active
-                            ? 'border-emerald-500 bg-emerald-500/10'
+                            ? 'border-cyan-500 bg-cyan-500/10'
                             : isDark
                             ? 'border-slate-800 bg-slate-900'
                             : 'border-slate-200 bg-white'
                         }`}
                       >
                         <div className="text-xs font-bold">{withClimate ? 'С климатом' : 'Без климата'}</div>
-                        <div className={`mt-1 text-[11px] font-bold ${scenario && scenario.arrivalSoc >= 20 ? 'text-emerald-500' : scenario && scenario.arrivalSoc >= 10 ? 'text-amber-500' : 'text-rose-500'}`}>
+                        <div className={`mt-1 text-[11px] font-bold ${scenario && scenario.arrivalSoc >= 20 ? 'text-cyan-500' : scenario && scenario.arrivalSoc >= 10 ? 'text-amber-500' : 'text-rose-500'}`}>
                           {scenario ? `${Math.round(scenario.arrivalSoc)}% SOC` : '—'}
                         </div>
                         {scenario && (
@@ -1438,14 +1438,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                         onClick={() => applyWhatIfSpeed(speed)}
                         className={`rounded-lg border px-2 py-2 text-center transition-colors ${
                           active
-                            ? 'border-emerald-500 bg-emerald-500/10'
+                            ? 'border-cyan-500 bg-cyan-500/10'
                             : isDark
                             ? 'border-slate-800 bg-slate-900'
                             : 'border-slate-200 bg-white'
                         }`}
                       >
                         <div className="text-xs font-bold">{speed} км/ч</div>
-                        <div className={`mt-1 text-[11px] font-bold ${scenario && scenario.arrivalSoc >= 20 ? 'text-emerald-500' : scenario && scenario.arrivalSoc >= 10 ? 'text-amber-500' : 'text-rose-500'}`}>
+                        <div className={`mt-1 text-[11px] font-bold ${scenario && scenario.arrivalSoc >= 20 ? 'text-cyan-500' : scenario && scenario.arrivalSoc >= 10 ? 'text-amber-500' : 'text-rose-500'}`}>
                           {scenario ? `${Math.round(scenario.arrivalSoc)}% SOC` : '—'}
                         </div>
                       </button>
@@ -1522,11 +1522,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 )}
 
                 {optimalSpeedScenario && (
-                  <div className={`rounded-xl border p-3 ${isDark ? 'bg-emerald-950/30 border-emerald-900/60' : 'bg-emerald-50 border-emerald-200'}`}>
+                  <div className={`rounded-xl border p-3 ${isDark ? 'bg-cyan-950/30 border-cyan-900/60' : 'bg-cyan-50 border-cyan-200'}`}>
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <div className={`text-[10px] font-bold uppercase tracking-wide ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>Оптимальная скорость</div>
-                        <div className={`mt-0.5 text-2xl font-black font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>{optimalSpeedScenario.speed} км/ч</div>
+                        <div className={`text-[10px] font-bold uppercase tracking-wide ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>Оптимальная скорость</div>
+                        <div className={`mt-0.5 text-2xl font-black font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-700'}`}>{optimalSpeedScenario.speed} км/ч</div>
                       </div>
                       <div className="text-right text-[11px]">
                         <div><span className="text-slate-500">Расход</span> <b>{optimalSpeedScenario.consumption.toFixed(1)} кВт⋅ч/100</b></div>
@@ -1545,7 +1545,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
                 <div className={`rounded-xl p-3 text-xs ${isDark ? 'bg-slate-950 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
                   <div className="flex justify-between"><span>Подъёмы</span><b>+{routeElevation.grossClimbEnergyKwh.toFixed(2)} кВт⋅ч</b></div>
-                  <div className="flex justify-between mt-1"><span>Рекуперация</span><b className="text-emerald-500">−{routeElevation.recoveredEnergyKwh.toFixed(2)} кВт⋅ч</b></div>
+                  <div className="flex justify-between mt-1"><span>Рекуперация</span><b className="text-cyan-500">−{routeElevation.recoveredEnergyKwh.toFixed(2)} кВт⋅ч</b></div>
                   <div className="flex justify-between mt-2 pt-2 border-t border-slate-500/20"><span>Скорр. расход</span><b>{elevationAdjustedConsumption.toFixed(1)} кВт⋅ч/100 км</b></div>
                 </div>
 
@@ -1625,7 +1625,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       <CollapsibleDetails
         isDark={isDark}
         label={weatherMode === 'current' ? 'Погода · сейчас' : 'Погода · вручную'}
-        icon={<CloudSun className="w-4 h-4 text-emerald-500" />}
+        icon={<CloudSun className="w-4 h-4 text-cyan-500" />}
         open={weatherPanelOpen}
         onToggle={() => setWeatherPanelOpen(v => !v)}
         className="rounded-2xl"
@@ -1644,14 +1644,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 <label className="text-xs"><span className="block text-slate-500 mb-1">💨 м/с</span><DecimalInput value={manualWindSpeed} onChange={setManualWindSpeed} min={0} max={40} className="w-full" /></label>
               </div>
               <div className="flex items-center gap-2"><Navigation className="w-4 h-4 text-slate-400" style={{transform:`rotate(${manualWindDirection}deg)`}} /><span className="text-xs text-slate-500">Ветер</span><DecimalInput value={manualWindDirection} onChange={(v) => setManualWindDirection(((Math.round(v)%360)+360)%360)} min={0} max={359} className="ml-auto w-20 text-right" /><span className="text-xs text-slate-500">°</span></div>
-              <div><div className="text-[11px] text-slate-500 mb-1.5">Осадки</div><div className="grid grid-cols-3 gap-1">{([['none','Нет'],['rain','Дождь'],['snow','Снег']] as const).map(([v,label]) => <button key={v} type="button" onClick={() => setManualPrecipitationType(v)} className={`rounded-lg py-2 text-xs font-semibold border ${manualPrecipitationType===v ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : (isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600')}`}>{label}</button>)}</div></div>
+              <div><div className="text-[11px] text-slate-500 mb-1.5">Осадки</div><div className="grid grid-cols-3 gap-1">{([['none','Нет'],['rain','Дождь'],['snow','Снег']] as const).map(([v,label]) => <button key={v} type="button" onClick={() => setManualPrecipitationType(v)} className={`rounded-lg py-2 text-xs font-semibold border ${manualPrecipitationType===v ? 'border-cyan-500 bg-cyan-500/10 text-cyan-500' : (isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600')}`}>{label}</button>)}</div></div>
               {manualPrecipitationType !== 'none' && (
                 <div className="grid grid-cols-3 gap-1">
                   {(['light','moderate','heavy'] as const).map((v) => {
                     const label = v === 'light' ? 'Лёгкая' : v === 'moderate' ? 'Умеренная' : 'Сильная';
                     return (
                       <button key={v} type="button" onClick={() => setManualPrecipitationIntensity(v)}
-                        className={`rounded-lg py-2 text-xs font-semibold border ${manualPrecipitationIntensity===v ? 'border-emerald-500 bg-emerald-500/10 text-emerald-500' : (isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600')}`}>
+                        className={`rounded-lg py-2 text-xs font-semibold border ${manualPrecipitationIntensity===v ? 'border-cyan-500 bg-cyan-500/10 text-cyan-500' : (isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600')}`}>
                         {label}
                       </button>
                     );
@@ -1679,15 +1679,15 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           {/* Hero result */}
           <section
             className={`rounded-2xl border p-4 text-center ${
-              isDark ? 'bg-emerald-950/40 border-emerald-800/60' : 'bg-emerald-50 border-emerald-200'
+              isDark ? 'bg-cyan-950/40 border-cyan-800/60' : 'bg-cyan-50 border-cyan-200'
             }`}
           >
-            <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-emerald-300/80' : 'text-emerald-700'}`}>
+            <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-cyan-300/80' : 'text-cyan-700'}`}>
               Расход
             </div>
-            <div className={`mt-1 text-5xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+            <div className={`mt-1 text-5xl font-black font-mono tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
               {consumptionPer100Km > 0 ? (
-                <AnimatedNumber value={consumptionPer100Km} decimals={1} className={isDark ? 'text-emerald-400' : 'text-emerald-600'} />
+                <AnimatedNumber value={consumptionPer100Km} decimals={1} className={isDark ? 'text-cyan-400' : 'text-cyan-600'} />
               ) : '—'}
               <span className="text-base font-bold ml-1.5 opacity-70">кВт⋅ч/100</span>
             </div>
@@ -1715,7 +1715,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>SOC на финише</span>
-                <span className={`text-xl font-black font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{Math.round(endSoc)}%</span>
+                <span className={`text-xl font-black font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(endSoc)}%</span>
               </div>
               <div className="flex items-center gap-2">
                 <button type="button" onClick={() => adjustValue(setEndSoc, -5, 0, Math.max(0, startSoc - 1))} className={`w-10 h-9 rounded-lg text-xs font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>
@@ -1725,7 +1725,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   max={Math.max(0, startSoc - 1)}
                   value={Math.min(endSoc, Math.max(0, startSoc - 1))}
                   onChange={(e) => setEndSoc(Number(e.target.value))}
-                  className="flex-1 accent-emerald-500 h-1.5 cursor-pointer"
+                  className="flex-1 accent-cyan-500 h-1.5 cursor-pointer"
                   aria-label="SOC на финише"
                 />
                 <button type="button" onClick={() => adjustValue(setEndSoc, 5, 0, Math.max(0, startSoc - 1))} className={`w-10 h-9 rounded-lg text-xs font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+5</button>
@@ -1742,8 +1742,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     suffix="км"
                     className={`w-full text-right px-2 py-1 rounded-lg text-sm font-bold font-mono focus:outline-none border ${
                       isDark
-                        ? 'bg-slate-950 border-slate-700 text-emerald-400'
-                        : 'bg-slate-50 border-slate-200 text-emerald-600'
+                        ? 'bg-slate-950 border-slate-700 text-cyan-400'
+                        : 'bg-slate-50 border-slate-200 text-cyan-600'
                     }`}
                   />
                 </div>
@@ -1787,8 +1787,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     className={`py-2 rounded-lg text-xs font-semibold border ${
                       roadType === id
                         ? isDark
-                          ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60'
-                          : 'bg-emerald-600 text-white border-emerald-700'
+                          ? 'bg-cyan-950/70 text-cyan-300 border-cyan-500/60'
+                          : 'bg-cyan-600 text-white border-cyan-700'
                         : isDark
                         ? 'bg-slate-950 text-slate-400 border-slate-800'
                         : 'bg-slate-50 text-slate-600 border-slate-200'
@@ -1853,7 +1853,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               <div className={`rounded-xl border p-3 text-xs ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
                 <div className="flex justify-between gap-2">
                   <span>Экономия vs ДВС</span>
-                  <b className="text-emerald-500">+{moneySaved.toFixed(2)} {settings.currency}</b>
+                  <b className="text-cyan-500">+{moneySaved.toFixed(2)} {settings.currency}</b>
                 </div>
                 <div className={`mt-1 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
                   ДВС ≈ {gasCostEquivalent.toFixed(2)} {settings.currency} · {settings.gasEquivalentL100km} л/100 км
@@ -1873,7 +1873,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               id="save-trip-direct-button"
               type="button"
               onClick={handleQuickSave}
-              className="flex-1 py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-sm shadow-emerald-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+              className="flex-1 py-3.5 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-sm shadow-sm shadow-cyan-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
             >
               <Zap className="w-4 h-4 fill-current" />
               Сохранить · {consumptionPer100Km > 0 ? `${consumptionPer100Km.toFixed(1)} кВт⋅ч/100` : '—'}

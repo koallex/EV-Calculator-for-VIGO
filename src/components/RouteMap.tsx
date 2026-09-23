@@ -92,12 +92,12 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           <FitRoute positions={positions} extras={stopPositions} />
           <Polyline
             positions={animatedPositions}
-            pathOptions={{ color: '#059669', weight: 5, opacity: 0.92 }}
+            pathOptions={{ color: '#06b6d4', weight: 5, opacity: 0.92 }}
           />
           <CircleMarker
             center={start}
             radius={8}
-            pathOptions={{ color: '#fff', weight: 3, fillColor: '#10b981', fillOpacity: 1 }}
+            pathOptions={{ color: '#fff', weight: 3, fillColor: '#22d3ee', fillOpacity: 1 }}
           />
           <CircleMarker
             center={end}
