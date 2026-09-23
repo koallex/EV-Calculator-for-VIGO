@@ -355,7 +355,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       const mustCharge = routeForecast.arrivalSoc < CHARGE_SUGGEST_SOC;
       const finishReserveSoc = mustCharge ? CHARGE_SUGGEST_SOC : ARRIVAL_RESERVE_SOC;
 
-      const candidates = vigoStations
+      let candidates = vigoStations
         .map((station) => ({
           station,
           socAtStation: socAtDistance(station.distanceAlongRouteKm),
@@ -374,13 +374,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             if (chargeNeeded < 2) return false;
             if (remainingKm < Math.min(20, totalDistanceKm * 0.12) && chargeNeeded < 10) return false;
           } else {
-            // Optional stop with comfortable finish SOC: still suggest a useful mid-route
-            // charger (charge toward ~80%), not "you already have 50% at B so no station".
-            if (socAtStation < 12) return false;
-            if (socAtStation > 68) return false; // too full for a useful optional stop
-            if (remainingKm < Math.min(15, totalDistanceKm * 0.1)) return false;
-            // Meaningful session toward ~80%
-            if (PREFERRED_TARGET_SOC - socAtStation < 10) return false;
+            // Optional stop (comfortable finish): still offer a mid-route CCS even when
+            // arrival SOC is already fine — user pressed the button on purpose.
+            if (socAtStation < 10) return false;
+            if (socAtStation > 82) return false;
+            if (remainingKm < Math.min(12, totalDistanceKm * 0.08)) return false;
+            if (station.distanceAlongRouteKm < Math.min(10, totalDistanceKm * 0.06)) return false;
+            // At least a small top-up possible toward ~80–90%
+            if (Math.min(90, PREFERRED_TARGET_SOC) - socAtStation < 5) return false;
           }
           return true;
         })
@@ -447,6 +448,59 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           }
           return b.chargeAddedSoc - a.chargeAddedSoc;
         });
+
+      // Optional search with high finish SOC: if strict window found nothing, take the
+      // best mid-route VIGO station with any positive charge session.
+      if (!candidates.length && !mustCharge) {
+        candidates = vigoStations
+          .map((station) => {
+            const socAtStation = socAtDistance(station.distanceAlongRouteKm);
+            const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
+            if (socAtStation < 10 || socAtStation > 88) return null;
+            if (remainingKm < 10) return null;
+            if (station.distanceAlongRouteKm < 5) return null;
+            const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
+            const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + ARRIVAL_RESERVE_SOC);
+            const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
+            const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
+            const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
+            const desiredTarget = Math.max(socAtStation + 8, Math.min(90, PREFERRED_TARGET_SOC));
+            const targetSoc = findOptimalChargeTargetSoc(
+              socAtStation,
+              desiredTarget,
+              connector,
+              stationMaxPowerKw,
+              { maxTargetSoc: 90, marginalRateThreshold: 0.45 },
+            );
+            const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
+            if (chargeAddedSoc < 3) return null;
+            const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
+            if (session.minutes <= 0) return null;
+            const finishSocAfterCharge = Math.max(
+              0,
+              Math.min(100, targetSoc - (remainingEnergyKwh / batteryCap) * 100),
+            );
+            const score =
+              session.minutes +
+              station.distanceFromRouteKm * 5 +
+              Math.abs(socAtStation - IDEAL_ARRIVAL_SOC) * 1.0 +
+              Math.abs(station.distanceAlongRouteKm - totalDistanceKm * 0.45) * 0.2;
+            return {
+              station,
+              connector,
+              socAtStation,
+              targetSoc,
+              minRequiredSoc,
+              session,
+              chargeAddedSoc,
+              finishSocAfterCharge,
+              stationPowerAssumed: rawStationMaxPowerKw === undefined,
+              score,
+            };
+          })
+          .filter((x): x is NonNullable<typeof x> => !!x)
+          .sort((a, b) => a.score - b.score);
+      }
 
       if (!candidates.length) {
         setChargingSuggestion(null);

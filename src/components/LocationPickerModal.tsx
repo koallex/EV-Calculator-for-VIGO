@@ -99,7 +99,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
     <AnimatePresence>
       {isOpen && (
         <motion.div
-          className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+          className="fixed inset-0 z-[10000] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -124,7 +124,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
               </button>
             </div>
 
-            <div className="relative flex-1 min-h-0">
+            <div className="relative flex-1 min-h-0 location-picker-map">
               <MapContainer center={center} zoom={12} zoomControl={false} attributionControl={false} className="w-full h-full">
                 <TileLayer url={getBaseTileUrl(isDark)} attribution={MAP_TILE_ATTRIBUTION} />
                 <ClickCatcher onPick={handlePick} />
