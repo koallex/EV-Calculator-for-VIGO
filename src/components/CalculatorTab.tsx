@@ -1021,87 +1021,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   ? 'text-amber-500'
                   : 'text-rose-500';
               return (
-              <div
-                id="route-result-main"
-                className={`rounded-2xl border p-5 ${
-                  isDark ? 'bg-slate-950 border-slate-800/80' : 'bg-white border-slate-200'
-                }`}
-              >
-                <div className="text-center">
-                  <div className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>На финише</div>
-                  <div className={`mt-1 text-6xl font-black font-mono tracking-tight ${statusColor}`}>
-                    <AnimatedNumber value={arrival} decimals={0} suffix="%" className={statusColor} />
-                  </div>
-                  <div className={`mt-2 text-[12px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{statusText}</div>
-                  <div className={`mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[12px] tabular-nums ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    <span><span className={`font-mono ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{routeForecast.consumption.toFixed(1)}</span> кВт⋅ч/100</span>
-                    <span className={isDark ? 'text-slate-700' : 'text-slate-300'}>·</span>
-                    <span><span className={`font-mono ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{routeForecast.energyKwh.toFixed(1)}</span> кВт⋅ч</span>
-                    <span className={isDark ? 'text-slate-700' : 'text-slate-300'}>·</span>
-                    <span>старт {Math.round(startSoc)}%</span>
-                  </div>
-                </div>
-
-                {/* Mid-route charging: automatic below 20%; manual button at 20%+ */}
-                {routeForecast && (
-                  <div className={`mt-3 rounded-xl p-3 ${isDark ? 'bg-slate-900/60' : 'bg-slate-100/80'}`}>
-                    <div className={`flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      <PlugZap className="w-3.5 h-3.5" /> {arrival < CHARGE_SUGGEST_SOC ? 'Зарядка в пути' : 'Зарядка по маршруту'}
-                    </div>
-                    {chargingSuggestionStatus === 'loading' && (
-                      <p className={`mt-1 text-[11px] flex items-center gap-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        <Loader2 className="w-3 h-3 animate-spin" /> Ищем станции вдоль маршрута…
-                      </p>
-                    )}
-                    {arrival >= CHARGE_SUGGEST_SOC && chargingSuggestionStatus === 'idle' && (
-                      <button
-                        type="button"
-                        onClick={() => { triggerHaptic('light', settings.hapticFeedback); void searchChargingStations(); }}
-                        className={`mt-2 rounded-lg border px-3 py-2 text-[11px] font-bold transition-transform active:scale-[0.98] ${isDark ? 'border-sky-700 bg-slate-900 text-sky-300 hover:bg-slate-800' : 'border-sky-200 bg-white text-sky-700 hover:bg-sky-50'}`}
-                      >
-                        Найти зарядку по маршруту
-                      </button>
-                    )}
-                    {chargingSuggestionStatus === 'unavailable' && (
-                      <p className={`mt-1 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        {stationsFoundAlongRoute > 0
-                          ? (arrival >= CHARGE_SUGGEST_SOC
-                              ? `Найдено ${stationsFoundAlongRoute} станций с CCS/Type2, но ни одна не подходит для удобной остановки (нужен заезд с ~12–68% и запас пути после неё). Попробуйте более длинный маршрут или другой старт.`
-                              : `Найдено ${stationsFoundAlongRoute} станций, но до подходящей не доезжаем с запасом или дозарядка слишком мелкая. Увеличьте стартовый SOC или скорректируйте маршрут.`)
-                          : 'Не нашли станций с CCS или Type2 в коридоре 5 км от маршрута (EVRACE + OSM). GBT-only для VIGO не учитываются.'}
-                      </p>
-                    )}
-                    {chargingSuggestionStatus === 'error' && (
-                      <p className={`mt-1 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                        Не удалось получить список станций (EVRACE/OSM). Пересчитайте маршрут или попробуйте позже.
-                      </p>
-                    )}
-                    {chargingSuggestionStatus === 'ready' && chargingSuggestion && (
-                      <>
-                        <p className={`mt-2 text-[12px] leading-snug ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                          <span className="font-semibold">{chargingSuggestion.station.name}</span>
-                          {chargingSuggestion.station.address ? ` · ${chargingSuggestion.station.address}` : ''}
-                          {' · '}~{Math.round(chargingSuggestion.station.distanceAlongRouteKm)} км
-                        </p>
-                        <p className={`mt-1 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                          {chargingSuggestion.connector === 'ccs2' ? 'CCS' : 'Type2'} · ~{Math.round(chargingSuggestion.socAtStation)}% → {Math.round(chargingSuggestion.targetSoc)}% · {chargingSuggestion.session.minutes} мин
-                          {chargingSuggestion.session.avgPowerKw ? ` · ~${chargingSuggestion.session.avgPowerKw} кВт` : ''}
-                        </p>
-                        <div className={`mt-3 rounded-lg px-3 py-2.5 text-center ${isDark ? 'bg-emerald-500/15' : 'bg-emerald-500/10'}`}>
-                          <div className={`text-[10px] font-medium uppercase tracking-wide ${isDark ? 'text-emerald-400/80' : 'text-emerald-700/70'}`}>
-                            SOC на финише после зарядки
-                          </div>
-                          <div className={`mt-0.5 text-3xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
-                            {Math.round(chargingSuggestion.finishSocAfterCharge)}%
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                    {/* Карта маршрута — сразу под результатом SOC / зарядкой */}
-                <div className={`mt-4 rounded-xl border overflow-hidden ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
+              <div id="route-result-main" className="space-y-3">
+                {/* Map first — main visual */}
+                <div className={`rounded-2xl border overflow-hidden ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                   <RouteMap
                     points={routeElevation.points}
                     isDark={isDark}
@@ -1122,7 +1044,78 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   </div>
                 </div>
 
+                {/* Compact SOC + charging strip under the map */}
+                <div className={`rounded-2xl border px-4 py-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
+                  <div className="flex items-center gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>На финише</div>
+                      <div className={`text-4xl font-black font-mono tracking-tight leading-none ${statusColor}`}>
+                        <AnimatedNumber value={arrival} decimals={0} suffix="%" className={statusColor} />
+                      </div>
+                      <div className={`mt-1 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{statusText}</div>
+                    </div>
+                    <div className={`text-right text-[11px] tabular-nums shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      <div><span className={`font-mono ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{routeForecast.consumption.toFixed(1)}</span> кВт⋅ч/100</div>
+                      <div className="mt-0.5"><span className={`font-mono ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{routeForecast.energyKwh.toFixed(1)}</span> кВт⋅ч</div>
+                      <div className="mt-0.5">старт {Math.round(startSoc)}%</div>
+                    </div>
+                  </div>
 
+                  {routeForecast && (
+                    <div className={`mt-3 pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
+                      <div className={`flex items-center gap-1.5 text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        <PlugZap className="w-3.5 h-3.5" />
+                        {arrival < CHARGE_SUGGEST_SOC ? 'Зарядка в пути' : 'Зарядка по маршруту'}
+                      </div>
+                      {chargingSuggestionStatus === 'loading' && (
+                        <p className={`mt-1.5 text-[11px] flex items-center gap-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                          <Loader2 className="w-3 h-3 animate-spin" /> Ищем станции…
+                        </p>
+                      )}
+                      {arrival >= CHARGE_SUGGEST_SOC && chargingSuggestionStatus === 'idle' && (
+                        <button
+                          type="button"
+                          onClick={() => { triggerHaptic('light', settings.hapticFeedback); void searchChargingStations(); }}
+                          className={`mt-2 w-full rounded-lg px-3 py-2 text-[12px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-100 text-slate-700'}`}
+                        >
+                          Найти зарядку по маршруту
+                        </button>
+                      )}
+                      {chargingSuggestionStatus === 'unavailable' && (
+                        <p className={`mt-1.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
+                          {stationsFoundAlongRoute > 0
+                            ? (arrival >= CHARGE_SUGGEST_SOC
+                                ? `Найдено ${stationsFoundAlongRoute} станций, но ни одна не подходит для удобной остановки.`
+                                : `Найдено ${stationsFoundAlongRoute} станций, но до подходящей не доезжаем с запасом.`)
+                            : 'Станций CCS/Type2 в коридоре 5 км не найдено.'}
+                        </p>
+                      )}
+                      {chargingSuggestionStatus === 'error' && (
+                        <p className={`mt-1.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
+                          Не удалось получить список станций. Попробуйте ещё раз.
+                        </p>
+                      )}
+                      {chargingSuggestionStatus === 'ready' && chargingSuggestion && (
+                        <div className="mt-2">
+                          <p className={`text-[12px] leading-snug ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                            <span className="font-semibold">{chargingSuggestion.station.name}</span>
+                            {chargingSuggestion.station.address ? ` · ${chargingSuggestion.station.address}` : ''}
+                            {' · '}~{Math.round(chargingSuggestion.station.distanceAlongRouteKm)} км
+                          </p>
+                          <p className={`mt-0.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                            {chargingSuggestion.connector === 'ccs2' ? 'CCS' : 'Type2'} · ~{Math.round(chargingSuggestion.socAtStation)}% → {Math.round(chargingSuggestion.targetSoc)}% · {chargingSuggestion.session.minutes} мин
+                          </p>
+                          <div className={`mt-2 flex items-baseline justify-between gap-2 rounded-lg px-3 py-2 ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-50'}`}>
+                            <span className={`text-[10px] ${isDark ? 'text-emerald-400/80' : 'text-emerald-700/70'}`}>После зарядки на финише</span>
+                            <span className={`text-2xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                              {Math.round(chargingSuggestion.finishSocAfterCharge)}%
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
               );
             })()}

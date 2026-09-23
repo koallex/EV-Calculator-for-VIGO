@@ -82,7 +82,7 @@ input[type=range]::-moz-range-thumb {
 /* Compact interactive route map */
 .route-map {
   position: relative;
-  height: 280px;
+  height: 380px;
 }
 .route-map .leaflet-container {
   height: 100%;
@@ -142,7 +142,7 @@ input[type=range]::-moz-range-thumb {
   .calculator-minimal-shell { gap: .5rem; }
   .calculator-minimal-shell > section { border-radius: 1rem; }
   .calculator-minimal-shell .text-5xl { font-size: 2.75rem; line-height: 1; }
-  .calculator-minimal-shell .route-map { height: 260px; }
+  .calculator-minimal-shell .route-map { height: 360px; }
 }
 
 /* HUD hierarchy */
@@ -184,4 +184,14 @@ input[type=range]::-moz-range-thumb {
 :focus-visible {
   outline: 2px solid rgb(16 185 129 / 0.55);
   outline-offset: 2px;
+}
+
+.route-map-leaflet,
+.route-map .leaflet-container {
+  height: 100%;
+  width: 100%;
+  background: #e2e8f0;
+}
+.route-map-shell {
+  border-radius: 0;
 }

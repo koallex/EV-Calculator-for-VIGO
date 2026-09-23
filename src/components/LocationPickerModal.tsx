@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapContainer, TileLayer, Marker, Pane, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import { X, MapPin, Check, Loader2, LocateFixed } from 'lucide-react';
 import { Icon } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { reverseGeocode } from '../services/routeElevation';
 import { triggerHaptic } from '../utils/haptics';
-import { getBaseTileUrl, getLabelsTileUrl, MAP_TILE_ATTRIBUTION, LABELS_PANE_NAME, LABELS_PANE_Z_INDEX } from '../utils/mapTiles';
+import { getBaseTileUrl, MAP_TILE_ATTRIBUTION } from '../utils/mapTiles';
 
 // Default Leaflet marker assets don't resolve correctly under Vite's bundling; build an
 // explicit icon from the CDN-hosted images (same approach used nowhere else yet in this
@@ -131,9 +131,6 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
                 {point && <Marker position={[point.lat, point.lon]} icon={pinIcon} />}
                 {/* Place-name labels above the pin marker, on their own pane, so city names
                     stay legible under/near the marker instead of being covered by it. */}
-                <Pane name={LABELS_PANE_NAME} style={{ zIndex: LABELS_PANE_Z_INDEX, pointerEvents: 'none' }}>
-                  <TileLayer url={getLabelsTileUrl(isDark)} pane={LABELS_PANE_NAME} />
-                </Pane>
               </MapContainer>
 
               <button

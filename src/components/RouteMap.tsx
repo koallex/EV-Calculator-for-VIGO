@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Polyline, CircleMarker, Marker, Popup, Pane, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polyline, CircleMarker, Marker, Popup, useMap } from 'react-leaflet';
 import { latLngBounds, DivIcon } from 'leaflet';
 import type { RoutePoint } from '../services/routeElevation';
-import { getBaseTileUrl, getLabelsTileUrl, MAP_TILE_ATTRIBUTION, LABELS_PANE_NAME, LABELS_PANE_Z_INDEX } from '../utils/mapTiles';
+import { getBaseTileUrl, MAP_TILE_ATTRIBUTION } from '../utils/mapTiles';
 import 'leaflet/dist/leaflet.css';
 
 function FitRoute({ positions, extra }: { positions: [number, number][]; extra?: [number, number] | null }) {
@@ -10,14 +10,11 @@ function FitRoute({ positions, extra }: { positions: [number, number][]; extra?:
   useEffect(() => {
     if (positions.length < 2) return;
     const bounds = latLngBounds(extra ? [...positions, extra] : positions);
-    map.fitBounds(bounds, { padding: [24, 24], maxZoom: 14, animate: false });
+    map.fitBounds(bounds, { padding: [28, 28], maxZoom: 13, animate: false });
   }, [map, positions, extra]);
   return null;
 }
 
-// A small amber plug badge, built as a DivIcon (plain HTML/CSS, no extra image asset) so it's
-// visually distinct at a glance from the green/red start-end dots and from any Leaflet default
-// marker pin used elsewhere (e.g. LocationPickerModal's tap-to-pick pin).
 const chargingStopIcon = new DivIcon({
   className: '',
   html: '<div class="route-map-charge-pin">⚡</div>',
@@ -39,7 +36,6 @@ export const RouteMap: React.FC<RouteMapProps> = ({ points, isDark, chargingStop
   useEffect(() => {
     if (positions.length < 2) return;
     setDrawCount(2);
-    // ~1.8–2.2s Tesla-style draw along the polyline
     const frames = 70;
     const step = Math.max(1, Math.ceil(positions.length / frames));
     let count = 2;
@@ -50,22 +46,28 @@ export const RouteMap: React.FC<RouteMapProps> = ({ points, isDark, chargingStop
     }, 28);
     return () => window.clearInterval(timer);
   }, [points]);
+
   const animatedPositions = positions.slice(0, drawCount);
 
   return (
-    <div className={`overflow-hidden ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
-      <div className="flex items-center justify-between px-3 py-1.5">
-        <span className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Маршрут</span>
-        <span className="text-[10px] text-slate-600">А → Б</span>
-      </div>
+    <div className={`route-map-shell overflow-hidden ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
       <div className="route-map">
-        <MapContainer center={start} zoom={12} scrollWheelZoom={false} zoomControl={false} attributionControl={false}>
-          {/* Roads/terrain base, below the route line and markers. */}
+        <MapContainer
+          center={start}
+          zoom={12}
+          scrollWheelZoom={true}
+          zoomControl={false}
+          attributionControl={false}
+          className="route-map-leaflet"
+        >
           <TileLayer url={getBaseTileUrl(isDark)} attribution={MAP_TILE_ATTRIBUTION} />
           <FitRoute positions={positions} extra={stopPos} />
-          <Polyline positions={animatedPositions} pathOptions={{ color: '#10b981', weight: 6, opacity: 0.95 }} />
-          <CircleMarker center={start} radius={7} pathOptions={{ color: '#ffffff', weight: 3, fillColor: '#10b981', fillOpacity: 1 }} />
-          <CircleMarker center={end} radius={7} pathOptions={{ color: '#ffffff', weight: 3, fillColor: '#ef4444', fillOpacity: 1 }} />
+          <Polyline
+            positions={animatedPositions}
+            pathOptions={{ color: '#059669', weight: 5, opacity: 0.92 }}
+          />
+          <CircleMarker center={start} radius={8} pathOptions={{ color: '#fff', weight: 3, fillColor: '#10b981', fillOpacity: 1 }} />
+          <CircleMarker center={end} radius={8} pathOptions={{ color: '#fff', weight: 3, fillColor: '#ef4444', fillOpacity: 1 }} />
           {stopPos && (
             <Marker position={stopPos} icon={chargingStopIcon}>
               <Popup>
@@ -74,11 +76,6 @@ export const RouteMap: React.FC<RouteMapProps> = ({ points, isDark, chargingStop
               </Popup>
             </Marker>
           )}
-          {/* Place-name labels on their own pane, above the route line so city names stay
-              readable even where the route passes directly under them. */}
-          <Pane name={LABELS_PANE_NAME} style={{ zIndex: LABELS_PANE_Z_INDEX, pointerEvents: 'none' }}>
-            <TileLayer url={getLabelsTileUrl(isDark)} pane={LABELS_PANE_NAME} />
-          </Pane>
         </MapContainer>
         <div className="route-map-legend">
           <span><i className="route-dot route-dot-start" />А</span>
@@ -89,4 +86,3 @@ export const RouteMap: React.FC<RouteMapProps> = ({ points, isDark, chargingStop
     </div>
   );
 };
-
