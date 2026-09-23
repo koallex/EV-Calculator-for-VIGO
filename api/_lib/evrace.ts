@@ -1,8 +1,8 @@
 const EVRACE_API = 'https://evrace.by/api/stations-page';
 
 const PAGE_SIZE = 20;
-const MAX_CONCURRENCY = 6;
-const REQUEST_TIMEOUT_MS = 8000;
+const MAX_CONCURRENCY = 12;
+const REQUEST_TIMEOUT_MS = 4500;
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 let cache: { expiresAt: number; groups: any[]; totalGroups: number } | null = null;
@@ -78,6 +78,23 @@ const loadAllGroups = async (): Promise<any[]> => {
   }
 };
 
+const groupCoordinates = (group: any): { lat: number; lon: number } | null => {
+  const directLat = Number(group?.latitude ?? group?.lat);
+  const directLon = Number(group?.longitude ?? group?.lng ?? group?.lon);
+  if (Number.isFinite(directLat) && Number.isFinite(directLon)) return { lat: directLat, lon: directLon };
+
+  const poles = Array.isArray(group?.poles) ? group.poles : [];
+  const coords = poles.map((pole: any) => ({
+    lat: Number(pole?.lat ?? pole?.latitude),
+    lon: Number(pole?.lng ?? pole?.lon ?? pole?.longitude),
+  })).filter((p: { lat: number; lon: number }) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  if (!coords.length) return null;
+  return {
+    lat: coords.reduce((sum: number, p: { lat: number }) => sum + p.lat, 0) / coords.length,
+    lon: coords.reduce((sum: number, p: { lon: number }) => sum + p.lon, 0) / coords.length,
+  };
+};
+
 export const getEvraceGroups = async (bbox?: {
   minLat: number;
   maxLat: number;
@@ -87,11 +104,10 @@ export const getEvraceGroups = async (bbox?: {
   const groups = await loadAllGroups();
   if (!bbox) return groups;
   return groups.filter(group => {
-    const lat = Number(group?.latitude);
-    const lon = Number(group?.longitude);
-    return Number.isFinite(lat) && Number.isFinite(lon)
-      && lat >= bbox.minLat && lat <= bbox.maxLat
-      && lon >= bbox.minLon && lon <= bbox.maxLon;
+    const point = groupCoordinates(group);
+    return !!point
+      && point.lat >= bbox.minLat && point.lat <= bbox.maxLat
+      && point.lon >= bbox.minLon && point.lon <= bbox.maxLon;
   });
 };
 

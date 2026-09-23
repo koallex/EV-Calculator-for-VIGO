@@ -31,8 +31,6 @@ export interface ChargingStation {
 export interface RouteRefPoint { lat: number; lon: number; distanceFromStartKm: number; }
 
 const EVRACE_API = '/api/evrace/stations';
-const EVRACE_CACHE_KEY = 'vigo_evrace_stations_v2';
-const EVRACE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
@@ -40,7 +38,7 @@ const OVERPASS_ENDPOINTS = [
 ];
 
 const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-const CACHE_PREFIX = 'vigo_charging_stations_v5_';
+const CACHE_PREFIX = 'vigo_charging_stations_v6_';
 const EVRACE_MATCH_DISTANCE_KM = 0.08; // 80 m: same physical location in two datasets.
 
 const haversineKm = (aLat: number, aLon: number, bLat: number, bLon: number) => {
@@ -103,24 +101,50 @@ const collectPoleObjects = (record: any): any[] => {
   return out;
 };
 
-const stationFromEvraceRecord = (record: any, index: number): ChargingStation | null => {
-  const lat = asFiniteNumber(
+// EVRACE /api/stations-page returns coordinates and connector data on individual
+// `poles`, while the parent `group` contains the address/location_id. Older
+// normalization expected coordinates on the group itself, which made every group
+// disappear during bbox filtering. Keep the group-level fallback, but derive the
+// station point from its poles when needed.
+const getEvraceCoordinates = (record: any): { lat: number; lon: number } | null => {
+  const directLat = asFiniteNumber(
     record?.lat, record?.latitude, record?.y,
     record?.location?.lat, record?.location?.latitude,
     record?.coordinates?.lat, record?.coordinates?.latitude,
   );
-  const lon = asFiniteNumber(
+  const directLon = asFiniteNumber(
     record?.lng, record?.lon, record?.longitude, record?.x,
     record?.location?.lng, record?.location?.lon, record?.location?.longitude,
     record?.coordinates?.lng, record?.coordinates?.lon, record?.coordinates?.longitude,
   );
-  if (lat === undefined || lon === undefined) return null;
+  if (directLat !== undefined && directLon !== undefined) return { lat: directLat, lon: directLon };
+
+  const poles = collectPoleObjects(record);
+  const coords = poles.map((pole: any) => ({
+    lat: asFiniteNumber(pole?.lat, pole?.latitude, pole?.y, pole?.location?.lat),
+    lon: asFiniteNumber(pole?.lng, pole?.lon, pole?.longitude, pole?.x, pole?.location?.lng),
+  })).filter((p): p is { lat: number; lon: number } => p.lat !== undefined && p.lon !== undefined);
+
+  if (!coords.length) return null;
+  return {
+    lat: coords.reduce((sum, p) => sum + p.lat, 0) / coords.length,
+    lon: coords.reduce((sum, p) => sum + p.lon, 0) / coords.length,
+  };
+};
+
+const stationFromEvraceRecord = (record: any, index: number): ChargingStation | null => {
+  const coordinates = getEvraceCoordinates(record);
+  if (!coordinates) return null;
+  const { lat, lon } = coordinates;
 
   const poles = collectPoleObjects(record);
   const connectorValues: unknown[] = [
     record?.gun1_type, record?.gun2_type, record?.gun3_type, record?.gun4_type,
     record?.connector, record?.connector_type,
-    ...poles.flatMap((p: any) => [p?.type, p?.connector, p?.connector_type, p?.gun_type, p?.socket, p?.standard]),
+    ...poles.flatMap((p: any) => [
+      p?.type, p?.connector, p?.connector_type, p?.gun_type, p?.socket, p?.standard,
+      p?.gun1_type, p?.gun2_type, p?.gun3_type, p?.gun4_type,
+    ]),
   ];
   const ccsValues = connectorValues.filter(isCcs);
   const type2Values = connectorValues.filter(isType2);
@@ -130,13 +154,17 @@ const stationFromEvraceRecord = (record: any, index: number): ChargingStation | 
 
   const ccsPowers = [
     record?.ccs2_power, record?.ccs_power, record?.dc_power,
-    ...poles.filter((p: any) => isCcs(p?.type ?? p?.connector ?? p?.connector_type ?? p?.standard))
-      .flatMap((p: any) => [p?.power_kw, p?.power, p?.kw, p?.dc_power]),
+    ...poles.filter((p: any) => {
+      const values = [p?.type, p?.connector, p?.connector_type, p?.gun_type, p?.standard, p?.gun1_type, p?.gun2_type, p?.gun3_type, p?.gun4_type];
+      return values.some(isCcs);
+    }).flatMap((p: any) => [p?.power_kw, p?.power, p?.kw, p?.dc_power]),
   ].map(parsePowerKw).filter((v): v is number => v !== undefined);
   const type2Powers = [
     record?.type2_power, record?.ac_power,
-    ...poles.filter((p: any) => isType2(p?.type ?? p?.connector ?? p?.connector_type ?? p?.standard))
-      .flatMap((p: any) => [p?.power_kw, p?.power, p?.kw, p?.ac_power]),
+    ...poles.filter((p: any) => {
+      const values = [p?.type, p?.connector, p?.connector_type, p?.gun_type, p?.standard, p?.gun1_type, p?.gun2_type, p?.gun3_type, p?.gun4_type];
+      return values.some(isType2);
+    }).flatMap((p: any) => [p?.power_kw, p?.power, p?.kw, p?.ac_power]),
   ].map(parsePowerKw).filter((v): v is number => v !== undefined);
 
   // EVRACE's public registry is Belarus-only. If a record has coordinates but no explicit
@@ -183,7 +211,7 @@ const extractTotal = (payload: any): number | undefined => asFiniteNumber(
 );
 
 const fetchEvraceStationsForRoute = async (points: RouteRefPoint[]): Promise<ChargingStation[]> => {
-  const bbox = bboxForChunk(points, 5);
+  const bbox = bboxForChunk(points, 10);
   const params = new URLSearchParams({
     minLat: bbox.minLat.toFixed(5),
     maxLat: bbox.maxLat.toFixed(5),

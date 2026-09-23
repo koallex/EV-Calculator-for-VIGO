@@ -1,4 +1,4 @@
 EV-Calc-Dongfeng-Vigo
-Application version: 1.03
-Build package: 1.03
-EVRACE proxy/pagination fix
+Application version: 1.04
+Build package: 1.04
+EVRACE group/pole coordinate + connector fix

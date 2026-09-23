@@ -1,5 +1,7 @@
 import { getEvraceGroups, getEvraceStats } from '../_lib/evrace';
 
+export const config = { maxDuration: 60 };
+
 const numberParam = (value: unknown): number | undefined => {
   if (Array.isArray(value)) value = value[0];
   const n = Number(value);
@@ -22,7 +24,7 @@ export default async function handler(req: any, res: any) {
     const groups = await getEvraceGroups(hasBbox ? { minLat: minLat!, maxLat: maxLat!, minLon: minLon!, maxLon: maxLon! } : undefined);
     const stats = getEvraceStats();
 
-    res.setHeader('Cache-Control', 's-maxage=21600, stale-while-revalidate=86400');
+    res.setHeader('Cache-Control', 'public, s-maxage=21600, stale-while-revalidate=86400');
     return res.status(200).json({
       source: 'evrace',
       groups,
@@ -30,6 +32,7 @@ export default async function handler(req: any, res: any) {
         total_groups: stats.totalGroups ?? groups.length,
         returned_groups: groups.length,
         filtered: hasBbox,
+        cache: stats.cached,
       },
     });
   } catch (error) {
