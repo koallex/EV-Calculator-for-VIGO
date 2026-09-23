@@ -34,6 +34,7 @@ import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress 
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
 import { fetchChargingStationsAlongRoute, stationSupportsVigo, ChargingStation } from '../services/chargingStations';
+import { findNearbyFreeCcsChargers, FreeChargerResult } from '../services/nearbyFreeCharging';
 import { estimateChargingSession, findOptimalChargeTargetSoc, DEFAULT_UNKNOWN_STATION_POWER_KW, ChargeConnector } from '../utils/chargingPlanner';
 import { RouteMap } from './RouteMap';
 import { LocationPickerModal } from './LocationPickerModal';
@@ -154,6 +155,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   }>>([]);
   /** How many VIGO-compatible stations were found along the corridor before usefulness filtering. */
   const [stationsFoundAlongRoute, setStationsFoundAlongRoute] = useState(0);
+  const [nearbyFreeStatus, setNearbyFreeStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [nearbyFreeList, setNearbyFreeList] = useState<FreeChargerResult[]>([]);
+  const [nearbyFreeError, setNearbyFreeError] = useState('');
+
   const [gpsStatus, setGpsStatus] = useState<'searching' | 'ok' | 'error'>('searching');
   // Last known device position, kept only to center the map-picker modal near the user
   // instead of defaulting to Minsk when they open it (weather fetch above already has this
@@ -267,7 +272,50 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     window.open(web, '_blank', 'noopener,noreferrer');
   };
 
+  const searchNearbyFreeChargers = useCallback(async () => {
+    setNearbyFreeStatus('loading');
+    setNearbyFreeError('');
+    setNearbyFreeList([]);
+    try {
+      let origin: { lat: number; lon: number } | null = null;
+      if (startMode === 'gps' && gpsCoords) {
+        origin = { lat: gpsCoords.lat, lon: gpsCoords.lon };
+      } else if (startPin) {
+        origin = { lat: startPin.lat, lon: startPin.lon };
+      } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 12000,
+            maximumAge: 30000,
+          }),
+        );
+        origin = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      }
+      if (!origin) {
+        throw new Error('Нужна геолокация или точка А на карте');
+      }
+      const { results } = await findNearbyFreeCcsChargers(origin, { radiusKm: 40, limit: 10 });
+      setNearbyFreeList(results);
+      setNearbyFreeStatus('ready');
+      if (!results.length) {
+        setNearbyFreeError('Сейчас нет свободных CCS в радиусе ~40 км (или нет live-данных у оператора).');
+      }
+    } catch (e) {
+      setNearbyFreeStatus('error');
+      setNearbyFreeError(e instanceof Error ? e.message : String(e));
+    }
+  }, [startMode, gpsCoords, startPin]);
+
+  const applyFreeChargerAsDestination = (item: FreeChargerResult) => {
+    const name = item.station.address || item.station.name;
+    setDestinationAddress(name);
+    setDestinationPin({ lat: item.station.lat, lon: item.station.lon });
+    triggerHaptic('light', settings.hapticFeedback);
+  };
+
   const searchChargingStations = useCallback(async () => {
+
 
     if (!routeElevation || !routeForecast) return;
     let cancelled = false;
@@ -1099,6 +1147,61 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
         {routeLoading && <div className="text-xs text-emerald-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />{routeStatus || 'Подготавливаем расчёт…'}</div>}
         {routeError && <div className="text-xs text-rose-500">{routeError}</div>}
+
+        <div className={`rounded-xl border p-3 space-y-2 ${isDark ? 'border-slate-800 bg-slate-950/50' : 'border-slate-200 bg-slate-50'}`}>
+          <button
+            type="button"
+            onClick={() => { triggerHaptic('light', settings.hapticFeedback); void searchNearbyFreeChargers(); }}
+            disabled={nearbyFreeStatus === 'loading'}
+            className={`w-full rounded-lg px-3 py-2.5 text-[12px] font-semibold flex items-center justify-center gap-2 ${
+              isDark ? 'bg-slate-900 text-slate-200 hover:bg-slate-800' : 'bg-white text-slate-800 border border-slate-200'
+            }`}
+          >
+            {nearbyFreeStatus === 'loading' ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Ищем свободные CCS…</>
+            ) : (
+              <><PlugZap className="w-4 h-4" /> Ближайшая свободная зарядка</>
+            )}
+          </button>
+          <p className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+            Live-статус портов EVRace (CCS для VIGO) в радиусе ~40 км от вас
+          </p>
+          {nearbyFreeStatus === 'error' && (
+            <p className="text-[11px] text-rose-500">{nearbyFreeError}</p>
+          )}
+          {nearbyFreeStatus === 'ready' && nearbyFreeError && !nearbyFreeList.length && (
+            <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{nearbyFreeError}</p>
+          )}
+          {nearbyFreeList.length > 0 && (
+            <ul className="space-y-1.5 max-h-56 overflow-auto">
+              {nearbyFreeList.map((item) => (
+                <li key={item.station.id}>
+                  <button
+                    type="button"
+                    onClick={() => applyFreeChargerAsDestination(item)}
+                    className={`w-full text-left rounded-lg px-3 py-2 ${
+                      isDark ? 'bg-slate-900/80 hover:bg-slate-800' : 'bg-white hover:bg-slate-100 border border-slate-100'
+                    }`}
+                  >
+                    <div className={`text-[12px] font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
+                      {item.station.name}
+                    </div>
+                    <div className={`mt-0.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                      {item.distanceKm < 1
+                        ? `${Math.round(item.distanceKm * 1000)} м`
+                        : `${item.distanceKm.toFixed(1)} км`}
+                      {' · '}CCS свободно {item.freeCcs}
+                      {item.operator ? ` · ${item.operator}` : ''}
+                    </div>
+                    <div className={`mt-1 text-[10px] font-medium ${isDark ? 'text-emerald-400/90' : 'text-emerald-700'}`}>
+                      Построить маршрут сюда
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         {routeElevation && !routeElevation.elevationAvailable && routeElevation.elevationNote && (
           <div className={`text-xs rounded-lg px-3 py-2 ${isDark ? 'bg-amber-950/40 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>⚠ {routeElevation.elevationNote}</div>
         )}
