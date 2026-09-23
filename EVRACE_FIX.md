@@ -105,3 +105,32 @@ out — this looks like temporary trouble with those public mirrors rather than 
 codebase, but it means the OSM fallback can't currently cover for EVRACE being cold/blocked.
 Worth adding more mirrors and/or proxying Overpass through our own backend (same CORS-avoidance
 reasoning as the EVRACE proxy) if this keeps happening.
+
+# EVRACE integration fix v1.07 — still a bare 500 + Overpass ERR_CONNECTION_REFUSED
+
+**Symptom:** `/api/evrace/stations` still returned a bare 500 despite v1.06, and separately both
+Overpass mirrors now failed with `ERR_CONNECTION_REFUSED` (not the CORS error from v1.06) during
+a real route calculation with charging required.
+
+**Root cause of the 500, part 2:** v1.06 stopped `loadRegistry()` from blocking on a live EVRACE
+fetch, but it still blocks on `readRedisCache()` — a plain `await redis.get(...)` with no
+timeout of its own. If Upstash is slow or briefly unreachable, that single await can run long
+enough to hit Vercel Hobby's 10s hard execution limit, producing the exact same bodiless
+`FUNCTION_INVOCATION_FAILED` (→ bare `500` in the browser) as the bug v1.06 fixed, just from a
+different call site. Fixed by racing the Redis read against a 3s timeout (`withTimeout` in
+`api/_lib/evrace.ts`) so a stalled Redis call degrades to "treat as cache miss" — which still
+answers immediately via `loadRegistry`'s empty-result path — instead of hanging the function.
+Also: the empty-result path now seeds the per-instance memory cache too, so `getEvraceStats()`
+(called right after `getEvraceGroups()` in the same request) doesn't pay a second Redis round
+trip — and a second timeout window — for data the request already just fetched.
+
+**Overpass `ERR_CONNECTION_REFUSED`:** unlike the CORS error in v1.06, a connection *refused* on
+both public mirrors from the browser is a strong signal of a network-level block on the client
+side (firewall, DNS, VPN, browser extension, or a regional block) rather than an app bug — a
+server sending a CORS-rejecting response is still reachable; a refused connection generally isn't
+reachable at all from that network. Implemented the proxy this file already flagged as the
+likely fix: new `api/osm/stations.ts` runs the same dual-mirror Overpass query server-side (no
+CORS concept between servers, and not subject to whatever is blocking the user's browser), and
+`chargingStations.ts` now calls `/api/osm/stations?south=&west=&north=&east=` instead of
+`overpass-api.de` / `overpass.kumi.systems` directly. If Overpass failures persist after this,
+they're genuinely upstream (both mirrors down) rather than reachability from a specific network.

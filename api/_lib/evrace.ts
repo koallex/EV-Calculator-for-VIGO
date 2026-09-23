@@ -172,9 +172,27 @@ const fetchAllGroupsLive = async (): Promise<CachedRegistry> => {
   return { groups: Array.from(unique.values()), totalGroups, fetchedAt: Date.now(), failedPages };
 };
 
+// v1.07 fix: this await had no timeout of its own. loadRegistry() no longer blocks on a live
+// EVRACE fetch (see v1.06 above), but it still blocks on this Redis read — and if Upstash is
+// slow or briefly unreachable, that single await can itself run long enough to hit Vercel
+// Hobby's 10s hard execution limit, producing the exact same bodiless FUNCTION_INVOCATION_FAILED
+// (bare 500, no JSON) as the bug v1.06 fixed, just from a different cause. Race it against a
+// short timeout so a stalled Redis call degrades to "treat as cache miss" (which still answers
+// immediately, per loadRegistry's empty-result path) instead of hanging the function.
+const REDIS_READ_TIMEOUT_MS = 3000;
+
+const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Redis read timed out after ${ms}ms`)), ms);
+    promise.then(
+      value => { clearTimeout(timer); resolve(value); },
+      err => { clearTimeout(timer); reject(err); },
+    );
+  });
+
 const readRedisCache = async (): Promise<CachedRegistry | null> => {
   try {
-    const cached = await redis.get<CachedRegistry>(CACHE_KEY);
+    const cached = await withTimeout(redis.get<CachedRegistry>(CACHE_KEY), REDIS_READ_TIMEOUT_MS);
     return cached ?? null;
   } catch (e) {
     console.error('[evrace] Redis read failed:', e);
@@ -258,7 +276,14 @@ const loadRegistry = async (): Promise<CachedRegistry> => {
   // reachable right after a fresh deploy, which is exactly why EVRACE_FIX.md recommends hitting
   // /api/cron/evrace-refresh once manually right after deploying.
   refreshInBackground();
-  return { groups: [], totalGroups: 0, fetchedAt: 0, failedPages: 0 };
+  // v1.07: also seed the per-instance memory cache with this empty stub (previously only the
+  // hit path did this). Without it, getEvraceStats()'s own readRedisCache() call — made right
+  // after this one, in the same request — paid a second full Redis round trip (and a second
+  // REDIS_READ_TIMEOUT_MS in the worst case) for a call this request already just made.
+  const empty: CachedRegistry = { groups: [], totalGroups: 0, fetchedAt: 0, failedPages: 0 };
+  memoryCache = empty;
+  memoryCachedAt = Date.now();
+  return empty;
 };
 
 const groupCoordinates = (group: any): { lat: number; lon: number } | null => {

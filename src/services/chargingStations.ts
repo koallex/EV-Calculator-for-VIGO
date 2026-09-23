@@ -32,10 +32,13 @@ export interface RouteRefPoint { lat: number; lon: number; distanceFromStartKm: 
 
 const EVRACE_API = '/api/evrace/stations';
 
-const OVERPASS_ENDPOINTS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-];
+// v1.07: routed through our own backend (api/osm/stations.ts) instead of calling
+// overpass-api.de / overpass.kumi.systems directly from the browser. Direct browser calls hit
+// two independent failure modes — CORS preflight failures on overpass-api.de, and outright
+// ERR_CONNECTION_REFUSED to both mirrors on networks that block them at the DNS/firewall level.
+// A server-to-server request from our backend has neither problem.
+const OSM_PROXY_API = '/api/osm/stations';
+const OSM_PROXY_TIMEOUT_MS = 12000;
 
 const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const CACHE_PREFIX = 'vigo_charging_stations_v6_';
@@ -370,26 +373,27 @@ const fetchOsmStationsAlongRoute = async (points: RouteRefPoint[], bufferKm: num
       const index = nextIndex++;
       if (index >= chunks.length) return;
       const bbox = bboxForChunk(chunks[index], bufferKm);
-      const south = bbox.minLat.toFixed(5), west = bbox.minLon.toFixed(5), north = bbox.maxLat.toFixed(5), east = bbox.maxLon.toFixed(5);
-      const query = `[out:json][timeout:12];(nwr["amenity"="charging_station"](${south},${west},${north},${east});nwr["man_made"="charge_point"](${south},${west},${north},${east});nwr["amenity"="fuel"]["fuel:electricity"="yes"](${south},${west},${north},${east}););out center tags;`;
-      for (const endpoint of OVERPASS_ENDPOINTS) {
-        const controller = new AbortController();
-        const timeout = window.setTimeout(() => controller.abort(), 14000);
-        try {
-          const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(query)}`, signal: controller.signal });
-          if (!res.ok) throw new Error(`Overpass ${res.status}`);
-          const data = await res.json();
-          successfulRequests++;
-          for (const el of data.elements || []) {
-            const station = stationFromOsmElement(el);
-            if (!station) continue;
-            const onRoute = stationOnRoute(station, points, bufferKm);
-            if (onRoute) results.set(station.id, onRoute);
-          }
-          break;
-        } catch (e) { lastError = e; }
-        finally { window.clearTimeout(timeout); }
-      }
+      const params = new URLSearchParams({
+        south: bbox.minLat.toFixed(5),
+        west: bbox.minLon.toFixed(5),
+        north: bbox.maxLat.toFixed(5),
+        east: bbox.maxLon.toFixed(5),
+      });
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), OSM_PROXY_TIMEOUT_MS);
+      try {
+        const res = await fetch(`${OSM_PROXY_API}?${params.toString()}`, { headers: { Accept: 'application/json' }, signal: controller.signal });
+        if (!res.ok) throw new Error(`OSM proxy ${res.status}`);
+        const data = await res.json();
+        successfulRequests++;
+        for (const el of data.elements || []) {
+          const station = stationFromOsmElement(el);
+          if (!station) continue;
+          const onRoute = stationOnRoute(station, points, bufferKm);
+          if (onRoute) results.set(station.id, onRoute);
+        }
+      } catch (e) { lastError = e; }
+      finally { window.clearTimeout(timeout); }
     }
   };
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
