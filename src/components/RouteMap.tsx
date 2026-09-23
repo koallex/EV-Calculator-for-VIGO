@@ -53,10 +53,10 @@ export const RouteMap: React.FC<RouteMapProps> = ({ points, isDark, chargingStop
   const animatedPositions = positions.slice(0, drawCount);
 
   return (
-    <div className={`overflow-hidden rounded-2xl border ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'}`}>
-      <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-xs font-bold">Маршрут</span>
-        <span className="text-[10px] text-slate-500">А → Б · жестом масштаб</span>
+    <div className={`overflow-hidden ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
+      <div className="flex items-center justify-between px-3 py-1.5">
+        <span className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Маршрут</span>
+        <span className="text-[10px] text-slate-600">А → Б</span>
       </div>
       <div className="route-map">
         <MapContainer center={start} zoom={12} scrollWheelZoom={false} zoomControl={false} attributionControl={false}>

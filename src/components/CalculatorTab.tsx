@@ -221,13 +221,13 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
   // Searches stations along the current route. It is invoked automatically only when the
   // unassisted arrival SoC is below 20%, or manually from the button shown for safer routes.
-  // Separate Yandex Maps vs Navigator destinations.
-  // On phones both https://yandex.ru/maps and /navi are often claimed by the Navigator app
-  // via Universal Links — so both buttons appear to "open Navigator". We use distinct
-  // app URL-schemes (yandexmaps:// vs yandexnavi://) with HTTPS fallbacks.
+  // Distinct destinations (no shared open-handler):
+  // Maps  → maps.yandex.ru (and yandexmaps:// on mobile)
+  // Navi  → yandex.ru/navi + yandexnavi://build_route_on_map
+  // The previous shared fallback often left both buttons on Maps.
   const yandexRouteLinks = (() => {
     if (!routeElevation?.points?.length) {
-      return { rtext: '', mapsHttps: '#', mapsApp: '#', naviHttps: '#', naviApp: '#' };
+      return { mapsHref: '#', naviHref: '#' };
     }
     const pts = routeElevation.points;
     const a = pts[0];
@@ -240,48 +240,50 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     if (via) parts.push(`${via.lat},${via.lon}`);
     parts.push(`${b.lat},${b.lon}`);
     const rtext = parts.join('~');
-    const mapsHttpsRaw = `https://maps.yandex.ru/?mode=routes&rtext=${rtext}&rtt=auto`;
-    const mapsApp = `yandexmaps://maps.yandex.ru/?rtext=${rtext}&rtt=auto`;
-    const naviHttpsRaw = `https://yandex.ru/navi/?rtext=${rtext}&rtt=auto`;
-    let naviApp = `yandexnavi://build_route_on_map?lat_from=${a.lat}&lon_from=${a.lon}&lat_to=${b.lat}&lon_to=${b.lon}`;
-    if (via) {
-      naviApp += `&lat_via_0=${via.lat}&lon_via_0=${via.lon}`;
-    }
-    return {
-      rtext,
-      mapsHttps: mapsHttpsRaw,
-      mapsApp,
-      naviHttps: naviHttpsRaw,
-      naviApp,
-    };
+    // Web Maps (maps subdomain — not yandex.ru/maps which some clients alias to Navi)
+    const mapsHref = `https://maps.yandex.ru/?mode=routes&rtext=${rtext}&rtt=auto`;
+    // Navigator: prefer app scheme; browsers without the app fall through poorly on <a href>,
+    // so we also keep https://yandex.ru/navi as the visible href and open the scheme on click.
+    let naviHref = `https://yandex.ru/navi/?rtext=${rtext}&rtt=auto`;
+    return { mapsHref, naviHref, rtext, a, b, via };
   })();
 
-  const openAppWithHttpsFallback = (appUrl: string, httpsUrl: string) => {
-    let cancelled = false;
-    const cancel = () => {
-      cancelled = true;
-    };
-    // If the app opens, the page usually hides/blurs — cancel the web fallback.
-    window.addEventListener('pagehide', cancel, { once: true });
-    window.addEventListener('blur', cancel, { once: true });
-    window.location.href = appUrl;
-    window.setTimeout(() => {
-      window.removeEventListener('pagehide', cancel);
-      window.removeEventListener('blur', cancel);
-      if (!cancelled) {
-        window.location.href = httpsUrl;
-      }
-    }, 600);
-  };
-
   const openYandexMaps = (e: React.MouseEvent) => {
+    // Try Maps app scheme first; do not touch Navigator URLs.
+    const rtext = yandexRouteLinks.rtext;
+    if (!rtext) return;
     e.preventDefault();
-    openAppWithHttpsFallback(yandexRouteLinks.mapsApp, yandexRouteLinks.mapsHttps);
+    const app = `yandexmaps://maps.yandex.ru/?rtext=${rtext}&rtt=auto`;
+    const web = yandexRouteLinks.mapsHref;
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = app;
+    document.body.appendChild(iframe);
+    window.setTimeout(() => {
+      try { document.body.removeChild(iframe); } catch { /* ignore */ }
+      window.open(web, '_blank', 'noopener,noreferrer');
+    }, 400);
   };
 
   const openYandexNavi = (e: React.MouseEvent) => {
+    const { a, b, via, naviHref } = yandexRouteLinks as {
+      a?: { lat: number; lon: number };
+      b?: { lat: number; lon: number };
+      via?: { lat: number; lon: number } | null;
+      naviHref: string;
+    };
+    if (!a || !b) return;
     e.preventDefault();
-    openAppWithHttpsFallback(yandexRouteLinks.naviApp, yandexRouteLinks.naviHttps);
+    let app = `yandexnavi://build_route_on_map?lat_from=${a.lat}&lon_from=${a.lon}&lat_to=${b.lat}&lon_to=${b.lon}`;
+    if (via) app += `&lat_via_0=${via.lat}&lon_via_0=${via.lon}`;
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = app;
+    document.body.appendChild(iframe);
+    window.setTimeout(() => {
+      try { document.body.removeChild(iframe); } catch { /* ignore */ }
+      window.open(naviHref, '_blank', 'noopener,noreferrer');
+    }, 400);
   };
 
   const searchChargingStations = useCallback(async () => {
@@ -1076,69 +1078,36 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   : statusTone === 'ok'
                   ? 'text-amber-500'
                   : 'text-rose-500';
-              const slower = getWhatIfScenario(Math.max(20, plannedSpeedKmH - 10));
-              const noClimate = getClimateScenario(false);
               return (
               <div
                 id="route-result-main"
-                className={`rounded-2xl border p-4 transition-shadow duration-500 ${
-                  resultHighlight
-                    ? isDark
-                      ? 'bg-slate-950/80 border-emerald-400/70 shadow-lg shadow-emerald-500/15 ring-2 ring-emerald-400/30'
-                      : 'bg-emerald-50/80 border-emerald-400 shadow-lg shadow-emerald-500/10 ring-2 ring-emerald-400/40'
-                    : isDark
-                    ? 'bg-slate-950/70 border-emerald-900/60'
-                    : 'bg-emerald-50/60 border-emerald-200'
+                className={`rounded-2xl border p-5 ${
+                  isDark ? 'bg-slate-950 border-slate-800/80' : 'bg-white border-slate-200'
                 }`}
               >
                 <div className="text-center">
-                  <div className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>SOC на финише</div>
-                  <div className={`mt-1 text-5xl font-black font-mono ${statusColor}`}>
+                  <div className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>На финише</div>
+                  <div className={`mt-1 text-6xl font-black font-mono tracking-tight ${statusColor}`}>
                     <AnimatedNumber value={arrival} decimals={0} suffix="%" className={statusColor} />
                   </div>
-                  <div className={`mt-1 text-xs font-semibold px-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{statusText}</div>
-                  <div className={`mt-1.5 text-[11px] leading-snug px-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Ориентировочно — зависит от стиля езды и погоды
-                  </div>
-                </div>
-
-                <div className={`mt-4 h-3 rounded-full overflow-hidden ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`}>
-                  <div
-                    className={`h-full rounded-full transition-all duration-300 ${statusTone === 'good' ? 'bg-emerald-500' : statusTone === 'ok' ? 'bg-amber-500' : 'bg-rose-500'}`}
-                    style={{ width: `${Math.min(100, Math.max(0, arrival))}%` }}
-                  />
-                </div>
-                <div className="mt-2 flex justify-between text-[10px] text-slate-500">
-                  <span>0%</span>
-                  <span>старт {Math.round(startSoc)}%</span>
-                  <span>100%</span>
-                </div>
-
-                <div className="mt-3 grid grid-cols-2 gap-2 text-center">
-                  <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-900/80' : 'bg-white/80'}`}>
-                    <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Расход</div>
-                    <div className="text-sm font-black font-mono">
-                      <AnimatedNumber value={routeForecast.consumption} decimals={1} />
-                    </div>
-                    <div className="text-[10px] text-slate-500">кВт⋅ч/100</div>
-                  </div>
-                  <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-900/80' : 'bg-white/80'}`}>
-                    <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Всего</div>
-                    <div className="text-sm font-black font-mono">
-                      <AnimatedNumber value={routeForecast.energyKwh} decimals={1} />
-                    </div>
-                    <div className="text-[10px] text-slate-500">кВт⋅ч</div>
+                  <div className={`mt-2 text-[12px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{statusText}</div>
+                  <div className={`mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[12px] tabular-nums ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                    <span><span className={`font-mono ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{routeForecast.consumption.toFixed(1)}</span> кВт⋅ч/100</span>
+                    <span className={isDark ? 'text-slate-700' : 'text-slate-300'}>·</span>
+                    <span><span className={`font-mono ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{routeForecast.energyKwh.toFixed(1)}</span> кВт⋅ч</span>
+                    <span className={isDark ? 'text-slate-700' : 'text-slate-300'}>·</span>
+                    <span>старт {Math.round(startSoc)}%</span>
                   </div>
                 </div>
 
                 {/* Mid-route charging: automatic below 20%; manual button at 20%+ */}
                 {routeForecast && (
-                  <div className={`mt-3 rounded-xl border p-3 ${isDark ? 'bg-sky-950/30 border-sky-800/50' : 'bg-sky-50 border-sky-200'}`}>
-                    <div className={`flex items-center gap-1.5 text-xs font-bold ${isDark ? 'text-sky-300' : 'text-sky-800'}`}>
+                  <div className={`mt-3 rounded-xl p-3 ${isDark ? 'bg-slate-900/60' : 'bg-slate-100/80'}`}>
+                    <div className={`flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                       <PlugZap className="w-3.5 h-3.5" /> {arrival < 20 ? 'Зарядка в пути' : 'Зарядка по маршруту'}
                     </div>
                     {chargingSuggestionStatus === 'loading' && (
-                      <p className={`mt-1 text-[11px] flex items-center gap-1.5 ${isDark ? 'text-sky-200/70' : 'text-sky-700'}`}>
+                      <p className={`mt-1 text-[11px] flex items-center gap-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                         <Loader2 className="w-3 h-3 animate-spin" /> Ищем станции вдоль маршрута…
                       </p>
                     )}
@@ -1152,38 +1121,43 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       </button>
                     )}
                     {chargingSuggestionStatus === 'unavailable' && (
-                      <p className={`mt-1 text-[11px] ${isDark ? 'text-sky-200/70' : 'text-sky-700'}`}>
+                      <p className={`mt-1 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                         {stationsFoundAlongRoute > 0
                           ? `Вдоль маршрута есть ${stationsFoundAlongRoute} станций с CCS/Type2 (коридор 5 км), но ни одна не подходит как остановка: либо уже хватает заряда до финиша, либо до станции не доехать с запасом ~10%. Попробуйте другой стартовый SOC.`
                           : 'Не нашли станций с CCS или Type2 в коридоре 5 км от маршрута (EVRACE + OSM). GBT-only станции для VIGO не учитываются.'}
                       </p>
                     )}
                     {chargingSuggestionStatus === 'error' && (
-                      <p className={`mt-1 text-[11px] ${isDark ? 'text-sky-200/70' : 'text-sky-700'}`}>
+                      <p className={`mt-1 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                         Не удалось получить список станций (EVRACE/OSM). Пересчитайте маршрут или попробуйте позже.
                       </p>
                     )}
                     {chargingSuggestionStatus === 'ready' && chargingSuggestion && (
                       <>
-                        <p className={`mt-1 text-[11px] ${isDark ? 'text-sky-200/90' : 'text-sky-900'}`}>
+                        <p className={`mt-2 text-[12px] leading-snug ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
                           <span className="font-semibold">{chargingSuggestion.station.name}</span>
                           {chargingSuggestion.station.address ? ` · ${chargingSuggestion.station.address}` : ''}
-                          {' · '}~{Math.round(chargingSuggestion.station.distanceAlongRouteKm)} км от старта
+                          {' · '}~{Math.round(chargingSuggestion.station.distanceAlongRouteKm)} км
                         </p>
-                        <p className={`mt-1 text-[11px] ${isDark ? 'text-sky-200/70' : 'text-sky-700'}`}>
-                          {chargingSuggestion.connector === 'ccs2' ? 'CCS (Combo2)' : 'Type2 (AC)'} · подъедете с ~{Math.round(chargingSuggestion.socAtStation)}% ·
-                          {' '}заряжать до <span className="font-semibold">{Math.round(chargingSuggestion.targetSoc)}%</span> (~{chargingSuggestion.session.minutes} мин, {chargingSuggestion.session.energyKwh.toFixed(1)} кВт⋅ч{chargingSuggestion.session.avgPowerKw ? `, ~${chargingSuggestion.session.avgPowerKw} кВт ср.` : ''})
+                        <p className={`mt-1 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                          {chargingSuggestion.connector === 'ccs2' ? 'CCS' : 'Type2'} · ~{Math.round(chargingSuggestion.socAtStation)}% → {Math.round(chargingSuggestion.targetSoc)}% · {chargingSuggestion.session.minutes} мин
+                          {chargingSuggestion.session.avgPowerKw ? ` · ~${chargingSuggestion.session.avgPowerKw} кВт` : ''}
                         </p>
-                        <p className={`mt-1 text-[11px] font-semibold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
-                          После этой зарядки прогноз SOC на финише: {Math.round(chargingSuggestion.finishSocAfterCharge)}%
-                        </p>
+                        <div className={`mt-3 rounded-lg px-3 py-2.5 text-center ${isDark ? 'bg-emerald-500/15' : 'bg-emerald-500/10'}`}>
+                          <div className={`text-[10px] font-medium uppercase tracking-wide ${isDark ? 'text-emerald-400/80' : 'text-emerald-700/70'}`}>
+                            SOC на финише после зарядки
+                          </div>
+                          <div className={`mt-0.5 text-3xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                            {Math.round(chargingSuggestion.finishSocAfterCharge)}%
+                          </div>
+                        </div>
                       </>
                     )}
                   </div>
                 )}
 
                     {/* Карта маршрута — сразу под результатом SOC / зарядкой */}
-                <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <div className={`mt-4 rounded-xl border overflow-hidden ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
                   <RouteMap
                     points={routeElevation.points}
                     isDark={isDark}
@@ -1195,20 +1169,20 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   />
                   <div className={`flex gap-2 p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
                     <a
-                      href={yandexRouteLinks.mapsHttps}
+                      href={yandexRouteLinks.mapsHref}
                       onClick={openYandexMaps}
                       target="_blank"
                       rel="noreferrer"
-                      className={`flex-1 rounded-lg border px-3 py-2 text-center text-[11px] font-bold ${isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
+                      className={`flex-1 rounded-lg px-3 py-2 text-center text-[11px] font-medium ${isDark ? 'bg-slate-900/80 text-slate-400 hover:text-slate-200' : 'bg-slate-100 text-slate-600 hover:text-slate-800'}`}
                     >
                       Яндекс Карты
                     </a>
                     <a
-                      href={yandexRouteLinks.naviHttps}
+                      href={yandexRouteLinks.naviHref}
                       onClick={openYandexNavi}
                       target="_blank"
                       rel="noreferrer"
-                      className={`flex-1 rounded-lg border px-3 py-2 text-center text-[11px] font-bold ${isDark ? 'border-slate-700 bg-slate-900 text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
+                      className={`flex-1 rounded-lg px-3 py-2 text-center text-[11px] font-medium ${isDark ? 'bg-slate-900/80 text-slate-400 hover:text-slate-200' : 'bg-slate-100 text-slate-600 hover:text-slate-800'}`}
                     >
                       Яндекс Навигатор
                     </a>
@@ -1216,92 +1190,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 </div>
 
 
-                {/* Low-reserve action banner */}
-                {statusTone === 'low' && (
-                  <div className={`mt-3 rounded-xl border p-3 ${isDark ? 'bg-rose-950/40 border-rose-700/50' : 'bg-rose-50 border-rose-300'}`}>
-                    <div className={`text-xs font-bold ${isDark ? 'text-rose-300' : 'text-rose-800'}`}>
-                      Низкий запас на финише
-                    </div>
-                    <p className={`mt-1 text-[11px] ${isDark ? 'text-rose-200/80' : 'text-rose-700'}`}>
-                      При текущих скорости, климате и стартовом SOC запас будет очень маленьким. Варианты:
-                    </p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {slower && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            triggerHaptic('light', settings.hapticFeedback);
-                            applyWhatIfSpeed(Math.max(20, plannedSpeedKmH - 10));
-                          }}
-                          className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold border ${
-                            isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-rose-200 text-rose-900'
-                          }`}
-                        >
-                          Снизить скорость до {Math.max(20, plannedSpeedKmH - 10)} км/ч
-                          <span className="opacity-70"> → {Math.round(slower.arrivalSoc)}%</span>
-                        </button>
-                      )}
-                      {climateOn && noClimate && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            triggerHaptic('light', settings.hapticFeedback);
-                            applyClimateScenario(false);
-                          }}
-                          className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold border ${
-                            isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-rose-200 text-rose-900'
-                          }`}
-                        >
-                          Выключить климат
-                          <span className="opacity-70"> → {Math.round(noClimate.arrivalSoc)}%</span>
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          triggerHaptic('light', settings.hapticFeedback);
-                          updateRouteStartSoc(Math.min(100, startSoc + 10));
-                        }}
-                        className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold border ${
-                          isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-rose-200 text-rose-900'
-                        }`}
-                      >
-                        +10% к стартовому SOC
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {routeWeather && (
-                  <ChipRow
-                    isDark={isDark}
-                    className="mt-3 justify-center"
-                    items={[
-                      {
-                        label: (
-                          <span className="inline-flex items-center gap-1"><CloudSun className="w-3 h-3" />Погода</span>
-                        ),
-                        value: (
-                          <>
-                            {routeForecast.weatherLabel}
-                            <span className="font-normal opacity-70">
-                              {' · '}{weatherMode === 'planning' ? 'ручные условия' : `к ${routeWeather.arrivalDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`}
-                            </span>
-                          </>
-                        ),
-                      },
-                      {
-                        label: (
-                          <span className="inline-flex items-center gap-1">
-                            <ArrowDown className="w-3 h-3 shrink-0" style={{ transform: `rotate(${routeForecast.relativeWindAngle}deg)` }} />
-                            Ветер
-                          </span>
-                        ),
-                        value: routeForecast.windLabel,
-                      },
-                    ]}
-                  />
-                )}
               </div>
               );
             })()}
