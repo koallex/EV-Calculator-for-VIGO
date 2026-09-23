@@ -142,6 +142,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     stationPowerAssumed: boolean;
   } | null>(null);
   const [chargingSuggestionStatus, setChargingSuggestionStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>('idle');
+  /** How many VIGO-compatible stations were found along the corridor before usefulness filtering. */
+  const [stationsFoundAlongRoute, setStationsFoundAlongRoute] = useState(0);
   const [gpsStatus, setGpsStatus] = useState<'searching' | 'ok' | 'error'>('searching');
   // Last known device position, kept only to center the map-picker modal near the user
   // instead of defaulting to Minsk when they open it (weather fetch above already has this
@@ -224,16 +226,17 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     let cancelled = false;
     setChargingSuggestionStatus('loading');
     try {
-      const stations = await fetchChargingStationsAlongRoute(routeElevation.points, 3);
+      const stations = await fetchChargingStationsAlongRoute(routeElevation.points, 5);
       if (cancelled) return;
+      const vigoStations = stations.filter(stationSupportsVigo);
+      setStationsFoundAlongRoute(vigoStations.length);
       const batteryCap = settings.batteryCapacityKwh || 51.87;
       const totalDistanceKm = routeElevation.distanceKm;
       const totalEnergyKwh = routeForecast.energyKwh;
       const socAtDistance = (distanceKm: number) =>
         startSoc - (totalEnergyKwh * (distanceKm / Math.max(0.001, totalDistanceKm)) / batteryCap) * 100;
 
-      const candidates = stations
-        .filter(stationSupportsVigo)
+      const candidates = vigoStations
         .map((station) => ({
           station,
           socAtStation: socAtDistance(station.distanceAlongRouteKm),
@@ -321,6 +324,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     if (!routeElevation || !routeForecast || routeForecast.arrivalSoc >= 20) {
       setChargingSuggestion(null);
       setChargingSuggestionStatus('idle');
+      setStationsFoundAlongRoute(0);
       return;
     }
     void searchChargingStations();
@@ -1063,12 +1067,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     )}
                     {chargingSuggestionStatus === 'unavailable' && (
                       <p className={`mt-1 text-[11px] ${isDark ? 'text-sky-200/70' : 'text-sky-700'}`}>
-                        Не нашли на OSM зарядку с CCS2/Type2 в радиусе 3 км от маршрута, до которой хватит текущего заряда. Возможно, стоит увеличить стартовый SOC.
+                        {stationsFoundAlongRoute > 0
+                          ? `Вдоль маршрута есть ${stationsFoundAlongRoute} станций с CCS/Type2 (коридор 5 км), но ни одна не подходит как остановка: либо уже хватает заряда до финиша, либо до станции не доехать с запасом ~10%. Попробуйте другой стартовый SOC.`
+                          : 'Не нашли станций с CCS или Type2 в коридоре 5 км от маршрута (EVRACE + OSM). GBT-only станции для VIGO не учитываются.'}
                       </p>
                     )}
                     {chargingSuggestionStatus === 'error' && (
                       <p className={`mt-1 text-[11px] ${isDark ? 'text-sky-200/70' : 'text-sky-700'}`}>
-                        Не удалось запросить данные о зарядках (Overpass). Попробуйте пересчитать маршрут ещё раз.
+                        Не удалось получить список станций (EVRACE/OSM). Пересчитайте маршрут или попробуйте позже.
                       </p>
                     )}
                     {chargingSuggestionStatus === 'ready' && chargingSuggestion && (
@@ -1079,7 +1085,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                           {' · '}~{Math.round(chargingSuggestion.station.distanceAlongRouteKm)} км от старта
                         </p>
                         <p className={`mt-1 text-[11px] ${isDark ? 'text-sky-200/70' : 'text-sky-700'}`}>
-                          {chargingSuggestion.connector === 'ccs2' ? 'CCS2' : 'Type2 (AC)'} · подъедете с ~{Math.round(chargingSuggestion.socAtStation)}% ·
+                          {chargingSuggestion.connector === 'ccs2' ? 'CCS (Combo2)' : 'Type2 (AC)'} · подъедете с ~{Math.round(chargingSuggestion.socAtStation)}% ·
                           {' '}заряжать до <span className="font-semibold">{Math.round(chargingSuggestion.targetSoc)}%</span> (~{chargingSuggestion.session.minutes} мин, {chargingSuggestion.session.energyKwh.toFixed(1)} кВт⋅ч{chargingSuggestion.session.avgPowerKw ? `, ~${chargingSuggestion.session.avgPowerKw} кВт ср.` : ''})
                         </p>
                         <p className={`mt-1 text-[11px] font-semibold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>

@@ -41,7 +41,7 @@ const OSM_PROXY_API = '/api/osm/stations';
 const OSM_PROXY_TIMEOUT_MS = 12000;
 
 const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-const CACHE_PREFIX = 'vigo_charging_stations_v6_';
+const CACHE_PREFIX = 'vigo_charging_stations_v7_';
 const EVRACE_MATCH_DISTANCE_KM = 0.08; // 80 m: same physical location in two datasets.
 
 const haversineKm = (aLat: number, aLon: number, bLat: number, bLon: number) => {
@@ -87,9 +87,21 @@ const normalizeConnector = (value: unknown): string => {
     .replace('type2c', 'type2');
 };
 
+// EVRACE labels the Combo2/CCS Type 2 DC gun simply as "CCS" (not "CCS2").
+// OSM uses socket:type2_combo / ccs / ccs2. All of these are the same physical plug on VIGO.
 const isCcs = (value: unknown) => {
   const s = normalizeConnector(value);
-  return s === 'ccs' || s === 'ccs2' || s === 'ccscombo' || s === 'combo2' || s === 'type2combo';
+  return (
+    s === 'ccs' ||
+    s === 'ccs2' ||
+    s === 'ccscombo' ||
+    s === 'ccscombo2' ||
+    s === 'combo' ||
+    s === 'combo2' ||
+    s === 'type2combo' ||
+    s === 'iec62196type2combo' ||
+    s.includes('ccs')
+  );
 };
 
 const isType2 = (value: unknown) => {
@@ -401,7 +413,7 @@ const fetchOsmStationsAlongRoute = async (points: RouteRefPoint[], bufferKm: num
   return Array.from(results.values());
 };
 
-export async function fetchChargingStationsAlongRoute(points: RouteRefPoint[], bufferKm = 3): Promise<ChargingStation[]> {
+export async function fetchChargingStationsAlongRoute(points: RouteRefPoint[], bufferKm = 5): Promise<ChargingStation[]> {
   if (points.length < 2) return [];
   const cacheKey = cacheKeyForRoute(points);
   try {
