@@ -30,8 +30,8 @@ export interface ChargingStation {
 
 export interface RouteRefPoint { lat: number; lon: number; distanceFromStartKm: number; }
 
-const EVRACE_API = 'https://evrace.by/api/stations-page';
-const EVRACE_CACHE_KEY = 'vigo_evrace_stations_v1';
+const EVRACE_API = '/api/evrace/stations';
+const EVRACE_CACHE_KEY = 'vigo_evrace_stations_v2';
 const EVRACE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 const OVERPASS_ENDPOINTS = [
@@ -40,7 +40,7 @@ const OVERPASS_ENDPOINTS = [
 ];
 
 const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-const CACHE_PREFIX = 'vigo_charging_stations_v4_';
+const CACHE_PREFIX = 'vigo_charging_stations_v5_';
 const EVRACE_MATCH_DISTANCE_KM = 0.08; // 80 m: same physical location in two datasets.
 
 const haversineKm = (aLat: number, aLon: number, bLat: number, bLon: number) => {
@@ -172,79 +172,33 @@ const stationFromEvraceRecord = (record: any, index: number): ChargingStation | 
 
 const extractStationRecords = (payload: any): any[] => {
   if (Array.isArray(payload)) return payload;
-  const candidates = [payload?.stations, payload?.items, payload?.rows, payload?.results, payload?.data, payload?.records];
+  const candidates = [payload?.groups, payload?.stations, payload?.items, payload?.rows, payload?.results, payload?.data, payload?.records];
   for (const candidate of candidates) if (Array.isArray(candidate)) return candidate;
   return [];
 };
 
 const extractTotal = (payload: any): number | undefined => asFiniteNumber(
   payload?.total, payload?.count, payload?.totalCount, payload?.pagination?.total,
-  payload?.meta?.total, payload?.data?.total,
+  payload?.meta?.total, payload?.meta?.total_groups, payload?.data?.total,
 );
 
-const fetchEvracePage = async (limit: number, offset: number): Promise<{ records: any[]; total?: number }> => {
-  const url = `${EVRACE_API}?limit=${limit}&offset=${offset}`;
-  const res = await fetch(url, { headers: { Accept: 'application/json', 'Accept-Language': 'ru' } });
-  if (!res.ok) throw new Error(`EVRACE ${res.status}`);
+const fetchEvraceStationsForRoute = async (points: RouteRefPoint[]): Promise<ChargingStation[]> => {
+  const bbox = bboxForChunk(points, 5);
+  const params = new URLSearchParams({
+    minLat: bbox.minLat.toFixed(5),
+    maxLat: bbox.maxLat.toFixed(5),
+    minLon: bbox.minLon.toFixed(5),
+    maxLon: bbox.maxLon.toFixed(5),
+  });
+  const res = await fetch(`${EVRACE_API}?${params.toString()}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`EVRACE proxy ${res.status}`);
   const payload = await res.json();
-  return { records: extractStationRecords(payload), total: extractTotal(payload) };
-};
-
-const loadEvraceStations = async (): Promise<ChargingStation[]> => {
-  try {
-    const cachedRaw = localStorage.getItem(EVRACE_CACHE_KEY);
-    if (cachedRaw) {
-      const cached = JSON.parse(cachedRaw);
-      if (cached.expiresAt > Date.now() && Array.isArray(cached.stations)) return cached.stations as ChargingStation[];
-    }
-  } catch { /* ignore cache */ }
-
-  // EVRACE accepts limit/offset pagination. Use a large page first so the normal case needs
-  // only 2–3 requests for the whole Belarus registry. If the API enforces a smaller limit,
-  // continue with the actual returned page size.
-  const first = await fetchEvracePage(1000, 0);
-  const firstRecords = first.records;
-  if (!firstRecords.length) return [];
-
-  const total = first.total;
-  const pageSize = firstRecords.length;
-  const offsets: number[] = [];
-  if (total !== undefined && total > pageSize) {
-    for (let offset = pageSize; offset < total; offset += pageSize) offsets.push(offset);
-  } else if (total === undefined && pageSize >= 1000) {
-    offsets.push(1000, 2000, 3000, 4000);
-  }
-
-  const pages = await Promise.all(offsets.map(async offset => {
-    try { return await fetchEvracePage(pageSize, offset); } catch { return { records: [] as any[] }; }
-  }));
-
-  const records = [firstRecords, ...pages.map(p => p.records)].flat();
-  const stations = records
+  const records = extractStationRecords(payload);
+  return records
     .map((record, index) => stationFromEvraceRecord(record, index))
     .filter((s): s is ChargingStation => !!s);
-
-  // Deduplicate records that point to the same physical location.
-  const deduped: ChargingStation[] = [];
-  for (const station of stations) {
-    const duplicate = deduped.find(existing => haversineKm(existing.lat, existing.lon, station.lat, station.lon) <= EVRACE_MATCH_DISTANCE_KM);
-    if (!duplicate) deduped.push(station);
-    else {
-      // Keep the richer record if the API exposes the same location more than once.
-      duplicate.hasCcs2 ||= station.hasCcs2;
-      duplicate.hasType2 ||= station.hasType2;
-      duplicate.connectorTypeUnknown = duplicate.connectorTypeUnknown && station.connectorTypeUnknown;
-      duplicate.ccs2PowerKw = Math.max(duplicate.ccs2PowerKw ?? 0, station.ccs2PowerKw ?? 0) || undefined;
-      duplicate.type2PowerKw = Math.max(duplicate.type2PowerKw ?? 0, station.type2PowerKw ?? 0) || undefined;
-      if (!duplicate.address && station.address) duplicate.address = station.address;
-      if (!duplicate.operator && station.operator) duplicate.operator = station.operator;
-    }
-  }
-
-  try {
-    localStorage.setItem(EVRACE_CACHE_KEY, JSON.stringify({ expiresAt: Date.now() + EVRACE_CACHE_TTL_MS, stations: deduped }));
-  } catch { /* ignore cache */ }
-  return deduped;
 };
 
 /** Returns nearest point on the actual route polyline, not nearest sampled route point. */
@@ -430,8 +384,8 @@ export async function fetchChargingStationsAlongRoute(points: RouteRefPoint[], b
   // connector and power information. Failure here must not prevent the OSM fallback.
   let evraceStations: ChargingStation[] = [];
   try {
-    const allEvrace = await loadEvraceStations();
-    evraceStations = allEvrace
+    const routeEvrace = await fetchEvraceStationsForRoute(points);
+    evraceStations = routeEvrace
       .map(station => stationOnRoute(station, points, bufferKm))
       .filter((s): s is ChargingStation => !!s);
   } catch { /* EVRACE unavailable; OSM remains available. */ }

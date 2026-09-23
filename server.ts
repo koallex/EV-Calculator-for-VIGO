@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
+import { getEvraceGroups, getEvraceStats } from "./api/_lib/evrace";
 
 async function startServer() {
   const app = express();
@@ -13,6 +14,21 @@ async function startServer() {
   // Health check endpoint for Cloud Run
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+
+  // EVRACE proxy: keeps browser requests same-origin and avoids EVRACE CORS/Cloudflare cookie issues.
+  app.get("/api/evrace/stations", async (req, res) => {
+    try {
+      const n = (value: unknown) => { const v = Array.isArray(value) ? value[0] : value; const x = Number(v); return Number.isFinite(x) ? x : undefined; };
+      const minLat = n(req.query.minLat), maxLat = n(req.query.maxLat), minLon = n(req.query.minLon), maxLon = n(req.query.maxLon);
+      const hasBbox = [minLat, maxLat, minLon, maxLon].every(v => v !== undefined);
+      const groups = await getEvraceGroups(hasBbox ? { minLat: minLat!, maxLat: maxLat!, minLon: minLon!, maxLon: maxLon! } : undefined);
+      const stats = getEvraceStats();
+      res.setHeader("Cache-Control", "public, max-age=300, s-maxage=21600");
+      res.json({ source: "evrace", groups, meta: { total_groups: stats.totalGroups ?? groups.length, returned_groups: groups.length, filtered: hasBbox } });
+    } catch (error) {
+      res.status(502).json({ error: "EVRACE unavailable", message: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   // Endpoint to download zip files with explicit headers
