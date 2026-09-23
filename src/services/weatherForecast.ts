@@ -6,6 +6,17 @@ export interface ForecastWeather {
   windDirection: number; // degrees, direction wind blows FROM
 }
 
+// Open-Meteo is a shared public service. Keep a short in-memory cache so recalculating the
+// same route/weather window does not multiply identical API requests. The route planner samples
+// only a handful of points, but repeated calculations can otherwise hit the public quota quickly.
+const FORECAST_CACHE_TTL_MS = 10 * 60 * 1000;
+const forecastCache = new Map<string, { at: number; value: ForecastWeather | null }>();
+const forecastCacheKey = (lat: number, lon: number, arrivalDate: Date) => {
+  const hour = new Date(arrivalDate);
+  hour.setMinutes(0, 0, 0);
+  return `${lat.toFixed(2)},${lon.toFixed(2)},${hour.toISOString()}`;
+};
+
 /**
  * Hourly forecast (not just "current conditions") for a given point, sampled at the hour closest
  * to the estimated arrival time — so a trip predicts against the weather it will actually be
@@ -19,6 +30,10 @@ export async function fetchForecastWeatherAt(
   lon: number,
   arrivalDate: Date
 ): Promise<ForecastWeather | null> {
+  const cacheKey = forecastCacheKey(lat, lon, arrivalDate);
+  const cached = forecastCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < FORECAST_CACHE_TTL_MS) return cached.value;
+
   try {
     const now = Date.now();
     const targetMs = arrivalDate.getTime();
@@ -55,13 +70,15 @@ export async function fetchForecastWeatherAt(
 
       const temperature = data.hourly.temperature_2m?.[bestIdx];
       if (!Number.isFinite(temperature)) return null;
-      return {
+      const value = {
         temperature: Math.round(temperature),
         weatherCode: data.hourly.weather_code?.[bestIdx] ?? 0,
         precipitation: Number((data.hourly.precipitation?.[bestIdx] ?? 0).toFixed(1)),
         windSpeed: Math.round(data.hourly.wind_speed_10m?.[bestIdx] ?? 0),
         windDirection: Math.round(data.hourly.wind_direction_10m?.[bestIdx] ?? 0),
       };
+      forecastCache.set(cacheKey, { at: Date.now(), value });
+      return value;
     }
 
     // Seasonal API supports a long-range timerange of up to 217 days (~7 months)
@@ -107,14 +124,17 @@ export async function fetchForecastWeatherAt(
 
     const temperature = data.daily.temperature_2m_mean?.[idx];
     if (!Number.isFinite(temperature)) return null;
-    return {
+    const value = {
       temperature: Math.round(temperature),
       weatherCode: data.daily.weather_code?.[idx] ?? 0,
       precipitation: Number(((data.daily.precipitation_sum?.[idx] ?? 0) / 24).toFixed(2)),
       windSpeed: Math.round(data.daily.wind_speed_10m_mean?.[idx] ?? 0),
       windDirection: Math.round(data.daily.wind_direction_10m_dominant?.[idx] ?? 0),
     };
+    forecastCache.set(cacheKey, { at: Date.now(), value });
+    return value;
   } catch {
+    forecastCache.set(cacheKey, { at: Date.now(), value: null });
     return null;
   }
 }

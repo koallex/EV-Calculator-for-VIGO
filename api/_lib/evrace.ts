@@ -17,36 +17,19 @@
 // 100 so ~1200 stations is ~12 pages, fetched with higher concurrency, so it usually completes
 // in a single round trip. A daily cron endpoint (api/cron/evrace-refresh.ts) also forces a
 // refresh so the cache should, in steady state, never need to fall back to a blocking fetch.
-type RedisLike = {
-  get<T>(key: string): Promise<T | null>;
-  set(key: string, value: unknown, options?: { nx?: boolean; ex?: number }): Promise<any>;
-  del(key: string): Promise<any>;
+import { Redis } from '@upstash/redis';
+
+const getRedis = (): Redis | null => {
+  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  if (!url || !token) return null;
+  try { return new Redis({ url, token }); } catch (e) {
+    console.error('[evrace] Redis client init failed:', e);
+    return null;
+  }
 };
 
-let redisClientPromise: Promise<RedisLike | null> | null = null;
-
-// Do not construct Upstash Redis at module import time. If an environment variable is
-// missing/malformed, @upstash/redis can throw during module initialization, which makes
-// Vercel return a bare 500 before the route handler's try/catch is ever reached.
-const getRedis = async (): Promise<RedisLike | null> => {
-  if (redisClientPromise) return redisClientPromise;
-  redisClientPromise = (async () => {
-    const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
-    const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
-    if (!url || !token) {
-      console.warn('[evrace] Upstash Redis env is not configured; EVRACE cache disabled');
-      return null;
-    }
-    try {
-      const { Redis } = await import('@upstash/redis');
-      return new Redis({ url, token }) as unknown as RedisLike;
-    } catch (e) {
-      console.error('[evrace] failed to initialize Upstash Redis:', e);
-      return null;
-    }
-  })();
-  return redisClientPromise;
-};
+const redis = getRedis();
 
 const EVRACE_API = 'https://evrace.by/api/stations-page';
 
@@ -203,7 +186,7 @@ const fetchAllGroupsLive = async (): Promise<CachedRegistry> => {
 // (bare 500, no JSON) as the bug v1.06 fixed, just from a different cause. Race it against a
 // short timeout so a stalled Redis call degrades to "treat as cache miss" (which still answers
 // immediately, per loadRegistry's empty-result path) instead of hanging the function.
-const REDIS_READ_TIMEOUT_MS = 3000;
+const REDIS_READ_TIMEOUT_MS = 1200;
 
 const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
   new Promise((resolve, reject) => {
@@ -215,7 +198,6 @@ const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
   });
 
 const readRedisCache = async (): Promise<CachedRegistry | null> => {
-  const redis = await getRedis();
   if (!redis) return null;
   try {
     const cached = await withTimeout(redis.get<CachedRegistry>(CACHE_KEY), REDIS_READ_TIMEOUT_MS);
@@ -227,7 +209,6 @@ const readRedisCache = async (): Promise<CachedRegistry | null> => {
 };
 
 const writeRedisCache = async (data: CachedRegistry) => {
-  const redis = await getRedis();
   if (!redis) return;
   try {
     await redis.set(CACHE_KEY, data);
@@ -239,8 +220,7 @@ const writeRedisCache = async (data: CachedRegistry) => {
 };
 
 const tryAcquireLock = async (): Promise<boolean> => {
-  const redis = await getRedis();
-  if (!redis) return true; // no shared cache/lock: allow one best-effort refresh in this instance
+  if (!redis) return false;
   try {
     const ok = await redis.set(LOCK_KEY, '1', { nx: true, ex: LOCK_TTL_SECONDS });
     return ok === 'OK';
@@ -250,7 +230,6 @@ const tryAcquireLock = async (): Promise<boolean> => {
 };
 
 const releaseLock = async () => {
-  const redis = await getRedis();
   if (!redis) return;
   try { await redis.del(LOCK_KEY); } catch { /* best-effort */ }
 };
@@ -294,24 +273,14 @@ const loadRegistry = async (): Promise<CachedRegistry> => {
     memoryCache = cached;
     memoryCachedAt = Date.now();
     const age = Date.now() - cached.fetchedAt;
-    if (age > SOFT_TTL_MS) refreshInBackground(); // stale-while-revalidate: don't block on it
+    // Stale data is still served; refresh is performed only by the scheduled cron job.
     return cached;
   }
 
-  // Nothing cached anywhere yet (first request since a fresh deploy / empty Redis). Do NOT
-  // block this request on a live fetch — even the deadline-bounded version can take several
-  // seconds, and doing that inline on every request until the cache fills would repeatedly eat
-  // into the platform's execution budget for no reason once one of them succeeds. Kick off a
-  // single lock-guarded background refresh and answer immediately with an explicitly-empty,
-  // labelled-as-uncached result. In steady state this is essentially never hit, because the
-  // cache is kept warm by stale-while-revalidate refreshes plus the daily cron — it's mainly
-  // reachable right after a fresh deploy, which is exactly why EVRACE_FIX.md recommends hitting
-  // /api/cron/evrace-refresh once manually right after deploying.
-  refreshInBackground();
-  // v1.07: also seed the per-instance memory cache with this empty stub (previously only the
-  // hit path did this). Without it, getEvraceStats()'s own readRedisCache() call — made right
-  // after this one, in the same request — paid a second full Redis round trip (and a second
-  // REDIS_READ_TIMEOUT_MS in the worst case) for a call this request already just made.
+  // No cached registry: never start a live EVRACE fetch from the user-facing request.
+  // Vercel serverless invocations can keep running background work after the response and that
+  // makes the endpoint intermittently hit the platform timeout, surfacing as a bare 500. The
+  // live registry is refreshed exclusively by the cron endpoint.
   const empty: CachedRegistry = { groups: [], totalGroups: 0, fetchedAt: 0, failedPages: 0 };
   memoryCache = empty;
   memoryCachedAt = Date.now();
