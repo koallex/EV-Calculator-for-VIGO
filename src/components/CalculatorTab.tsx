@@ -33,7 +33,7 @@ import { saveLastRouteForecast } from '../utils/routeForecastBridge';
 import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
 import { fetchChargingStationsAlongRoute, stationSupportsVigo, ChargingStation } from '../services/chargingStations';
-import { estimateChargingSession, findOptimalChargeTargetSoc, DEFAULT_UNKNOWN_STATION_POWER_KW, ChargeConnector } from '../utils/chargingPlanner';
+import { estimateChargingSession, DEFAULT_UNKNOWN_STATION_POWER_KW, ChargeConnector } from '../utils/chargingPlanner';
 import { RouteMap } from './RouteMap';
 import { LocationPickerModal } from './LocationPickerModal';
 import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts';
@@ -242,39 +242,90 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         const socAtDistance = (distanceKm: number) =>
           startSoc - (totalEnergyKwh * (distanceKm / Math.max(0.001, totalDistanceKm)) / batteryCap) * 100;
 
-        const reachable = stations
+        // Evaluate every reachable station by estimated charging time.
+        // The old algorithm preferred the furthest reachable station, which could force
+        // charging above 80% at a late stop, where the DC curve is already much slower.
+        const candidates = stations
           .filter(stationSupportsVigo)
-          .map((station) => ({ station, socAtStation: socAtDistance(station.distanceAlongRouteKm) }))
-          .filter(({ socAtStation }) => socAtStation >= ARRIVAL_RESERVE_SOC);
+          .map((station) => ({
+            station,
+            socAtStation: socAtDistance(station.distanceAlongRouteKm),
+          }))
+          .filter(({ socAtStation }) => socAtStation >= ARRIVAL_RESERVE_SOC)
+          .map(({ station, socAtStation }) => {
+            const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
+            const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
+            const minRequiredSoc = Math.min(
+              95,
+              (remainingEnergyKwh / batteryCap) * 100 + ARRIVAL_RESERVE_SOC
+            );
 
-        if (!reachable.length) {
-          if (!cancelled) { setChargingSuggestion(null); setChargingSuggestionStatus('unavailable'); }
+            // CCS2 is the fast-charge choice. Type2 is a fallback when CCS2 is not tagged.
+            // Charge only to the minimum SOC needed to finish with the normal reserve.
+            const connector: ChargeConnector = station.hasCcs2 ? 'ccs2' : 'type2';
+            const rawStationMaxPowerKw =
+              connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
+            const stationPowerAssumed = rawStationMaxPowerKw === undefined;
+            const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
+            const targetSoc = Math.max(socAtStation, minRequiredSoc);
+            const session = estimateChargingSession(
+              socAtStation,
+              targetSoc,
+              batteryCap,
+              connector,
+              stationMaxPowerKw
+            );
+
+            return {
+              station,
+              connector,
+              socAtStation,
+              targetSoc,
+              minRequiredSoc,
+              session,
+              stationPowerAssumed,
+            };
+          })
+          .sort((a, b) => {
+            // Primary objective: minimum charging time.
+            const timeDiff = a.session.minutes - b.session.minutes;
+            if (Math.abs(timeDiff) >= 2) return timeDiff;
+
+            // Stable tie-breakers: closer to route, then further along the route.
+            const distanceDiff =
+              a.station.distanceFromRouteKm - b.station.distanceFromRouteKm;
+            if (Math.abs(distanceDiff) > 0.25) return distanceDiff;
+            return b.station.distanceAlongRouteKm - a.station.distanceAlongRouteKm;
+          });
+
+        if (!candidates.length) {
+          if (!cancelled) {
+            setChargingSuggestion(null);
+            setChargingSuggestionStatus('unavailable');
+          }
           return;
         }
 
-        // Prefer CCS2 (DC fast) over Type2-only, then the furthest-along reachable station —
-        // covering as much distance as possible before the one stop needed.
-        reachable.sort((a, b) => {
-          if (a.station.hasCcs2 !== b.station.hasCcs2) return a.station.hasCcs2 ? -1 : 1;
-          return b.station.distanceAlongRouteKm - a.station.distanceAlongRouteKm;
-        });
-        const { station, socAtStation } = reachable[0];
-        const connector: ChargeConnector = station.hasCcs2 ? 'ccs2' : 'type2';
-        const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
-        // OSM often has no power tag for a station at all — treat that as "unknown", not as
-        // "as fast as the car can physically take" (see DEFAULT_UNKNOWN_STATION_POWER_KW).
-        const stationPowerAssumed = rawStationMaxPowerKw === undefined;
-        const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
-
-        const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
-        const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
-        const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + ARRIVAL_RESERVE_SOC);
-
-        const targetSoc = findOptimalChargeTargetSoc(socAtStation, minRequiredSoc, connector, stationMaxPowerKw);
-        const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
+        const {
+          station,
+          connector,
+          socAtStation,
+          targetSoc,
+          minRequiredSoc,
+          session,
+          stationPowerAssumed,
+        } = candidates[0];
 
         if (!cancelled) {
-          setChargingSuggestion({ station, connector, socAtStation, targetSoc, minRequiredSoc, session, stationPowerAssumed });
+          setChargingSuggestion({
+            station,
+            connector,
+            socAtStation,
+            targetSoc,
+            minRequiredSoc,
+            session,
+            stationPowerAssumed,
+          });
           setChargingSuggestionStatus('ready');
         }
       } catch {
