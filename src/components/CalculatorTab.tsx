@@ -164,6 +164,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   /** Reserve SoC kept as safety buffer when interpreting arrival forecast.
    *  Example: arrival 18% with reserve 10% → "free margin" above the safety floor = 8%. */
   const ARRIVAL_RESERVE_SOC = 10;
+  /** Below this finish SOC we auto-suggest a mid-route charge; at/above — only via button. */
+  const CHARGE_SUGGEST_SOC = 20;
 
   const weatherIcon = (code: number, className = 'w-4 h-4') => {
     if ([71,73,75,77,85,86].includes(code)) return <CloudSnow className={className} />;
@@ -308,6 +310,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       const IDEAL_ARRIVAL_SOC = 30;
       const PREFERRED_TARGET_SOC = 80;
 
+      // Auto-suggest when finish SOC < 20%: plan a stop so arrival can reach ~20%+ comfort.
+      // Manual (button) when finish SOC >= 20%: optional stop along the route, still no micro top-ups.
+      const mustCharge = routeForecast.arrivalSoc < CHARGE_SUGGEST_SOC;
+      const finishReserveSoc = mustCharge ? CHARGE_SUGGEST_SOC : ARRIVAL_RESERVE_SOC;
+
       const candidates = vigoStations
         .map((station) => ({
           station,
@@ -316,22 +323,30 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         .filter(({ station, socAtStation }) => {
           const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
           const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
-          const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + ARRIVAL_RESERVE_SOC);
+          const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + finishReserveSoc);
           const chargeNeeded = minRequiredSoc - socAtStation;
           if (socAtStation < ARRIVAL_RESERVE_SOC) return false;
-          if (chargeNeeded < 2) return false;
-          if (station.distanceAlongRouteKm < 5 && chargeNeeded < 5) return false;
-          // Reject micro top-ups while SOC is still comfortable — better to stop later.
-          if (socAtStation >= 70 && chargeNeeded < 20) return false;
-          if (socAtStation >= 55 && chargeNeeded < 12) return false;
-          // Leave enough road after the stop to use the charge (not a stop at the finish line).
-          if (remainingKm < Math.min(25, totalDistanceKm * 0.15) && chargeNeeded < 15) return false;
+          if (station.distanceAlongRouteKm < 5 && socAtStation > 60) return false;
+          // Reject micro top-ups while SOC is still high — better later on the route.
+          if (socAtStation >= 70) return false; // never a micro-stop on a nearly full pack
+          if (mustCharge && socAtStation >= 55 && chargeNeeded < 8) return false;
+          if (mustCharge) {
+            // Need a real top-up to reach comfortable finish.
+            if (chargeNeeded < 2) return false;
+            if (remainingKm < Math.min(20, totalDistanceKm * 0.12) && chargeNeeded < 10) return false;
+          } else {
+            // Optional stop: only if we arrive at the station in a sensible SOC window
+            // and can take a meaningful charge toward ~80%.
+            if (socAtStation > 55) return false;
+            if (socAtStation < 15) return false;
+            if (remainingKm < Math.min(30, totalDistanceKm * 0.2)) return false;
+          }
           return true;
         })
         .map(({ station, socAtStation }) => {
           const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
           const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
-          const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + ARRIVAL_RESERVE_SOC);
+          const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + finishReserveSoc);
           const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
           const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
           const stationPowerAssumed = rawStationMaxPowerKw === undefined;
@@ -409,7 +424,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
   // Automatic search is deliberately limited to the low-arrival-SOC case.
   useEffect(() => {
-    if (!routeElevation || !routeForecast || routeForecast.arrivalSoc >= 20) {
+    if (!routeElevation || !routeForecast || routeForecast.arrivalSoc >= CHARGE_SUGGEST_SOC) {
       setChargingSuggestion(null);
       setChargingSuggestionStatus('idle');
       setStationsFoundAlongRoute(0);
@@ -1104,14 +1119,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 {routeForecast && (
                   <div className={`mt-3 rounded-xl p-3 ${isDark ? 'bg-slate-900/60' : 'bg-slate-100/80'}`}>
                     <div className={`flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      <PlugZap className="w-3.5 h-3.5" /> {arrival < 20 ? 'Зарядка в пути' : 'Зарядка по маршруту'}
+                      <PlugZap className="w-3.5 h-3.5" /> {arrival < CHARGE_SUGGEST_SOC ? 'Зарядка в пути' : 'Зарядка по маршруту'}
                     </div>
                     {chargingSuggestionStatus === 'loading' && (
                       <p className={`mt-1 text-[11px] flex items-center gap-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                         <Loader2 className="w-3 h-3 animate-spin" /> Ищем станции вдоль маршрута…
                       </p>
                     )}
-                    {arrival >= 20 && chargingSuggestionStatus === 'idle' && (
+                    {arrival >= CHARGE_SUGGEST_SOC && chargingSuggestionStatus === 'idle' && (
                       <button
                         type="button"
                         onClick={() => { triggerHaptic('light', settings.hapticFeedback); void searchChargingStations(); }}
