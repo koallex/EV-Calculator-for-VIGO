@@ -19,6 +19,8 @@ export interface ChargingStation {
   fee?: string;
   hasType2: boolean;
   hasCcs2: boolean;
+  /** True when OSM marks the station as a charging point but does not specify connector type. */
+  connectorTypeUnknown: boolean;
   /** Rated output per connector type, in kW, when OSM has it tagged. */
   type2PowerKw?: number;
   ccs2PowerKw?: number;
@@ -40,7 +42,7 @@ const OVERPASS_ENDPOINTS = [
 // Stations get added/removed far more often than terrain elevation does, so this cache is
 // deliberately shorter-lived than the 30-day elevation cache in routeElevation.ts.
 const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-const CACHE_PREFIX = 'vigo_charging_stations_';
+const CACHE_PREFIX = 'vigo_charging_stations_v3_';
 
 const haversineKm = (aLat: number, aLon: number, bLat: number, bLon: number) => {
   const R = 6371, r = Math.PI / 180;
@@ -130,10 +132,11 @@ const stationFromElement = (el: any, points: RouteRefPoint[], bufferKm: number):
     operator: tags.operator,
     access: tags.access,
     fee: tags.fee,
-    hasType2: !!(tags['socket:type2'] || tags['socket:type2:output']),
-    hasCcs2: !!(tags['socket:type2_combo'] || tags['socket:type2_combo:output'] || tags['socket:ccs2'] || tags['socket:ccs']),
-    type2PowerKw: parsePowerKw(tags['socket:type2:output']),
-    ccs2PowerKw: parsePowerKw(tags['socket:type2_combo:output'] || tags['socket:ccs2:output'] || tags['socket:ccs:output']),
+    hasType2: !!(tags['socket:type2'] || tags['socket:type2:output'] || tags['socket:type2_c'] || tags['socket:type2_c:output']),
+    hasCcs2: !!(tags['socket:type2_combo'] || tags['socket:type2_combo:output'] || tags['socket:ccs2'] || tags['socket:ccs2:output'] || tags['socket:ccs'] || tags['socket:ccs:output'] || tags['socket:ccs_combo'] || tags['socket:ccs_combo:output'] || tags['socket:combo-2'] || tags['socket:combo-2:output'] || tags['socket:combo2'] || tags['socket:combo2:output']),
+    connectorTypeUnknown: !(tags['socket:type2'] || tags['socket:type2:output'] || tags['socket:type2_c'] || tags['socket:type2_c:output'] || tags['socket:type2_combo'] || tags['socket:type2_combo:output'] || tags['socket:ccs2'] || tags['socket:ccs2:output'] || tags['socket:ccs'] || tags['socket:ccs:output'] || tags['socket:ccs_combo'] || tags['socket:ccs_combo:output'] || tags['socket:combo-2'] || tags['socket:combo-2:output'] || tags['socket:combo2'] || tags['socket:combo2:output'] || tags['socket:chademo'] || tags['socket:chademo:output'] || tags['socket:tesla_supercharger'] || tags['socket:tesla_destination']),
+    type2PowerKw: parsePowerKw(tags['socket:type2:output'] || tags['socket:type2_c:output']),
+    ccs2PowerKw: parsePowerKw(tags['socket:type2_combo:output'] || tags['socket:ccs2:output'] || tags['socket:ccs:output'] || tags['socket:ccs_combo:output'] || tags['socket:combo-2:output'] || tags['socket:combo2:output']),
     distanceFromRouteKm: Number(nearestDist.toFixed(2)),
     distanceAlongRouteKm: nearestDistAlong,
   };
@@ -146,7 +149,12 @@ const cacheKeyForRoute = (points: RouteRefPoint[]): string => {
 
 /** Dongfeng Vigo charges via CCS Type 2 (DC fast) or plain Type 2 (AC) — this filters out
  *  stations offering neither (CHAdeMO-only lots, Tesla-proprietary connectors, etc.). */
-export const stationSupportsVigo = (s: ChargingStation) => s.hasType2 || s.hasCcs2;
+export const stationSupportsVigo = (s: ChargingStation) => {
+  // OSM coverage is incomplete: many real stations are mapped as charging_station
+  // but have no socket:* tag at all. Do not throw those stations away.
+  // Explicitly incompatible-only stations are still excluded.
+  return s.hasType2 || s.hasCcs2 || s.connectorTypeUnknown;
+};
 
 export async function fetchChargingStationsAlongRoute(
   points: RouteRefPoint[],
@@ -183,7 +191,7 @@ export async function fetchChargingStationsAlongRoute(
       const west = bbox.minLon.toFixed(5);
       const north = bbox.maxLat.toFixed(5);
       const east = bbox.maxLon.toFixed(5);
-      const query = `[out:json][timeout:12];(node["amenity"="charging_station"](${south},${west},${north},${east});way["amenity"="charging_station"](${south},${west},${north},${east});node["man_made"="charge_point"](${south},${west},${north},${east}););out center tags;`;
+      const query = `[out:json][timeout:12];(nwr["amenity"="charging_station"](${south},${west},${north},${east});nwr["man_made"="charge_point"](${south},${west},${north},${east});nwr["amenity"="fuel"]["fuel:electricity"="yes"](${south},${west},${north},${east}););out center tags;`;
 
       for (const endpoint of OVERPASS_ENDPOINTS) {
         const controller = new AbortController();

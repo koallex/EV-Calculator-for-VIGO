@@ -262,7 +262,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
             // CCS2 is the fast-charge choice. Type2 is a fallback when CCS2 is not tagged.
             // Charge only to the minimum SOC needed to finish with the normal reserve.
-            const connector: ChargeConnector = station.hasCcs2 ? 'ccs2' : 'type2';
+            const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
             const rawStationMaxPowerKw =
               connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
             const stationPowerAssumed = rawStationMaxPowerKw === undefined;
