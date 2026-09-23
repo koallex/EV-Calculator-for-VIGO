@@ -1,12 +1,12 @@
 // Charging-station lookup from OpenStreetMap, via the public Overpass API — no key, no
 // per-request quota tied to an account. Data is tagged `amenity=charging_station` (the same
 // tag MapComplete's "Charging stations" theme reads: https://mapcomplete.org/charging_stations),
-// licensed ODbL: free to store and reuse locally as long as OpenStreetMap is credited.
+// licensed ODbL: free to store and reuse locally as long as OpenStreetMap is credited, which
+// the map attribution already does (see mapTiles.ts).
 //
-// The route search is intentionally split into small distance windows. A single Overpass query
-// containing dozens of `around:` clauses becomes very expensive on long routes and can make the
-// UI wait for a timeout before falling back. We therefore query independent route chunks with a
-// small concurrency limit and a short client-side timeout.
+// Explicitly NOT sourced by scraping Yandex/Google Maps search results — that's against those
+// services' terms even for just extracting names+addresses, and the terms of service violation
+// risk isn't worth it for data that's available legitimately here anyway.
 
 export interface ChargingStation {
   id: string;
@@ -30,19 +30,17 @@ export interface ChargingStation {
 
 export interface RouteRefPoint { lat: number; lon: number; distanceFromStartKm: number; }
 
+// kumi.systems mirrors the same Overpass dataset; used as a fallback if the main instance is
+// rate-limiting or briefly down, same pattern as most Overpass-consuming apps use.
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
 ];
 
+// Stations get added/removed far more often than terrain elevation does, so this cache is
+// deliberately shorter-lived than the 30-day elevation cache in routeElevation.ts.
 const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const CACHE_PREFIX = 'vigo_charging_stations_';
-
-// Keep each request small enough for public Overpass instances to answer quickly.
-const QUERY_CHUNK_KM = 100;
-const QUERY_SAMPLE_KM = 8;
-const QUERY_TIMEOUT_MS = 12000;
-const MAX_CONCURRENT_QUERIES = 3;
 
 const haversineKm = (aLat: number, aLon: number, bLat: number, bLon: number) => {
   const R = 6371, r = Math.PI / 180;
@@ -64,15 +62,15 @@ const buildAddress = (tags: Record<string, string>): string => {
   return [street, city].filter(Boolean).join(', ');
 };
 
-const sampleRouteForQuery = (points: RouteRefPoint[], stepKm = QUERY_SAMPLE_KM): RouteRefPoint[] => {
+// Thins the route down to one point roughly every `stepKm` before building the Overpass
+// `around:` filter — querying every raw route point (there can be hundreds) would make the
+// request URL/body unnecessarily huge without meaningfully changing which stations are found.
+const sampleRouteForQuery = (points: RouteRefPoint[], stepKm = 8): RouteRefPoint[] => {
   if (!points.length) return [];
   const sampled: RouteRefPoint[] = [points[0]];
   let last = points[0].distanceFromStartKm;
   for (const p of points) {
-    if (p.distanceFromStartKm - last >= stepKm) {
-      sampled.push(p);
-      last = p.distanceFromStartKm;
-    }
+    if (p.distanceFromStartKm - last >= stepKm) { sampled.push(p); last = p.distanceFromStartKm; }
   }
   const lastPoint = points[points.length - 1];
   if (sampled[sampled.length - 1] !== lastPoint) sampled.push(lastPoint);
@@ -84,174 +82,8 @@ const cacheKeyForRoute = (points: RouteRefPoint[]): string => {
   return `${CACHE_PREFIX}${a.lat.toFixed(2)}_${a.lon.toFixed(2)}_${b.lat.toFixed(2)}_${b.lon.toFixed(2)}_${Math.round(b.distanceFromStartKm)}`;
 };
 
-const buildQuery = (sampled: RouteRefPoint[], bufferKm: number): string => {
-  // Overpass `around:` accepts ONE center point per filter. The previous implementation
-  // concatenated all route points into one `around:` expression, which produces an invalid
-  // Overpass query and is why the client always fell through to the error state.
-  // Keep the route chunked and make a small union of valid filters instead.
-  const radiusM = Math.round(bufferKm * 1000);
-  const filters = sampled.flatMap(p => {
-    const point = `${radiusM},${p.lat.toFixed(5)},${p.lon.toFixed(5)}`;
-    return [
-      `nwr["amenity"="charging_station"](around:${point});`,
-      `nwr["man_made"="charge_point"](around:${point});`,
-    ];
-  }).join('');
-
-  return `[out:json][timeout:10];(${filters});out center tags;`;
-};
-
-const splitRouteIntoChunks = (points: RouteRefPoint[], chunkKm = QUERY_CHUNK_KM): RouteRefPoint[][] => {
-  if (points.length < 2) return [];
-
-  const chunks: RouteRefPoint[][] = [];
-  let current: RouteRefPoint[] = [points[0]];
-  let chunkStartKm = points[0].distanceFromStartKm;
-
-  for (let i = 1; i < points.length; i++) {
-    const p = points[i];
-    current.push(p);
-
-    if (p.distanceFromStartKm - chunkStartKm >= chunkKm) {
-      chunks.push(current);
-      // Repeat the boundary point in the next chunk. This prevents a station close to a
-      // 100-km boundary from being missed just because it fell into the next query window.
-      current = [p];
-      chunkStartKm = p.distanceFromStartKm;
-    }
-  }
-
-  if (current.length >= 2) chunks.push(current);
-  return chunks;
-};
-
-const fetchJsonWithTimeout = async (endpoint: string, query: string): Promise<any> => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), QUERY_TIMEOUT_MS);
-
-  try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`Overpass ${res.status}`);
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
-const fetchChunk = async (chunk: RouteRefPoint[], bufferKm: number): Promise<any> => {
-  const sampled = sampleRouteForQuery(chunk, QUERY_SAMPLE_KM);
-  const query = buildQuery(sampled, bufferKm);
-  let lastError: unknown = null;
-
-  // Try the second public instance only when this particular chunk fails.
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      return await fetchJsonWithTimeout(endpoint, query);
-    } catch (e) {
-      lastError = e;
-    }
-  }
-
-  throw new Error(`Не удалось получить данные о зарядках для участка маршрута: ${String(lastError)}`);
-};
-
-const runWithConcurrency = async <T>(
-  items: T[],
-  worker: (item: T) => Promise<any>,
-  concurrency: number,
-): Promise<{ values: any[]; errors: unknown[] }> => {
-  const values: any[] = [];
-  const errors: unknown[] = [];
-  let nextIndex = 0;
-
-  const runWorker = async () => {
-    while (true) {
-      const index = nextIndex++;
-      if (index >= items.length) return;
-
-      try {
-        values[index] = await worker(items[index]);
-      } catch (e) {
-        errors[index] = e;
-      }
-    }
-  };
-
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker()),
-  );
-
-  return { values, errors };
-};
-
-const parseStations = (
-  dataSets: any[],
-  points: RouteRefPoint[],
-  bufferKm: number,
-): ChargingStation[] => {
-  const seen = new Set<string>();
-  const stations: ChargingStation[] = [];
-
-  for (const data of dataSets) {
-    for (const el of data?.elements || []) {
-      const id = `${el.type}/${el.id}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-
-      const tags = el.tags || {};
-      const lat = el.lat ?? el.center?.lat;
-      const lon = el.lon ?? el.center?.lon;
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-
-      let nearestDistAlong = 0;
-      let nearestDist = Infinity;
-      for (const p of points) {
-        const d = haversineKm(lat, lon, p.lat, p.lon);
-        if (d < nearestDist) {
-          nearestDist = d;
-          nearestDistAlong = p.distanceFromStartKm;
-        }
-      }
-
-      const station: ChargingStation = {
-        id,
-        lat,
-        lon,
-        name: tags.name || tags.operator || 'Зарядная станция',
-        address: buildAddress(tags),
-        operator: tags.operator,
-        access: tags.access,
-        fee: tags.fee,
-        hasType2: !!(tags['socket:type2'] || tags['socket:type2:output']),
-        hasCcs2: !!(
-          tags['socket:type2_combo'] ||
-          tags['socket:type2_combo:output'] ||
-          tags['socket:ccs2'] ||
-          tags['socket:ccs']
-        ),
-        type2PowerKw: parsePowerKw(tags['socket:type2:output']),
-        ccs2PowerKw: parsePowerKw(
-          tags['socket:type2_combo:output'] ||
-          tags['socket:ccs2:output'] ||
-          tags['socket:ccs:output'],
-        ),
-        distanceFromRouteKm: Number(nearestDist.toFixed(2)),
-        distanceAlongRouteKm: nearestDistAlong,
-      };
-
-      if (station.distanceFromRouteKm <= bufferKm) stations.push(station);
-    }
-  }
-
-  return stations;
-};
-
-/** Dongfeng Vigo charges via CCS Type 2 (DC fast) or plain Type 2 (AC). */
+/** Dongfeng Vigo charges via CCS Type 2 (DC fast) or plain Type 2 (AC) — this filters out
+ *  stations offering neither (CHAdeMO-only lots, Tesla-proprietary connectors, etc.). */
 export const stationSupportsVigo = (s: ChargingStation) => s.hasType2 || s.hasCcs2;
 
 export async function fetchChargingStationsAlongRoute(
@@ -265,35 +97,78 @@ export async function fetchChargingStationsAlongRoute(
     const cached = localStorage.getItem(cacheKey);
     if (cached) {
       const parsed = JSON.parse(cached);
-      if (parsed.expiresAt > Date.now() && Array.isArray(parsed.stations)) {
-        return parsed.stations as ChargingStation[];
-      }
+      if (parsed.expiresAt > Date.now() && Array.isArray(parsed.stations)) return parsed.stations as ChargingStation[];
     }
   } catch { /* corrupt/unavailable cache entry — just refetch */ }
 
-  const chunks = splitRouteIntoChunks(points);
-  const { values, errors } = await runWithConcurrency(
-    chunks,
-    chunk => fetchChunk(chunk, bufferKm),
-    MAX_CONCURRENT_QUERIES,
-  );
+  const sampled = sampleRouteForQuery(points, 8);
 
-  const successfulData = values.filter(Boolean);
-  // A real empty result is different from an API failure. Only report an error to the caller
-  // when every chunk failed, so the UI cannot turn a transient Overpass outage into
-  // "charging stations not found".
-  if (!successfulData.length && errors.length) {
-    throw new Error('Не удалось получить данные о зарядных станциях: Overpass API недоступен.');
+  // Overpass `around:` accepts exactly one center point: (around:radius,lat,lon).
+  // The previous implementation tried to put many centers into one `around:` clause,
+  // which makes Overpass reject the query. Build a valid union of small circles instead.
+  const radiusM = Math.round(bufferKm * 1000);
+  const clauses = sampled.flatMap(p => [
+    `node["amenity"="charging_station"](around:${radiusM},${p.lat.toFixed(5)},${p.lon.toFixed(5)});`,
+    `way["amenity"="charging_station"](around:${radiusM},${p.lat.toFixed(5)},${p.lon.toFixed(5)});`,
+    `node["man_made"="charge_point"](around:${radiusM},${p.lat.toFixed(5)},${p.lon.toFixed(5)});`,
+  ]);
+
+  // Keep the request reasonably small. One query per route is still much cheaper than
+  // querying every raw GPS/OSRM point, while every `around:` expression remains valid.
+  const query = `[out:json][timeout:25];(${clauses.join('')});out center tags;`;
+
+  let data: any = null;
+  let lastError: unknown = null;
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+        body: `data=${encodeURIComponent(query)}`,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`Overpass ${res.status}${text ? `: ${text.slice(0, 180)}` : ''}`);
+      }
+      data = await res.json();
+      break;
+    } catch (e) { lastError = e; }
   }
+  if (!data) throw new Error(`Не удалось получить данные о зарядках: ${String(lastError)}`);
 
-  const stations = parseStations(successfulData, points, bufferKm);
+  const stations: ChargingStation[] = (data.elements || [])
+    .map((el: any) => {
+      const tags = el.tags || {};
+      const lat = el.lat ?? el.center?.lat;
+      const lon = el.lon ?? el.center?.lon;
+      let nearestDistAlong = 0;
+      let nearestDist = Infinity;
+      for (const p of points) {
+        const d = haversineKm(lat, lon, p.lat, p.lon);
+        if (d < nearestDist) { nearestDist = d; nearestDistAlong = p.distanceFromStartKm; }
+      }
+      const station: ChargingStation = {
+        id: `${el.type}/${el.id}`,
+        lat, lon,
+        name: tags.name || tags.operator || 'Зарядная станция',
+        address: buildAddress(tags),
+        operator: tags.operator,
+        access: tags.access,
+        fee: tags.fee,
+        hasType2: !!(tags['socket:type2'] || tags['socket:type2:output']),
+        hasCcs2: !!(tags['socket:type2_combo'] || tags['socket:type2_combo:output'] || tags['socket:ccs2'] || tags['socket:ccs']),
+        type2PowerKw: parsePowerKw(tags['socket:type2:output']),
+        ccs2PowerKw: parsePowerKw(tags['socket:type2_combo:output'] || tags['socket:ccs2:output'] || tags['socket:ccs:output']),
+        distanceFromRouteKm: Number(nearestDist.toFixed(2)),
+        distanceAlongRouteKm: nearestDistAlong,
+      };
+      return station;
+    })
+    .filter((s: ChargingStation) => Number.isFinite(s.lat) && Number.isFinite(s.lon) && s.distanceFromRouteKm <= bufferKm);
 
   try {
-    localStorage.setItem(cacheKey, JSON.stringify({
-      expiresAt: Date.now() + CACHE_TTL_MS,
-      stations,
-    }));
-  } catch { /* storage full/unavailable — degrade gracefully */ }
+    localStorage.setItem(cacheKey, JSON.stringify({ expiresAt: Date.now() + CACHE_TTL_MS, stations }));
+  } catch { /* storage full/unavailable — degrade gracefully, still return the fresh fetch */ }
 
   return stations;
 }
