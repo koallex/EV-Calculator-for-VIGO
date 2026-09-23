@@ -12,12 +12,11 @@ export const config = { maxDuration: 15 };
 
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
-  'https://overpass.private.coffee/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass.openstreetmap.ru/api/interpreter',
 ];
 
-const REQUEST_TIMEOUT_MS = 7000;
+const REQUEST_TIMEOUT_MS = 9000; // per endpoint attempt; stays comfortably under Hobby's 10s cap
+                                  // even for the second endpoint if the first times out fast.
 
 const numberParam = (value: unknown): number | undefined => {
   if (Array.isArray(value)) value = value[0];
@@ -41,7 +40,8 @@ export default async function handler(req: any, res: any) {
 
   const query = `[out:json][timeout:20];(nwr["amenity"="charging_station"](${south},${west},${north},${east});nwr["man_made"="charge_point"](${south},${west},${north},${east});nwr["amenity"="fuel"]["fuel:electricity"="yes"](${south},${west},${north},${east}););out center tags;`;
 
-  const attempt = async (endpoint: string) => {
+  let lastError: unknown = null;
+  for (const endpoint of OVERPASS_ENDPOINTS) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
@@ -52,22 +52,19 @@ export default async function handler(req: any, res: any) {
         signal: controller.signal,
       });
       if (!response.ok) throw new Error(`Overpass ${response.status}`);
-      return await response.json();
+      const data = await response.json();
+      res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
+      return res.status(200).json(data);
+    } catch (e) {
+      lastError = e;
+      console.error(`[osm-proxy] endpoint ${endpoint} failed:`, e);
     } finally {
       clearTimeout(timer);
     }
-  };
-
-  try {
-    const result = await Promise.any(OVERPASS_ENDPOINTS.map(async endpoint => {
-      try { return await attempt(endpoint); }
-      catch (e) { console.error(`[osm-proxy] endpoint ${endpoint} failed:`, e); throw e; }
-    }));
-    res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
-    return res.status(200).json(result);
-  } catch (e) {
-    const errors = e instanceof AggregateError ? e.errors : [e];
-    const message = errors.map(x => x instanceof Error ? x.message : String(x)).join('; ');
-    return res.status(502).json({ error: 'OSM/Overpass unavailable', message });
   }
+
+  return res.status(502).json({
+    error: 'OSM/Overpass unavailable',
+    message: lastError instanceof Error ? lastError.message : String(lastError),
+  });
 }

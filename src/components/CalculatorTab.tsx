@@ -138,7 +138,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
      *  conservative DEFAULT_UNKNOWN_STATION_POWER_KW assumption rather than a real reading —
      *  worth flagging, since actual time can differ a lot either way. */
     stationPowerAssumed: boolean;
-    finishSocAfterCharge: number;
   } | null>(null);
   const [chargingSuggestionStatus, setChargingSuggestionStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>('idle');
   const [gpsStatus, setGpsStatus] = useState<'searching' | 'ok' | 'error'>('searching');
@@ -216,76 +215,123 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     return () => window.clearTimeout(timer);
   }, [resultHighlight, routeForecast]);
 
-  // Charging search: automatic only when the projected finish SOC is below 20%.
-  // For a healthier finish SOC the same search is available manually via the button below.
-  const findChargingSuggestion = async () => {
-    if (!routeElevation || !routeForecast) return;
-    setChargingSuggestionStatus('loading');
-    try {
-      const stations = await fetchChargingStationsAlongRoute(routeElevation.points, 3);
-      const batteryCap = settings.batteryCapacityKwh || 51.87;
-      const totalDistanceKm = routeElevation.distanceKm;
-      const totalEnergyKwh = routeForecast.energyKwh;
-      const socAtDistance = (distanceKm: number) =>
-        startSoc - (totalEnergyKwh * (distanceKm / Math.max(0.001, totalDistanceKm)) / batteryCap) * 100;
-
-      const candidates = stations
-        .filter(stationSupportsVigo)
-        .map((station) => ({ station, socAtStation: socAtDistance(station.distanceAlongRouteKm) }))
-        .filter(({ socAtStation }) => socAtStation >= ARRIVAL_RESERVE_SOC)
-        .map(({ station, socAtStation }) => {
-          const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
-          const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
-          const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + ARRIVAL_RESERVE_SOC);
-          const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
-          const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
-          const stationPowerAssumed = rawStationMaxPowerKw === undefined;
-          const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
-          // Never recommend a stop where no actual charging is needed. This prevents e.g.
-          // "97% -> 97%" at a station immediately after point A from winning the sort.
-          const needsCharge = minRequiredSoc > socAtStation + 1;
-          if (!needsCharge) return null;
-          const targetSoc = Math.min(95, Math.max(socAtStation + 1, minRequiredSoc));
-          const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
-          const finishSocAfterCharge = Math.max(0, targetSoc - (remainingEnergyKwh / batteryCap) * 100);
-          return { station, connector, socAtStation, targetSoc, minRequiredSoc, session, stationPowerAssumed, finishSocAfterCharge };
-        })
-        .filter((x): x is NonNullable<typeof x> => !!x)
-        .sort((a, b) => {
-          const timeDiff = a.session.minutes - b.session.minutes;
-          if (Math.abs(timeDiff) >= 2) return timeDiff;
-          const distanceDiff = a.station.distanceFromRouteKm - b.station.distanceFromRouteKm;
-          if (Math.abs(distanceDiff) > 0.25) return distanceDiff;
-          return b.station.distanceAlongRouteKm - a.station.distanceAlongRouteKm;
-        });
-
-      if (!candidates.length) {
-        setChargingSuggestion(null);
-        setChargingSuggestionStatus('unavailable');
-        return;
-      }
-      const best = candidates[0];
-      setChargingSuggestion(best);
-      setChargingSuggestionStatus('ready');
-    } catch (e) {
-      console.error('[CalculatorTab] charging suggestion failed:', e);
-      setChargingSuggestion(null);
-      setChargingSuggestionStatus('error');
-    }
-  };
-
+  // Mid-route charging suggestion: triggers whenever the forecast arrival SoC drops under 20%,
+  // loads the EVRACE Belarus registry with OSM/Overpass as a fallback/supplement,
+  // filters to ones the Vigo can actually plug into (CCS2/Type2), and works out both which
+  // station to recommend and how far to charge there. See services/chargingStations.ts and
+  // utils/chargingPlanner.ts for how the station search and the charge-time model work.
   useEffect(() => {
     if (!routeElevation || !routeForecast || routeForecast.arrivalSoc >= 20) {
-      if (routeForecast?.arrivalSoc !== undefined && routeForecast.arrivalSoc >= 20) {
-        setChargingSuggestion(null);
-        setChargingSuggestionStatus('idle');
-      }
+      setChargingSuggestion(null);
+      setChargingSuggestionStatus('idle');
       return;
     }
     let cancelled = false;
+    setChargingSuggestionStatus('loading');
     (async () => {
-      await findChargingSuggestion();
-      if (cancelled) setChargingSuggestionStatus('idle');
+      try {
+        const stations = await fetchChargingStationsAlongRoute(routeElevation.points, 3);
+        if (cancelled) return;
+        const batteryCap = settings.batteryCapacityKwh || 51.87;
+        const totalDistanceKm = routeElevation.distanceKm;
+        const totalEnergyKwh = routeForecast.energyKwh;
+        // First-pass approximation: consumption spread proportionally to distance travelled
+        // rather than re-running the full segment-by-segment physics model per candidate point.
+        // Good enough to decide "is this station reachable" and "how much charging is needed
+        // from here" — not a replacement for the calibrated per-segment forecast above it.
+        const socAtDistance = (distanceKm: number) =>
+          startSoc - (totalEnergyKwh * (distanceKm / Math.max(0.001, totalDistanceKm)) / batteryCap) * 100;
+
+        // Evaluate every reachable station by estimated charging time.
+        // The old algorithm preferred the furthest reachable station, which could force
+        // charging above 80% at a late stop, where the DC curve is already much slower.
+        const candidates = stations
+          .filter(stationSupportsVigo)
+          .map((station) => ({
+            station,
+            socAtStation: socAtDistance(station.distanceAlongRouteKm),
+          }))
+          .filter(({ socAtStation }) => socAtStation >= ARRIVAL_RESERVE_SOC)
+          .map(({ station, socAtStation }) => {
+            const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
+            const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
+            const minRequiredSoc = Math.min(
+              95,
+              (remainingEnergyKwh / batteryCap) * 100 + ARRIVAL_RESERVE_SOC
+            );
+
+            // CCS2 is the fast-charge choice. Type2 is a fallback when CCS2 is not tagged.
+            // Charge only to the minimum SOC needed to finish with the normal reserve.
+            const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
+            const rawStationMaxPowerKw =
+              connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
+            const stationPowerAssumed = rawStationMaxPowerKw === undefined;
+            const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
+            const targetSoc = Math.max(socAtStation, minRequiredSoc);
+            const session = estimateChargingSession(
+              socAtStation,
+              targetSoc,
+              batteryCap,
+              connector,
+              stationMaxPowerKw
+            );
+
+            return {
+              station,
+              connector,
+              socAtStation,
+              targetSoc,
+              minRequiredSoc,
+              session,
+              stationPowerAssumed,
+            };
+          })
+          .sort((a, b) => {
+            // Primary objective: minimum charging time.
+            const timeDiff = a.session.minutes - b.session.minutes;
+            if (Math.abs(timeDiff) >= 2) return timeDiff;
+
+            // Stable tie-breakers: closer to route, then further along the route.
+            const distanceDiff =
+              a.station.distanceFromRouteKm - b.station.distanceFromRouteKm;
+            if (Math.abs(distanceDiff) > 0.25) return distanceDiff;
+            return b.station.distanceAlongRouteKm - a.station.distanceAlongRouteKm;
+          });
+
+        if (!candidates.length) {
+          if (!cancelled) {
+            setChargingSuggestion(null);
+            setChargingSuggestionStatus('unavailable');
+          }
+          return;
+        }
+
+        const {
+          station,
+          connector,
+          socAtStation,
+          targetSoc,
+          minRequiredSoc,
+          session,
+          stationPowerAssumed,
+        } = candidates[0];
+
+        if (!cancelled) {
+          setChargingSuggestion({
+            station,
+            connector,
+            socAtStation,
+            targetSoc,
+            minRequiredSoc,
+            session,
+            stationPowerAssumed,
+          });
+          setChargingSuggestionStatus('ready');
+        }
+      } catch (e) {
+        console.error('[CalculatorTab] charging suggestion failed:', e);
+        if (!cancelled) { setChargingSuggestion(null); setChargingSuggestionStatus('error'); }
+      }
     })();
     return () => { cancelled = true; };
   }, [routeElevation, routeForecast, startSoc, settings.batteryCapacityKwh]);
@@ -1005,8 +1051,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   </div>
                 </div>
 
-                {/* Automatic search only below 20%; otherwise the user can start it manually. */}
-                {(arrival < 20 || chargingSuggestionStatus !== 'idle') && (
+                {/* Mid-route charging suggestion — shown whenever forecast arrival SoC < 20% */}
+                {arrival < 20 && (
                   <div className={`mt-3 rounded-xl border p-3 ${isDark ? 'bg-sky-950/30 border-sky-800/50' : 'bg-sky-50 border-sky-200'}`}>
                     <div className={`flex items-center gap-1.5 text-xs font-bold ${isDark ? 'text-sky-300' : 'text-sky-800'}`}>
                       <PlugZap className="w-3.5 h-3.5" /> Зарядка в пути
@@ -1037,23 +1083,17 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                           {chargingSuggestion.connector === 'ccs2' ? 'CCS2' : 'Type2 (AC)'} · подъедете с ~{Math.round(chargingSuggestion.socAtStation)}% ·
                           {' '}заряжать до <span className="font-semibold">{Math.round(chargingSuggestion.targetSoc)}%</span> (~{chargingSuggestion.session.minutes} мин, {chargingSuggestion.session.energyKwh.toFixed(1)} кВт⋅ч{chargingSuggestion.session.avgPowerKw ? `, ~${chargingSuggestion.session.avgPowerKw} кВт ср.` : ''})
                         </p>
-                        <p className={`mt-1 text-[11px] font-semibold ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
-                          На финише после этой зарядки: ~{Math.round(chargingSuggestion.finishSocAfterCharge)}% SOC
+                        <p className={`mt-1 text-[10px] ${isDark ? 'text-sky-300/50' : 'text-sky-600/80'}`}>
+                          Цель — доехать до Б с запасом ≥{ARRIVAL_RESERVE_SOC}%, дальше заряжать невыгодно по времени: скорость зарядки к этой точке уже заметно падает.
                         </p>
+                        {chargingSuggestion.stationPowerAssumed && (
+                          <p className={`mt-1 text-[10px] ${isDark ? 'text-amber-400/80' : 'text-amber-700'}`}>
+                            ⚠ Мощность станции не указана в OSM — время оценено по осторожному допущению ≤{DEFAULT_UNKNOWN_STATION_POWER_KW} кВт. Если это мощная станция (~160 кВт+) без других машин на ней — реально может выйти заметно быстрее.
+                          </p>
+                        )}
                       </>
                     )}
                   </div>
-                )}
-                {arrival >= 20 && (
-                  <button
-                    type="button"
-                    onClick={findChargingSuggestion}
-                    disabled={chargingSuggestionStatus === 'loading'}
-                    className={`mt-3 w-full rounded-xl border py-2.5 text-xs font-bold flex items-center justify-center gap-2 ${isDark ? 'border-sky-800 bg-sky-950/30 text-sky-300' : 'border-sky-200 bg-sky-50 text-sky-700'} disabled:opacity-60`}
-                  >
-                    {chargingSuggestionStatus === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlugZap className="w-4 h-4" />}
-                    {chargingSuggestionStatus === 'loading' ? 'Ищем станции…' : 'Найти зарядную станцию на маршруте'}
-                  </button>
                 )}
 
                 {/* Low-reserve action banner */}
@@ -1324,19 +1364,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     }
                   />
                 </div>
-                {routeElevation.points.length >= 2 && (() => {
-                  const a = routeElevation.points[0];
-                  const b = routeElevation.points[routeElevation.points.length - 1];
-                  const rtext = `${a.lat},${a.lon}~${b.lat},${b.lon}`;
-                  const yandexMaps = `https://yandex.ru/maps/?rtext=${encodeURIComponent(rtext)}&rtt=auto`;
-                  const yandexNavi = `yandexnavi://build_route_on_map?lat_to=${b.lat}&lon_to=${b.lon}`;
-                  return (
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      <a href={yandexMaps} target="_blank" rel="noreferrer" className={`rounded-xl py-2.5 text-center text-xs font-bold ${isDark ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-800'}`}>Яндекс Карты</a>
-                      <a href={yandexNavi} className={`rounded-xl py-2.5 text-center text-xs font-bold ${isDark ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-800'}`}>Яндекс Навигатор</a>
-                    </div>
-                  );
-                })()}
 
                 {(() => {
                   const profilePoints = routeElevation.points
