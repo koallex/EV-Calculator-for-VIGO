@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Play,
   Square,
@@ -251,39 +251,39 @@ export const HudTab: React.FC<HudTabProps> = ({
   } | null>(null);
   const [trackingStopMessage, setTrackingStopMessage] = useState('');
 
-  const watchIdRef = useRef<number | null>(null);
-  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
-  const prevPositionRef = useRef<{ lat: number; lon: number; time: number; speed: number } | null>(null);
-  const speedHistoryRef = useRef<number[]>([]);
-  const distanceRef = useRef<number>(0);
-  const smoothSpeedBufferRef = useRef<number[]>([]);
-  const lastHeadingRef = useRef<number>(0);
-  const smoothedAltitudeRef = useRef<number | null>(null);
-  const lastCountedAltitudeRef = useRef<number | null>(null);
-  const lastCountedAltitudeDistanceKmRef = useRef(0);
-  const elevationTrendDirectionRef = useRef<1 | -1 | 0>(0);
-  const elevationTrendSamplesRef = useRef(0);
-  const previousSmoothedAltitudeRef = useRef<number | null>(null);
-  const elevationGainRef = useRef(0);
-  const elevationLossRef = useRef(0);
+  const watchIdRef = React.useRef<number | null>(null);
+  const wakeLockRef = React.useRef<WakeLockSentinel | null>(null);
+  const prevPositionRef = React.useRef<{ lat: number; lon: number; time: number; speed: number } | null>(null);
+  const speedHistoryRef = React.useRef<number[]>([]);
+  const distanceRef = React.useRef<number>(0);
+  const smoothSpeedBufferRef = React.useRef<number[]>([]);
+  const lastHeadingRef = React.useRef<number>(0);
+  const smoothedAltitudeRef = React.useRef<number | null>(null);
+  const lastCountedAltitudeRef = React.useRef<number | null>(null);
+  const lastCountedAltitudeDistanceKmRef = React.useRef(0);
+  const elevationTrendDirectionRef = React.useRef<1 | -1 | 0>(0);
+  const elevationTrendSamplesRef = React.useRef(0);
+  const previousSmoothedAltitudeRef = React.useRef<number | null>(null);
+  const elevationGainRef = React.useRef(0);
+  const elevationLossRef = React.useRef(0);
   // Elevation energy accumulated incrementally, in kWh, at the vehicle mass that applied at the
   // moment each metre was actually gained/lost — see the ELEVATION TRACKING block below. This
   // replaces recomputing net elevation kWh from aggregate gainM/lossM at the CURRENT passenger
   // count on every render, which retroactively re-priced the whole trip's climb/descent history
   // whenever passengers changed mid-trip.
-  const elevationEnergyKwhRef = useRef(0);
+  const elevationEnergyKwhRef = React.useRef(0);
   // Climate energy accumulated incrementally, once per second, at whatever climateOn/outdoor
   // temperature was in effect at that second — see the 1Hz timer below. Replaces computing
   // climatePowerKw × total-elapsed-time on every render, which (like the old elevation
   // aggregate-recompute bug) re-prices the WHOLE trip's climate at the CURRENT toggle state:
   // switching climate off for the last few km would have silently zeroed out climate energy for
   // the entire trip, not just the remainder.
-  const climateEnergyKwhRef = useRef(0);
+  const climateEnergyKwhRef = React.useRef(0);
   // Compact trail of wind/energy checkpoints sampled roughly every WIND_LOG_INTERVAL_KM, kept
   // for later diagnosis. Captured live during tracking, independent of any later manual SoC
   // correction (handleUpdateSessionEndSoc only rewrites endSoc/energyUsedKwh/consumptionPer100Km,
   // never this log), so it preserves what the model actually saw at each point along the route.
-  const windLogRef = useRef<Array<{
+  const windLogRef = React.useRef<Array<{
     d: number; // distanceKm
     v: number; // speedKmH
     w: number; // windSpeedKmH
@@ -296,42 +296,42 @@ export const HudTab: React.FC<HudTabProps> = ({
     alt: number | null; // smoothed altitude reading (m), for eyeballing raw trend/noise
     aa: number | null; // latest raw altitudeAccuracy (m) seen from GPS, whether or not it passed the gate
   }>>([]);
-  const lastWindLogDistanceKmRef = useRef(0);
+  const lastWindLogDistanceKmRef = React.useRef(0);
   // Latest raw altitudeAccuracy seen from the GPS, regardless of whether it passed the
   // ALT_ACCURACY_THRESHOLD_M gate — logged alongside wind checkpoints purely to find out what
   // values this device/browser actually reports (some browsers never report it at all).
-  const lastAltitudeAccuracyRef = useRef<number | null>(null);
+  const lastAltitudeAccuracyRef = React.useRef<number | null>(null);
 
   // Latest GPS state used by the low-frequency weather refresh while tracking.
-  const latestGpsPositionRef = useRef<{ lat: number; lon: number } | null>(null);
-  const latestGpsSpeedRef = useRef(0);
-  const weatherRefreshInFlightRef = useRef(false);
-  const lastWeatherFetchAtRef = useRef(0);
+  const latestGpsPositionRef = React.useRef<{ lat: number; lon: number } | null>(null);
+  const latestGpsSpeedRef = React.useRef(0);
+  const weatherRefreshInFlightRef = React.useRef(false);
+  const lastWeatherFetchAtRef = React.useRef(0);
 
   // Cached destination geo so live recalculations during tracking don't re-geocode every time.
-  const cachedDestRef = useRef<{ lat: number; lon: number; name: string } | null>(null);
+  const cachedDestRef = React.useRef<{ lat: number; lon: number; name: string } | null>(null);
   // Throttling for automatic live SoC-at-destination recalculation while tracking.
-  const lastDestRecalcAtRef = useRef(0);
-  const lastDestRecalcDistanceRef = useRef(0);
-  const destRecalcInFlightRef = useRef(false);
+  const lastDestRecalcAtRef = React.useRef(0);
+  const lastDestRecalcDistanceRef = React.useRef(0);
+  const destRecalcInFlightRef = React.useRef(false);
 
   // Live per-segment energy accumulation. Instead of applying the trip's average speed to the
   // whole distance (which under-costs a route that mixes city and highway driving, since the
   // speed→consumption curve is convex), every accepted GPS segment below adds its own distance
   // × consumption-at-that-segment's-actual-speed to this running total. See computeFlatRoadConsumptionRate.
-  const segmentEnergyKwhRef = useRef(0);
+  const segmentEnergyKwhRef = React.useRef(0);
   const [liveSegmentEnergyKwh, setLiveSegmentEnergyKwh] = useState(0);
 
   // Mirrors of render-scope values the geolocation watchPosition callback needs to read at
   // call-time without forcing the GPS watch to be torn down and resubscribed on every change.
-  const weatherRef = useRef(weather);
-  const relativeWindAngleRef = useRef(0);
-  const passengersRef = useRef(passengers);
+  const weatherRef = React.useRef(weather);
+  const relativeWindAngleRef = React.useRef(0);
+  const passengersRef = React.useRef(passengers);
   // Same reasoning, for the climate toggle and outdoor temp: the 1Hz timer below (not the GPS
   // callback) needs the current value at call-time so tapping the climate on/off button
   // mid-trip only changes energy accrual from that second forward.
-  const climateOnRef = useRef(climateOn);
-  const outdoorTempRef = useRef(20);
+  const climateOnRef = React.useRef(climateOn);
+  const outdoorTempRef = React.useRef(20);
 
   const isDark = settings.theme !== 'light';
   const batteryCap = settings.batteryCapacityKwh || 51.87;

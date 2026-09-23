@@ -146,7 +146,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   // fix rate, this just also remembers the coordinate).
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [quickWeather, setQuickWeather] = useState<{ temperature:number; weatherCode:number; windSpeed:number } | null>(null);
-  const weatherCacheRef = useRef<{ key: string; at: number; weather: { temperature:number; weatherCode:number; windSpeed:number } } | null>(null);
   const [routeMapOpen, setRouteMapOpen] = useState(false);
   const [elevationOpen, setElevationOpen] = useState(false);
   const [consumptionOpen, setConsumptionOpen] = useState(true);
@@ -188,27 +187,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         setGpsCoords({ lat: position.coords.latitude, lon: position.coords.longitude });
         try {
           const { latitude, longitude } = position.coords;
-          const now = Date.now();
-          const key = `${latitude.toFixed(2)},${longitude.toFixed(2)}`;
-          const cached = weatherCacheRef.current;
-          // GPS can emit many positions per minute. Weather does not need that resolution.
-          // Reuse the last result for 15 minutes (and within the same ~1 km grid cell).
-          if (cached && now - cached.at < 15 * 60 * 1000) {
-            setQuickWeather(cached.weather);
-            return;
-          }
-          const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude.toFixed(2)}&longitude=${longitude.toFixed(2)}&current=temperature_2m,weather_code,wind_speed_10m&timezone=auto`);
+          const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude.toFixed(4)}&longitude=${longitude.toFixed(4)}&current=temperature_2m,weather_code,wind_speed_10m&timezone=auto`);
           if (!res.ok) return;
           const data = await res.json();
-          if (data?.current) {
-            const nextWeather = {
-              temperature: Math.round(data.current.temperature_2m),
-              weatherCode: data.current.weather_code ?? 0,
-              windSpeed: Math.round(data.current.wind_speed_10m ?? 0),
-            };
-            weatherCacheRef.current = { key, at: now, weather: nextWeather };
-            setQuickWeather(nextWeather);
-          }
+          if (data?.current) setQuickWeather({
+            temperature: Math.round(data.current.temperature_2m),
+            weatherCode: data.current.weather_code ?? 0,
+            windSpeed: Math.round(data.current.wind_speed_10m ?? 0),
+          });
         } catch { /* keep last known weather */ }
       },
       () => setGpsStatus('error'),

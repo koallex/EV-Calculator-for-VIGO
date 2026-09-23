@@ -19,17 +19,10 @@
 // refresh so the cache should, in steady state, never need to fall back to a blocking fetch.
 import { Redis } from '@upstash/redis';
 
-const getRedis = (): Redis | null => {
-  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
-  if (!url || !token) return null;
-  try { return new Redis({ url, token }); } catch (e) {
-    console.error('[evrace] Redis client init failed:', e);
-    return null;
-  }
-};
-
-const redis = getRedis();
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
 const EVRACE_API = 'https://evrace.by/api/stations-page';
 
@@ -186,7 +179,7 @@ const fetchAllGroupsLive = async (): Promise<CachedRegistry> => {
 // (bare 500, no JSON) as the bug v1.06 fixed, just from a different cause. Race it against a
 // short timeout so a stalled Redis call degrades to "treat as cache miss" (which still answers
 // immediately, per loadRegistry's empty-result path) instead of hanging the function.
-const REDIS_READ_TIMEOUT_MS = 1200;
+const REDIS_READ_TIMEOUT_MS = 3000;
 
 const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
   new Promise((resolve, reject) => {
@@ -198,7 +191,6 @@ const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
   });
 
 const readRedisCache = async (): Promise<CachedRegistry | null> => {
-  if (!redis) return null;
   try {
     const cached = await withTimeout(redis.get<CachedRegistry>(CACHE_KEY), REDIS_READ_TIMEOUT_MS);
     return cached ?? null;
@@ -209,7 +201,6 @@ const readRedisCache = async (): Promise<CachedRegistry | null> => {
 };
 
 const writeRedisCache = async (data: CachedRegistry) => {
-  if (!redis) return;
   try {
     await redis.set(CACHE_KEY, data);
   } catch (e) {
@@ -220,7 +211,6 @@ const writeRedisCache = async (data: CachedRegistry) => {
 };
 
 const tryAcquireLock = async (): Promise<boolean> => {
-  if (!redis) return false;
   try {
     const ok = await redis.set(LOCK_KEY, '1', { nx: true, ex: LOCK_TTL_SECONDS });
     return ok === 'OK';
@@ -230,7 +220,6 @@ const tryAcquireLock = async (): Promise<boolean> => {
 };
 
 const releaseLock = async () => {
-  if (!redis) return;
   try { await redis.del(LOCK_KEY); } catch { /* best-effort */ }
 };
 
@@ -273,14 +262,24 @@ const loadRegistry = async (): Promise<CachedRegistry> => {
     memoryCache = cached;
     memoryCachedAt = Date.now();
     const age = Date.now() - cached.fetchedAt;
-    // Stale data is still served; refresh is performed only by the scheduled cron job.
+    if (age > SOFT_TTL_MS) refreshInBackground(); // stale-while-revalidate: don't block on it
     return cached;
   }
 
-  // No cached registry: never start a live EVRACE fetch from the user-facing request.
-  // Vercel serverless invocations can keep running background work after the response and that
-  // makes the endpoint intermittently hit the platform timeout, surfacing as a bare 500. The
-  // live registry is refreshed exclusively by the cron endpoint.
+  // Nothing cached anywhere yet (first request since a fresh deploy / empty Redis). Do NOT
+  // block this request on a live fetch — even the deadline-bounded version can take several
+  // seconds, and doing that inline on every request until the cache fills would repeatedly eat
+  // into the platform's execution budget for no reason once one of them succeeds. Kick off a
+  // single lock-guarded background refresh and answer immediately with an explicitly-empty,
+  // labelled-as-uncached result. In steady state this is essentially never hit, because the
+  // cache is kept warm by stale-while-revalidate refreshes plus the daily cron — it's mainly
+  // reachable right after a fresh deploy, which is exactly why EVRACE_FIX.md recommends hitting
+  // /api/cron/evrace-refresh once manually right after deploying.
+  refreshInBackground();
+  // v1.07: also seed the per-instance memory cache with this empty stub (previously only the
+  // hit path did this). Without it, getEvraceStats()'s own readRedisCache() call — made right
+  // after this one, in the same request — paid a second full Redis round trip (and a second
+  // REDIS_READ_TIMEOUT_MS in the worst case) for a call this request already just made.
   const empty: CachedRegistry = { groups: [], totalGroups: 0, fetchedAt: 0, failedPages: 0 };
   memoryCache = empty;
   memoryCachedAt = Date.now();
