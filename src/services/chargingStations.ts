@@ -85,15 +85,20 @@ const cacheKeyForRoute = (points: RouteRefPoint[]): string => {
 };
 
 const buildQuery = (sampled: RouteRefPoint[], bufferKm: number): string => {
-  const around = sampled
-    .map(p => `${Math.round(bufferKm * 1000)},${p.lat.toFixed(5)},${p.lon.toFixed(5)}`)
-    .join(',');
+  // Overpass `around:` accepts ONE center point per filter. The previous implementation
+  // concatenated all route points into one `around:` expression, which produces an invalid
+  // Overpass query and is why the client always fell through to the error state.
+  // Keep the route chunked and make a small union of valid filters instead.
+  const radiusM = Math.round(bufferKm * 1000);
+  const filters = sampled.flatMap(p => {
+    const point = `${radiusM},${p.lat.toFixed(5)},${p.lon.toFixed(5)}`;
+    return [
+      `nwr["amenity"="charging_station"](around:${point});`,
+      `nwr["man_made"="charge_point"](around:${point});`,
+    ];
+  }).join('');
 
-  return `[out:json][timeout:10];` +
-    `(node["amenity"="charging_station"](around:${around});` +
-    `way["amenity"="charging_station"](around:${around});` +
-    `node["man_made"="charge_point"](around:${around}););` +
-    `out center tags;`;
+  return `[out:json][timeout:10];(${filters});out center tags;`;
 };
 
 const splitRouteIntoChunks = (points: RouteRefPoint[], chunkKm = QUERY_CHUNK_KM): RouteRefPoint[][] => {
