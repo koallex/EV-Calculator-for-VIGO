@@ -110,19 +110,55 @@ const bboxForChunk = (chunk: RouteRefPoint[], bufferKm: number) => {
   return { minLat: minLat - latPad, maxLat: maxLat + latPad, minLon: minLon - lonPad, maxLon: maxLon + lonPad };
 };
 
+const distanceToRouteKm = (lat: number, lon: number, points: RouteRefPoint[]) => {
+  if (points.length === 1) {
+    return { distanceKm: haversineKm(lat, lon, points[0].lat, points[0].lon), distanceAlongRouteKm: points[0].distanceFromStartKm };
+  }
+
+  // Find the closest point on the actual route polyline, not merely the closest
+  // sampled point. This is important because Overpass search boxes are deliberately
+  // sampled coarsely for speed (10 km), while a station may sit between two samples.
+  // Use a local equirectangular projection for each segment; the segments are short
+  // enough that the approximation is more than adequate for a 3 km route buffer.
+  const latRad = lat * Math.PI / 180;
+  const kmPerDegLat = 111.32;
+  const kmPerDegLon = 111.32 * Math.max(0.2, Math.cos(latRad));
+  let bestDistance = Infinity;
+  let bestAlong = points[0].distanceFromStartKm;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const ax = (a.lon - lon) * kmPerDegLon;
+    const ay = (a.lat - lat) * kmPerDegLat;
+    const bx = (b.lon - lon) * kmPerDegLon;
+    const by = (b.lat - lat) * kmPerDegLat;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+    const px = ax + t * dx;
+    const py = ay + t * dy;
+    const distance = Math.hypot(px, py);
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      const segmentLengthKm = haversineKm(a.lat, a.lon, b.lat, b.lon);
+      bestAlong = a.distanceFromStartKm + segmentLengthKm * t;
+    }
+  }
+
+  return { distanceKm: bestDistance, distanceAlongRouteKm: bestAlong };
+};
+
 const stationFromElement = (el: any, points: RouteRefPoint[], bufferKm: number): ChargingStation | null => {
   const tags = el.tags || {};
   const lat = el.lat ?? el.center?.lat;
   const lon = el.lon ?? el.center?.lon;
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
-  let nearestDistAlong = 0;
-  let nearestDist = Infinity;
-  for (const p of points) {
-    const d = haversineKm(lat, lon, p.lat, p.lon);
-    if (d < nearestDist) { nearestDist = d; nearestDistAlong = p.distanceFromStartKm; }
-  }
-  if (nearestDist > bufferKm) return null;
+  const nearest = distanceToRouteKm(lat, lon, points);
+  if (nearest.distanceKm > bufferKm) return null;
 
   return {
     id: `${el.type}/${el.id}`,
@@ -137,8 +173,8 @@ const stationFromElement = (el: any, points: RouteRefPoint[], bufferKm: number):
     connectorTypeUnknown: !(tags['socket:type2'] || tags['socket:type2:output'] || tags['socket:type2_c'] || tags['socket:type2_c:output'] || tags['socket:type2_combo'] || tags['socket:type2_combo:output'] || tags['socket:ccs2'] || tags['socket:ccs2:output'] || tags['socket:ccs'] || tags['socket:ccs:output'] || tags['socket:ccs_combo'] || tags['socket:ccs_combo:output'] || tags['socket:combo-2'] || tags['socket:combo-2:output'] || tags['socket:combo2'] || tags['socket:combo2:output'] || tags['socket:chademo'] || tags['socket:chademo:output'] || tags['socket:tesla_supercharger'] || tags['socket:tesla_destination']),
     type2PowerKw: parsePowerKw(tags['socket:type2:output'] || tags['socket:type2_c:output']),
     ccs2PowerKw: parsePowerKw(tags['socket:type2_combo:output'] || tags['socket:ccs2:output'] || tags['socket:ccs:output'] || tags['socket:ccs_combo:output'] || tags['socket:combo-2:output'] || tags['socket:combo2:output']),
-    distanceFromRouteKm: Number(nearestDist.toFixed(2)),
-    distanceAlongRouteKm: nearestDistAlong,
+    distanceFromRouteKm: Number(nearest.distanceKm.toFixed(2)),
+    distanceAlongRouteKm: nearest.distanceAlongRouteKm,
   };
 };
 
