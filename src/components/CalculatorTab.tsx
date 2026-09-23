@@ -31,6 +31,7 @@ import { getTariffForType, getOperatorLabel, estimateTripConsumption, estimateSe
 import { triggerHaptic } from '../utils/haptics';
 import { saveLastRouteForecast } from '../utils/routeForecastBridge';
 import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress } from '../services/routeElevation';
+import { AddressAutocomplete } from './AddressAutocomplete';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
 import { fetchChargingStationsAlongRoute, stationSupportsVigo, ChargingStation } from '../services/chargingStations';
 import { estimateChargingSession, findOptimalChargeTargetSoc, DEFAULT_UNKNOWN_STATION_POWER_KW, ChargeConnector } from '../utils/chargingPlanner';
@@ -142,6 +143,15 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     stationPowerAssumed: boolean;
   } | null>(null);
   const [chargingSuggestionStatus, setChargingSuggestionStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>('idle');
+  /** Full plan: one or more stops on long trips (first stop mirrors chargingSuggestion). */
+  const [chargingStops, setChargingStops] = useState<Array<{
+    station: ChargingStation;
+    connector: ChargeConnector;
+    socAtStation: number;
+    targetSoc: number;
+    session: { minutes: number; energyKwh: number; avgPowerKw: number };
+    finishSocAfterCharge: number;
+  }>>([]);
   /** How many VIGO-compatible stations were found along the corridor before usefulness filtering. */
   const [stationsFoundAlongRoute, setStationsFoundAlongRoute] = useState(0);
   const [gpsStatus, setGpsStatus] = useState<'searching' | 'ok' | 'error'>('searching');
@@ -228,16 +238,17 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     const pts = routeElevation.points;
     const a = pts[0];
     const b = pts[pts.length - 1];
-    const via =
-      chargingSuggestionStatus === 'ready' && chargingSuggestion
-        ? { lat: chargingSuggestion.station.lat, lon: chargingSuggestion.station.lon }
-        : null;
-    // App scheme is primary; https is fallback for desktop / no-app.
+    const vias =
+      chargingSuggestionStatus === 'ready' && chargingStops.length
+        ? chargingStops.map((s) => ({ lat: s.station.lat, lon: s.station.lon }))
+        : chargingSuggestionStatus === 'ready' && chargingSuggestion
+          ? [{ lat: chargingSuggestion.station.lat, lon: chargingSuggestion.station.lon }]
+          : [];
     let app = `yandexnavi://build_route_on_map?lat_from=${a.lat}&lon_from=${a.lon}&lat_to=${b.lat}&lon_to=${b.lon}`;
-    if (via) app += `&lat_via_0=${via.lat}&lon_via_0=${via.lon}`;
-    const parts = [`${a.lat},${a.lon}`];
-    if (via) parts.push(`${via.lat},${via.lon}`);
-    parts.push(`${b.lat},${b.lon}`);
+    vias.forEach((v, i) => {
+      app += `&lat_via_${i}=${v.lat}&lon_via_${i}=${v.lon}`;
+    });
+    const parts = [`${a.lat},${a.lon}`, ...vias.map((v) => `${v.lat},${v.lon}`), `${b.lat},${b.lon}`];
     const web = `https://yandex.ru/navi/?rtext=${parts.join('~')}&rtt=auto`;
     return { app, web };
   })();
@@ -261,6 +272,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     if (!routeElevation || !routeForecast) return;
     let cancelled = false;
     setChargingSuggestionStatus('loading');
+    setChargingStops([]);
     try {
       const stations = await fetchChargingStationsAlongRoute(routeElevation.points, 5);
       if (cancelled) return;
@@ -378,18 +390,101 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
       if (!candidates.length) {
         setChargingSuggestion(null);
+        setChargingStops([]);
+        setChargingSuggestionStatus('unavailable');
+        return;
+      }
+
+      // Multi-stop plan for long trips: chain stops until projected finish SOC is comfortable
+      // or we hit the stop limit. Each next leg starts from the previous targetSoc.
+      const MAX_STOPS = 4;
+      const MIN_GAP_KM = 25;
+      const plan: typeof candidates = [];
+      let cursorKm = 0;
+      let socCursor = startSoc;
+      const energyPerKm = totalEnergyKwh / Math.max(0.001, totalDistanceKm);
+
+      for (let n = 0; n < MAX_STOPS; n++) {
+        const remainingFromCursor = Math.max(0, totalDistanceKm - cursorKm);
+        const projectedFinish = socCursor - energyPerKm * remainingFromCursor * 100 / batteryCap;
+        // After first stop, keep chaining only while finish would still be tight.
+        if (n > 0 && projectedFinish >= CHARGE_SUGGEST_SOC) break;
+
+        const pool = (n === 0 ? candidates : vigoStations.map((station) => {
+          const dist = station.distanceAlongRouteKm;
+          if (dist < cursorKm + MIN_GAP_KM) return null;
+          const socAtStation = socCursor - energyPerKm * (dist - cursorKm) * 100 / batteryCap;
+          if (socAtStation < ARRIVAL_RESERVE_SOC) return null;
+          if (socAtStation > 68) return null;
+          const remainingKm = Math.max(0, totalDistanceKm - dist);
+          const remainingEnergyKwh = energyPerKm * remainingKm;
+          const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + CHARGE_SUGGEST_SOC);
+          const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
+          const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
+          const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
+          const desiredTarget = Math.max(minRequiredSoc, Math.min(90, 80));
+          const targetSoc = findOptimalChargeTargetSoc(socAtStation, desiredTarget, connector, stationMaxPowerKw, {
+            maxTargetSoc: 90,
+            marginalRateThreshold: 0.45,
+          });
+          const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
+          if (chargeAddedSoc < 8) return null;
+          const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
+          const finishSocAfterCharge = Math.max(0, Math.min(100, targetSoc - (remainingEnergyKwh / batteryCap) * 100));
+          const score =
+            session.minutes +
+            station.distanceFromRouteKm * 5 +
+            Math.abs(socAtStation - 30) * 1.5 +
+            (socAtStation > 50 ? (socAtStation - 50) * 1.5 : 0);
+          return {
+            station,
+            connector,
+            socAtStation,
+            targetSoc,
+            minRequiredSoc,
+            session,
+            chargeAddedSoc,
+            finishSocAfterCharge,
+            stationPowerAssumed: rawStationMaxPowerKw === undefined,
+            score,
+          };
+        }).filter((x): x is NonNullable<typeof x> => !!x)
+          .filter((c) => c.session.minutes > 0)
+          .sort((a, b) => a.score - b.score));
+
+        if (!pool.length) break;
+        const pick = pool[0];
+        plan.push(pick);
+        cursorKm = pick.station.distanceAlongRouteKm;
+        socCursor = pick.targetSoc;
+        // If this stop already gets us home comfortably, stop planning more.
+        if (pick.finishSocAfterCharge >= CHARGE_SUGGEST_SOC) break;
+      }
+
+      if (!plan.length) {
+        setChargingSuggestion(null);
+        setChargingStops([]);
         setChargingSuggestionStatus('unavailable');
         return;
       }
 
       if (!cancelled) {
-        setChargingSuggestion(candidates[0]);
+        setChargingSuggestion(plan[0]);
+        setChargingStops(plan.map(({ station, connector, socAtStation, targetSoc, session, finishSocAfterCharge }) => ({
+          station,
+          connector,
+          socAtStation,
+          targetSoc,
+          session,
+          finishSocAfterCharge,
+        })));
         setChargingSuggestionStatus('ready');
       }
     } catch (e) {
       console.error('[CalculatorTab] charging suggestion failed:', e);
       if (!cancelled) {
         setChargingSuggestion(null);
+        setChargingStops([]);
         setChargingSuggestionStatus('error');
       }
     }
@@ -400,6 +495,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   useEffect(() => {
     if (!routeElevation || !routeForecast || routeForecast.arrivalSoc >= CHARGE_SUGGEST_SOC) {
       setChargingSuggestion(null);
+      setChargingStops([]);
       setChargingSuggestionStatus('idle');
       setStationsFoundAlongRoute(0);
       return;
@@ -889,7 +985,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         {startMode === 'address' && (
           <div className="relative">
             <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input value={startAddress} onChange={e => { setStartAddress(e.target.value); setStartPin(null); }} placeholder="Откуда? Город, улица, дом" className={`w-full rounded-xl border py-3 pl-9 pr-12 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`} />
+            <AddressAutocomplete
+              value={startAddress}
+              onChange={(v) => { setStartAddress(v); setStartPin(null); }}
+              onSelect={(s) => { setStartAddress(s.displayName); setStartPin({ lat: s.lat, lon: s.lon }); }}
+              placeholder="Откуда? Город, улица, дом"
+              isDark={isDark}
+              inputClassName={`w-full rounded-xl border py-3 pl-9 pr-12 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
+            />
             <button
               type="button"
               onClick={() => { triggerHaptic('light', settings.hapticFeedback); setPickerFor('start'); }}
@@ -924,7 +1027,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
         <div className="relative">
           <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input value={destinationAddress} onChange={e => { setDestinationAddress(e.target.value); setDestinationPin(null); }} placeholder="Куда? Город, улица, дом" className={`w-full rounded-xl border py-3 pl-9 pr-12 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`} />
+          <AddressAutocomplete
+            value={destinationAddress}
+            onChange={(v) => { setDestinationAddress(v); setDestinationPin(null); }}
+            onSelect={(s) => { setDestinationAddress(s.displayName); setDestinationPin({ lat: s.lat, lon: s.lon }); }}
+            placeholder="Куда? Город, улица, дом"
+            isDark={isDark}
+            inputClassName={`w-full rounded-xl border py-3 pl-9 pr-12 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
+          />
           <button
             type="button"
             onClick={() => { triggerHaptic('light', settings.hapticFeedback); setPickerFor('destination'); }}
@@ -1026,10 +1136,22 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   <RouteMap
                     points={routeElevation.points}
                     isDark={isDark}
-                    chargingStop={
-                      chargingSuggestionStatus === 'ready' && chargingSuggestion
-                        ? { lat: chargingSuggestion.station.lat, lon: chargingSuggestion.station.lon, name: chargingSuggestion.station.name, address: chargingSuggestion.station.address }
-                        : null
+                    chargingStops={
+                      chargingSuggestionStatus === 'ready' && chargingStops.length
+                        ? chargingStops.map((s) => ({
+                            lat: s.station.lat,
+                            lon: s.station.lon,
+                            name: s.station.name,
+                            address: s.station.address,
+                          }))
+                        : chargingSuggestionStatus === 'ready' && chargingSuggestion
+                          ? [{
+                              lat: chargingSuggestion.station.lat,
+                              lon: chargingSuggestion.station.lon,
+                              name: chargingSuggestion.station.name,
+                              address: chargingSuggestion.station.address,
+                            }]
+                          : []
                     }
                   />
                   <div className={`p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
@@ -1094,22 +1216,42 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                           Не удалось получить список станций. Попробуйте ещё раз.
                         </p>
                       )}
-                      {chargingSuggestionStatus === 'ready' && chargingSuggestion && (
-                        <div className="mt-2">
-                          <p className={`text-[12px] leading-snug ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                            <span className="font-semibold">{chargingSuggestion.station.name}</span>
-                            {chargingSuggestion.station.address ? ` · ${chargingSuggestion.station.address}` : ''}
-                            {' · '}~{Math.round(chargingSuggestion.station.distanceAlongRouteKm)} км
-                          </p>
-                          <p className={`mt-0.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                            {chargingSuggestion.connector === 'ccs2' ? 'CCS' : 'Type2'} · ~{Math.round(chargingSuggestion.socAtStation)}% → {Math.round(chargingSuggestion.targetSoc)}% · {chargingSuggestion.session.minutes} мин
-                          </p>
-                          <div className={`mt-2 flex items-baseline justify-between gap-2 rounded-lg px-3 py-2 ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-50'}`}>
-                            <span className={`text-[10px] ${isDark ? 'text-emerald-400/80' : 'text-emerald-700/70'}`}>После зарядки на финише</span>
-                            <span className={`text-2xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
-                              {Math.round(chargingSuggestion.finishSocAfterCharge)}%
-                            </span>
-                          </div>
+                      {chargingSuggestionStatus === 'ready' && (chargingStops.length > 0 || chargingSuggestion) && (
+                        <div className="mt-2 space-y-2">
+                          {(chargingStops.length ? chargingStops : [{
+                            station: chargingSuggestion!.station,
+                            connector: chargingSuggestion!.connector,
+                            socAtStation: chargingSuggestion!.socAtStation,
+                            targetSoc: chargingSuggestion!.targetSoc,
+                            session: chargingSuggestion!.session,
+                            finishSocAfterCharge: chargingSuggestion!.finishSocAfterCharge,
+                          }]).map((stop, idx, arr) => (
+                            <div key={`${stop.station.id}-${idx}`} className={idx > 0 ? `pt-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}` : ''}>
+                              <p className={`text-[12px] leading-snug ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                                {arr.length > 1 && (
+                                  <span className={`mr-1.5 text-[10px] font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                                    {idx + 1}.
+                                  </span>
+                                )}
+                                <span className="font-semibold">{stop.station.name}</span>
+                                {stop.station.address ? ` · ${stop.station.address}` : ''}
+                                {' · '}~{Math.round(stop.station.distanceAlongRouteKm)} км
+                              </p>
+                              <p className={`mt-0.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                                {stop.connector === 'ccs2' ? 'CCS' : 'Type2'} · ~{Math.round(stop.socAtStation)}% → {Math.round(stop.targetSoc)}% · {stop.session.minutes} мин
+                              </p>
+                              {idx === arr.length - 1 && (
+                                <div className={`mt-2 flex items-baseline justify-between gap-2 rounded-lg px-3 py-2 ${isDark ? 'bg-emerald-500/10' : 'bg-emerald-50'}`}>
+                                  <span className={`text-[10px] ${isDark ? 'text-emerald-400/80' : 'text-emerald-700/70'}`}>
+                                    {arr.length > 1 ? 'После всех остановок на финише' : 'После зарядки на финише'}
+                                  </span>
+                                  <span className={`text-2xl font-black font-mono tabular-nums ${isDark ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                                    {Math.round(stop.finishSocAfterCharge)}%
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>

@@ -14,7 +14,47 @@ const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 // degrade gracefully" apart from "something is actually broken, surface an error".
 class ElevationLimitError extends Error { constructor(msg:string){ super(msg); this.name='ElevationLimitError'; } }
 
-export const geocodeAddress=async(query:string)=>{const res=await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=0&q=${encodeURIComponent(query)}`,{headers:{Accept:'application/json'}});if(!res.ok)throw new Error(`Не удалось найти адрес (${res.status})`);const d=await res.json();if(!Array.isArray(d)||!d[0])throw new Error('Адрес не найден');return{lat:Number(d[0].lat),lon:Number(d[0].lon),displayName:String(d[0].display_name||query)}};
+export type AddressSuggestion = { lat: number; lon: number; displayName: string };
+
+export const geocodeAddress = async (query: string): Promise<AddressSuggestion> => {
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=0&accept-language=ru&q=${encodeURIComponent(query)}`,
+    { headers: { Accept: 'application/json' } },
+  );
+  if (!res.ok) throw new Error(`Не удалось найти адрес (${res.status})`);
+  const d = await res.json();
+  if (!Array.isArray(d) || !d[0]) throw new Error('Адрес не найден');
+  return { lat: Number(d[0].lat), lon: Number(d[0].lon), displayName: String(d[0].display_name || query) };
+};
+
+/** Autocomplete while typing. Nominatim policy: keep requests sparse (debounce in UI). */
+export const searchAddressSuggestions = async (
+  query: string,
+  limit = 5,
+): Promise<AddressSuggestion[]> => {
+  const q = query.trim();
+  if (q.length < 3) return [];
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=json&limit=${limit}&addressdetails=0&accept-language=ru&q=${encodeURIComponent(q)}`,
+    { headers: { Accept: 'application/json' } },
+  );
+  if (!res.ok) return [];
+  const d = await res.json();
+  if (!Array.isArray(d)) return [];
+  const seen = new Set<string>();
+  const out: AddressSuggestion[] = [];
+  for (const row of d) {
+    const displayName = String(row?.display_name || '').trim();
+    const lat = Number(row?.lat);
+    const lon = Number(row?.lon);
+    if (!displayName || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const key = `${lat.toFixed(5)},${lon.toFixed(5)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ lat, lon, displayName });
+  }
+  return out;
+};
 
 // Reverse geocoding: turn a lat/lon (e.g. from a tap on the interactive map) into a short
 // human-readable label. Falls back to raw coordinates if Nominatim has nothing nearby or

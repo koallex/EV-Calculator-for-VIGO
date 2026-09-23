@@ -5,13 +5,19 @@ import type { RoutePoint } from '../services/routeElevation';
 import { getBaseTileUrl, MAP_TILE_ATTRIBUTION } from '../utils/mapTiles';
 import 'leaflet/dist/leaflet.css';
 
-function FitRoute({ positions, extra }: { positions: [number, number][]; extra?: [number, number] | null }) {
+function FitRoute({
+  positions,
+  extras,
+}: {
+  positions: [number, number][];
+  extras?: [number, number][];
+}) {
   const map = useMap();
   useEffect(() => {
     if (positions.length < 2) return;
-    const bounds = latLngBounds(extra ? [...positions, extra] : positions);
+    const bounds = latLngBounds(extras?.length ? [...positions, ...extras] : positions);
     map.fitBounds(bounds, { padding: [28, 28], maxZoom: 13, animate: false });
-  }, [map, positions, extra]);
+  }, [map, positions, extras]);
   return null;
 }
 
@@ -22,16 +28,38 @@ const chargingStopIcon = new DivIcon({
   iconAnchor: [14, 14],
 });
 
-export interface RouteMapChargingStop { lat: number; lon: number; name: string; address?: string; }
+export interface RouteMapChargingStop {
+  lat: number;
+  lon: number;
+  name: string;
+  address?: string;
+}
 
-interface RouteMapProps { points: RoutePoint[]; isDark: boolean; chargingStop?: RouteMapChargingStop | null; }
+interface RouteMapProps {
+  points: RoutePoint[];
+  isDark: boolean;
+  /** @deprecated use chargingStops */
+  chargingStop?: RouteMapChargingStop | null;
+  chargingStops?: RouteMapChargingStop[];
+}
 
-export const RouteMap: React.FC<RouteMapProps> = ({ points, isDark, chargingStop }) => {
+export const RouteMap: React.FC<RouteMapProps> = ({
+  points,
+  isDark,
+  chargingStop,
+  chargingStops,
+}) => {
   const positions = points.map((p) => [p.lat, p.lon] as [number, number]);
   const [drawCount, setDrawCount] = useState(positions.length);
   const start = positions[0];
   const end = positions[positions.length - 1];
-  const stopPos: [number, number] | null = chargingStop ? [chargingStop.lat, chargingStop.lon] : null;
+  const stops =
+    chargingStops && chargingStops.length
+      ? chargingStops
+      : chargingStop
+        ? [chargingStop]
+        : [];
+  const stopPositions = stops.map((s) => [s.lat, s.lon] as [number, number]);
 
   useEffect(() => {
     if (positions.length < 2) return;
@@ -61,26 +89,50 @@ export const RouteMap: React.FC<RouteMapProps> = ({ points, isDark, chargingStop
           className="route-map-leaflet"
         >
           <TileLayer url={getBaseTileUrl(isDark)} attribution={MAP_TILE_ATTRIBUTION} />
-          <FitRoute positions={positions} extra={stopPos} />
+          <FitRoute positions={positions} extras={stopPositions} />
           <Polyline
             positions={animatedPositions}
             pathOptions={{ color: '#059669', weight: 5, opacity: 0.92 }}
           />
-          <CircleMarker center={start} radius={8} pathOptions={{ color: '#fff', weight: 3, fillColor: '#10b981', fillOpacity: 1 }} />
-          <CircleMarker center={end} radius={8} pathOptions={{ color: '#fff', weight: 3, fillColor: '#ef4444', fillOpacity: 1 }} />
-          {stopPos && (
-            <Marker position={stopPos} icon={chargingStopIcon}>
+          <CircleMarker
+            center={start}
+            radius={8}
+            pathOptions={{ color: '#fff', weight: 3, fillColor: '#10b981', fillOpacity: 1 }}
+          />
+          <CircleMarker
+            center={end}
+            radius={8}
+            pathOptions={{ color: '#fff', weight: 3, fillColor: '#ef4444', fillOpacity: 1 }}
+          />
+          {stops.map((s, i) => (
+            <Marker key={`${s.lat}-${s.lon}-${i}`} position={[s.lat, s.lon]} icon={chargingStopIcon}>
               <Popup>
-                <span className="text-xs font-semibold">{chargingStop!.name}</span>
-                {chargingStop!.address ? <><br /><span className="text-xs">{chargingStop!.address}</span></> : null}
+                <span className="text-xs font-semibold">
+                  {stops.length > 1 ? `${i + 1}. ` : ''}
+                  {s.name}
+                </span>
+                {s.address ? (
+                  <>
+                    <br />
+                    <span className="text-xs">{s.address}</span>
+                  </>
+                ) : null}
               </Popup>
             </Marker>
-          )}
+          ))}
         </MapContainer>
         <div className="route-map-legend">
-          <span><i className="route-dot route-dot-start" />А</span>
-          <span><i className="route-dot route-dot-end" />Б</span>
-          {chargingStop && <span>⚡ Зарядка</span>}
+          <span>
+            <i className="route-dot route-dot-start" />А
+          </span>
+          <span>
+            <i className="route-dot route-dot-end" />Б
+          </span>
+          {stops.length > 0 && (
+            <span>
+              ⚡ {stops.length > 1 ? `${stops.length} остановки` : 'Зарядка'}
+            </span>
+          )}
         </div>
       </div>
     </div>
