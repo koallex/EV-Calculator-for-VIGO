@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Polyline, CircleMarker, Marker, Popup, Pane, useMap } from 'react-leaflet';
 import { latLngBounds, DivIcon } from 'leaflet';
 import type { RoutePoint } from '../services/routeElevation';
@@ -31,10 +31,24 @@ interface RouteMapProps { points: RoutePoint[]; isDark: boolean; chargingStop?: 
 
 export const RouteMap: React.FC<RouteMapProps> = ({ points, isDark, chargingStop }) => {
   const positions = points.map((p) => [p.lat, p.lon] as [number, number]);
-  if (positions.length < 2) return null;
+  const [drawCount, setDrawCount] = useState(positions.length);
   const start = positions[0];
   const end = positions[positions.length - 1];
   const stopPos: [number, number] | null = chargingStop ? [chargingStop.lat, chargingStop.lon] : null;
+
+  useEffect(() => {
+    if (positions.length < 2) return;
+    setDrawCount(2);
+    const step = Math.max(1, Math.ceil(positions.length / 45));
+    let count = 2;
+    const timer = window.setInterval(() => {
+      count = Math.min(positions.length, count + step);
+      setDrawCount(count);
+      if (count >= positions.length) window.clearInterval(timer);
+    }, 22);
+    return () => window.clearInterval(timer);
+  }, [points]);
+  const animatedPositions = positions.slice(0, drawCount);
 
   return (
     <div className={`overflow-hidden rounded-2xl border ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'}`}>
@@ -47,7 +61,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({ points, isDark, chargingStop
           {/* Roads/terrain base, below the route line and markers. */}
           <TileLayer url={getBaseTileUrl(isDark)} attribution={MAP_TILE_ATTRIBUTION} />
           <FitRoute positions={positions} extra={stopPos} />
-          <Polyline positions={positions} pathOptions={{ color: '#10b981', weight: 5, opacity: 0.9 }} />
+          <Polyline positions={animatedPositions} pathOptions={{ color: '#10b981', weight: 5, opacity: 0.9 }} />
           <CircleMarker center={start} radius={7} pathOptions={{ color: '#ffffff', weight: 3, fillColor: '#10b981', fillOpacity: 1 }} />
           <CircleMarker center={end} radius={7} pathOptions={{ color: '#ffffff', weight: 3, fillColor: '#ef4444', fillOpacity: 1 }} />
           {stopPos && (

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, useSpring, useTransform, AnimatePresence } from 'motion/react';
 
 interface AnimatedNumberProps {
@@ -25,7 +25,7 @@ export const AnimatedNumber: React.FC<AnimatedNumberProps> = ({
   pulse = true,
 }) => {
   const [pulseKey, setPulseKey] = useState(0);
-  const prev = React.useRef(value);
+  const prev = useRef(value);
 
   useEffect(() => {
     if (prev.current !== value) {
