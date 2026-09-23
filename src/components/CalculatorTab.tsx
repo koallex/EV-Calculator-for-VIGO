@@ -1627,8 +1627,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             <button type="button" onClick={() => setWeatherMode('current')} className={`rounded-lg py-2 text-xs font-semibold ${weatherMode === 'current' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>Сейчас</button>
             <button type="button" onClick={() => setWeatherMode('planning')} className={`rounded-lg py-2 text-xs font-semibold ${weatherMode === 'planning' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>Планирование</button>
           </div>
-          {weatherMode === 'current' ? (
-          ) : (
+          {weatherMode === 'planning' && (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <label className="text-xs"><span className="block text-slate-500 mb-1">🌡️ °C</span><DecimalInput value={manualTemperature} onChange={setManualTemperature} min={-40} max={50} allowNegative className="w-full" /></label>
