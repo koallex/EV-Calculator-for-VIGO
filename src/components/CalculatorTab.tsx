@@ -328,7 +328,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           });
           setChargingSuggestionStatus('ready');
         }
-      } catch {
+      } catch (e) {
+        console.error('[CalculatorTab] charging suggestion failed:', e);
         if (!cancelled) { setChargingSuggestion(null); setChargingSuggestionStatus('error'); }
       }
     })();

@@ -2,5 +2,8 @@
   "framework": "vite",
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron/evrace-refresh", "schedule": "0 3 * * *" }
   ]
 }

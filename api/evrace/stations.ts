@@ -22,7 +22,7 @@ export default async function handler(req: any, res: any) {
     const hasBbox = [minLat, maxLat, minLon, maxLon].every(v => v !== undefined);
 
     const groups = await getEvraceGroups(hasBbox ? { minLat: minLat!, maxLat: maxLat!, minLon: minLon!, maxLon: maxLon! } : undefined);
-    const stats = getEvraceStats();
+    const stats = await getEvraceStats();
 
     res.setHeader('Cache-Control', 'public, s-maxage=21600, stale-while-revalidate=86400');
     return res.status(200).json({
@@ -33,6 +33,8 @@ export default async function handler(req: any, res: any) {
         returned_groups: groups.length,
         filtered: hasBbox,
         cache: stats.cached,
+        stale: stats.stale,
+        failed_pages: stats.failedPages,
       },
     });
   } catch (error) {

@@ -416,14 +416,19 @@ export async function fetchChargingStationsAlongRoute(points: RouteRefPoint[], b
     evraceStations = routeEvrace
       .map(station => stationOnRoute(station, points, bufferKm))
       .filter((s): s is ChargingStation => !!s);
-  } catch { /* EVRACE unavailable; OSM remains available. */ }
+  } catch (e) {
+    // EVRACE unavailable; OSM remains available. Logged (not surfaced to the user) so this is
+    // debuggable from the browser console instead of silently producing an empty result.
+    console.error('[chargingStations] EVRACE fetch failed:', e);
+  }
 
   let osmStations: ChargingStation[] = [];
   try {
     osmStations = await fetchOsmStationsAlongRoute(points, bufferKm);
-  } catch {
+  } catch (e) {
     // If EVRACE already gave us stations, a temporary Overpass failure should not turn the
     // whole feature into an error. Only throw when both sources failed below.
+    console.error('[chargingStations] OSM/Overpass fetch failed:', e);
   }
 
   if (!evraceStations.length && !osmStations.length) {
