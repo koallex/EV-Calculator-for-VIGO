@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { searchAddressSuggestions, AddressSuggestion } from '../services/routeElevation';
-import { Loader2 } from 'lucide-react';
+import { Loader2, X } from 'lucide-react';
 
 interface Props {
   value: string;
@@ -9,7 +9,6 @@ interface Props {
   placeholder: string;
   isDark: boolean;
   inputClassName: string;
-  /** Optional leading icon already outside — we only render input + dropdown */
 }
 
 export const AddressAutocomplete: React.FC<Props> = ({
@@ -53,6 +52,15 @@ export const AddressAutocomplete: React.FC<Props> = ({
     return () => window.clearTimeout(timer);
   }, [value]);
 
+  const clear = () => {
+    if (blurTimer.current) window.clearTimeout(blurTimer.current);
+    reqId.current += 1;
+    onChange('');
+    setItems([]);
+    setOpen(false);
+    setLoading(false);
+  };
+
   return (
     <div className="relative w-full">
       <input
@@ -72,7 +80,20 @@ export const AddressAutocomplete: React.FC<Props> = ({
         className={inputClassName}
       />
       {loading && (
-        <Loader2 className="absolute right-12 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-slate-500 pointer-events-none" />
+        <Loader2 className="absolute right-[2.75rem] top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-slate-500 pointer-events-none" />
+      )}
+      {!loading && value.length > 0 && (
+        <button
+          type="button"
+          aria-label="Очистить"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={clear}
+          className={`absolute right-11 top-1/2 -translate-y-1/2 p-1 rounded-full ${
+            isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200'
+          }`}
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
       )}
       {open && items.length > 0 && (
         <ul

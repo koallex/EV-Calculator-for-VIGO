@@ -308,10 +308,22 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   }, [startMode, gpsCoords, startPin]);
 
   const applyFreeChargerAsDestination = (item: FreeChargerResult) => {
-    const name = item.station.address || item.station.name;
+    // Short label so the destination field doesn't overflow the route form.
+    const name =
+      (item.station.name && item.station.name.length < 80
+        ? item.station.name
+        : item.station.address) ||
+      item.station.name ||
+      'Свободная зарядка';
+    const pin = { lat: item.station.lat, lon: item.station.lon };
     setDestinationAddress(name);
-    setDestinationPin({ lat: item.station.lat, lon: item.station.lon });
+    setDestinationPin(pin);
+    setNearbyFreeList([]);
+    setNearbyFreeStatus('idle');
+    setNearbyFreeError('');
     triggerHaptic('light', settings.hapticFeedback);
+    // Calculate immediately with explicit coords (don't wait for setState).
+    void calculateRouteProfile({ lat: pin.lat, lon: pin.lon, displayName: name });
   };
 
   const searchChargingStations = useCallback(async () => {
@@ -582,8 +594,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     });
   };
 
-  const calculateRouteProfile = async () => {
-    if (!destinationAddress.trim()) { setRouteError('Введите адрес точки Б'); return; }
+  const calculateRouteProfile = async (destOverride?: { lat: number; lon: number; displayName: string }) => {
+    if (!destOverride && !destinationAddress.trim()) { setRouteError('Введите адрес точки Б'); return; }
     if (startMode === 'address' && !startAddress.trim()) { setRouteError('Введите адрес точки А'); return; }
     setRouteLoading(true); setRouteError(''); setRouteElevation(null); setRouteWeather(null); setRouteForecast(null);
     const onProgress = (p: RouteProgress) => setRouteStatus(p.message);
@@ -597,8 +609,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       } else if (startPin) { start = { lat: startPin.lat, lon: startPin.lon, displayName: startAddress.trim() }; }
       else { setRouteStatus('Ищем начальный адрес…'); start = await geocodeAddress(startAddress.trim()); }
       let destination: { lat:number; lon:number; displayName:string };
-      if (destinationPin) { destination = { lat: destinationPin.lat, lon: destinationPin.lon, displayName: destinationAddress.trim() }; }
-      else { setRouteStatus('Ищем адрес назначения…'); destination = await geocodeAddress(destinationAddress.trim()); }
+      if (destOverride) {
+        destination = destOverride;
+      } else if (destinationPin) {
+        destination = { lat: destinationPin.lat, lon: destinationPin.lon, displayName: destinationAddress.trim() };
+      } else {
+        setRouteStatus('Ищем адрес назначения…');
+        destination = await geocodeAddress(destinationAddress.trim());
+      }
       const data = await buildRouteElevation(start.lat,start.lon,destination.lat,destination.lon,destination.displayName,onProgress);
       setRouteElevation(data); setDistanceKm(data.distanceKm);
       const etaMinutes=Math.max(1,Math.round((data.distanceKm/Math.max(10,plannedSpeedKmH))*60));
@@ -1039,7 +1057,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               onSelect={(s) => { setStartAddress(s.displayName); setStartPin({ lat: s.lat, lon: s.lon }); }}
               placeholder="Откуда? Город, улица, дом"
               isDark={isDark}
-              inputClassName={`w-full rounded-xl border py-3 pl-9 pr-12 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
+              inputClassName={`w-full rounded-xl border py-3 pl-9 pr-12 text-sm outline-none truncate ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
             />
             <button
               type="button"
@@ -1081,7 +1099,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             onSelect={(s) => { setDestinationAddress(s.displayName); setDestinationPin({ lat: s.lat, lon: s.lon }); }}
             placeholder="Куда? Город, улица, дом"
             isDark={isDark}
-            inputClassName={`w-full rounded-xl border py-3 pl-9 pr-12 text-sm outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
+            inputClassName={`w-full rounded-xl border py-3 pl-9 pr-12 text-sm outline-none truncate ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
           />
           <button
             type="button"
