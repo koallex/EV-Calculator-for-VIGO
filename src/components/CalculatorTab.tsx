@@ -213,24 +213,18 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   useEffect(() => {
     if (!resultHighlight || !routeForecast) return;
     const timer = window.setTimeout(() => {
-      const el =
-        document.getElementById('route-result-main') ||
-        document.getElementById('route-result-summary');
-      el?.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+      document.getElementById('route-result-main')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
     }, 120);
     return () => window.clearTimeout(timer);
   }, [resultHighlight, routeForecast]);
 
   // Searches stations along the current route. It is invoked automatically only when the
   // unassisted arrival SoC is below 20%, or manually from the button shown for safer routes.
-  // Distinct destinations (no shared open-handler):
-  // Maps  → maps.yandex.ru (and yandexmaps:// on mobile)
-  // Navi  → yandex.ru/navi + yandexnavi://build_route_on_map
-  // The previous shared fallback often left both buttons on Maps.
-  const yandexRouteLinks = (() => {
-    if (!routeElevation?.points?.length) {
-      return { mapsHref: '#', naviHref: '#' };
-    }
+  // One button: Yandex Navigator only (Maps and Navi were collapsing to the same app).
+  // Deep link build_route_on_map + via point for the suggested charger.
+  const yandexNaviHref = (() => {
+    if (!routeElevation?.points?.length) return '#';
     const pts = routeElevation.points;
     const a = pts[0];
     const b = pts[pts.length - 1];
@@ -238,54 +232,35 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       chargingSuggestionStatus === 'ready' && chargingSuggestion
         ? { lat: chargingSuggestion.station.lat, lon: chargingSuggestion.station.lon }
         : null;
+    // App scheme is primary; https is fallback for desktop / no-app.
+    let app = `yandexnavi://build_route_on_map?lat_from=${a.lat}&lon_from=${a.lon}&lat_to=${b.lat}&lon_to=${b.lon}`;
+    if (via) app += `&lat_via_0=${via.lat}&lon_via_0=${via.lon}`;
     const parts = [`${a.lat},${a.lon}`];
     if (via) parts.push(`${via.lat},${via.lon}`);
     parts.push(`${b.lat},${b.lon}`);
-    const rtext = parts.join('~');
-    // Web Maps (maps subdomain — not yandex.ru/maps which some clients alias to Navi)
-    const mapsHref = `https://maps.yandex.ru/?mode=routes&rtext=${rtext}&rtt=auto`;
-    // Navigator: prefer app scheme; browsers without the app fall through poorly on <a href>,
-    // so we also keep https://yandex.ru/navi as the visible href and open the scheme on click.
-    let naviHref = `https://yandex.ru/navi/?rtext=${rtext}&rtt=auto`;
-    return { mapsHref, naviHref, rtext, a, b, via };
+    const web = `https://yandex.ru/navi/?rtext=${parts.join('~')}&rtt=auto`;
+    return { app, web };
   })();
 
-  const openYandexMaps = (e: React.MouseEvent) => {
-    // Try Maps app scheme first; do not touch Navigator URLs.
-    const rtext = yandexRouteLinks.rtext;
-    if (!rtext) return;
-    e.preventDefault();
-    const app = `yandexmaps://maps.yandex.ru/?rtext=${rtext}&rtt=auto`;
-    const web = yandexRouteLinks.mapsHref;
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = app;
-    document.body.appendChild(iframe);
-    window.setTimeout(() => {
-      try { document.body.removeChild(iframe); } catch { /* ignore */ }
-      window.open(web, '_blank', 'noopener,noreferrer');
-    }, 400);
-  };
-
   const openYandexNavi = (e: React.MouseEvent) => {
-    const { a, b, via, naviHref } = yandexRouteLinks as {
-      a?: { lat: number; lon: number };
-      b?: { lat: number; lon: number };
-      via?: { lat: number; lon: number } | null;
-      naviHref: string;
-    };
-    if (!a || !b) return;
+    if (yandexNaviHref === '#' || typeof yandexNaviHref === 'string') return;
     e.preventDefault();
-    let app = `yandexnavi://build_route_on_map?lat_from=${a.lat}&lon_from=${a.lon}&lat_to=${b.lat}&lon_to=${b.lon}`;
-    if (via) app += `&lat_via_0=${via.lat}&lon_via_0=${via.lon}`;
-    const iframe = document.createElement('iframe');
-    iframe.style.display = 'none';
-    iframe.src = app;
-    document.body.appendChild(iframe);
+    const { app, web } = yandexNaviHref;
+    // Navigate to app scheme in the same tab first (most reliable on iOS/Android).
+    const start = Date.now();
+    const onHide = () => { document.removeEventListener('visibilitychange', onVis); };
+    const onVis = () => {
+      if (document.hidden) onHide();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    window.location.href = app;
     window.setTimeout(() => {
-      try { document.body.removeChild(iframe); } catch { /* ignore */ }
-      window.open(naviHref, '_blank', 'noopener,noreferrer');
-    }, 400);
+      document.removeEventListener('visibilitychange', onVis);
+      // If still visible after ~0.8s, app likely missing — open web Navi.
+      if (!document.hidden && Date.now() - start >= 700) {
+        window.location.href = web;
+      }
+    }, 800);
   };
 
   const searchChargingStations = useCallback(async () => {
@@ -326,20 +301,21 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + finishReserveSoc);
           const chargeNeeded = minRequiredSoc - socAtStation;
           if (socAtStation < ARRIVAL_RESERVE_SOC) return false;
-          if (station.distanceAlongRouteKm < 5 && socAtStation > 60) return false;
-          // Reject micro top-ups while SOC is still high — better later on the route.
-          if (socAtStation >= 70) return false; // never a micro-stop on a nearly full pack
-          if (mustCharge && socAtStation >= 55 && chargeNeeded < 8) return false;
+          if (station.distanceAlongRouteKm < 8 && socAtStation > 65) return false;
           if (mustCharge) {
-            // Need a real top-up to reach comfortable finish.
+            // Need a real top-up so finish can reach ~20% comfort.
+            if (socAtStation >= 70) return false;
+            if (socAtStation >= 55 && chargeNeeded < 8) return false;
             if (chargeNeeded < 2) return false;
             if (remainingKm < Math.min(20, totalDistanceKm * 0.12) && chargeNeeded < 10) return false;
           } else {
-            // Optional stop: only if we arrive at the station in a sensible SOC window
-            // and can take a meaningful charge toward ~80%.
-            if (socAtStation > 55) return false;
-            if (socAtStation < 15) return false;
-            if (remainingKm < Math.min(30, totalDistanceKm * 0.2)) return false;
+            // Optional stop with comfortable finish SOC: still suggest a useful mid-route
+            // charger (charge toward ~80%), not "you already have 50% at B so no station".
+            if (socAtStation < 12) return false;
+            if (socAtStation > 68) return false; // too full for a useful optional stop
+            if (remainingKm < Math.min(15, totalDistanceKm * 0.1)) return false;
+            // Meaningful session toward ~80%
+            if (PREFERRED_TARGET_SOC - socAtStation < 10) return false;
           }
           return true;
         })
@@ -365,11 +341,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           const finishSocAfterCharge = Math.min(100, routeForecast.arrivalSoc + chargeAddedSoc);
 
           // Lower score is better.
-          const socWindowPenalty = Math.abs(socAtStation - IDEAL_ARRIVAL_SOC) * 1.8;
-          const highSocPenalty = socAtStation > 50 ? (socAtStation - 50) * 2.5 : 0;
+          const socWindowPenalty = Math.abs(socAtStation - IDEAL_ARRIVAL_SOC) * (mustCharge ? 1.8 : 1.2);
+          const highSocPenalty = socAtStation > 50 ? (socAtStation - 50) * (mustCharge ? 2.5 : 1.2) : 0;
           const smallChargePenalty = chargeAddedSoc < 15 ? (15 - chargeAddedSoc) * 2 : 0;
           const detourPenalty = station.distanceFromRouteKm * 5;
-          // Mild preference for later stops when other factors are equal (use more of the pack).
           const earlyStopPenalty = Math.max(0, 0.35 * totalDistanceKm - station.distanceAlongRouteKm) * 0.15;
           const score =
             session.minutes +
@@ -905,54 +880,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         >
         <>
 
-      {/* Compact result strip — always visible at top once a route is calculated */}
-      {routeForecast && (
-        <section
-          id="route-result-summary"
-          className={`rounded-2xl border px-3.5 py-3 transition-shadow duration-500 ${
-            resultHighlight
-              ? isDark
-                ? 'bg-emerald-950/50 border-emerald-400/70 shadow-lg shadow-emerald-500/20 ring-2 ring-emerald-400/40'
-                : 'bg-emerald-50 border-emerald-400 shadow-lg shadow-emerald-500/15 ring-2 ring-emerald-400/50'
-              : isDark
-              ? 'bg-emerald-950/40 border-emerald-800/60'
-              : 'bg-emerald-50 border-emerald-200'
-          }`}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-emerald-300/80' : 'text-emerald-700'}`}>
-                SOC на финише
-              </div>
-              <div className="flex items-baseline gap-2 mt-0.5">
-                <AnimatedNumber
-                  value={routeForecast.arrivalSoc}
-                  decimals={1}
-                  suffix="%"
-                  className={`text-3xl font-black font-mono ${
-                    routeForecast.arrivalSoc >= 20
-                      ? isDark ? 'text-emerald-400' : 'text-emerald-600'
-                      : routeForecast.arrivalSoc >= ARRIVAL_RESERVE_SOC
-                      ? 'text-amber-500'
-                      : 'text-rose-500'
-                  }`}
-                />
-              </div>
-            </div>
-            <div className="text-right shrink-0">
-              <div className={`text-sm font-bold font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                <AnimatedNumber value={routeForecast.consumption} decimals={1} className={isDark ? 'text-white' : 'text-slate-900'} /> <span className="text-[10px] font-semibold text-slate-500">кВт⋅ч/100</span>
-              </div>
-              <div className={`text-[11px] mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                {routeForecast.energyKwh.toFixed(1)} кВт⋅ч
-                {routeElevation ? ` · ${routeElevation.distanceKm} км` : ''}
-                {routeWeather?.etaMinutes != null ? ` · ~${routeWeather.etaMinutes} мин` : ''}
-              </div>
-            </div>
-          </div>
-          </section>
-      )}
-
       {/* Route: A → B + calculate */}
       <section className={`calculator-route rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className={`grid grid-cols-2 rounded-xl p-1 ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
@@ -1138,8 +1065,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     {chargingSuggestionStatus === 'unavailable' && (
                       <p className={`mt-1 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                         {stationsFoundAlongRoute > 0
-                          ? `Вдоль маршрута есть ${stationsFoundAlongRoute} станций с CCS/Type2 (коридор 5 км), но ни одна не подходит как остановка: либо уже хватает заряда до финиша, либо до станции не доехать с запасом ~10%. Попробуйте другой стартовый SOC.`
-                          : 'Не нашли станций с CCS или Type2 в коридоре 5 км от маршрута (EVRACE + OSM). GBT-only станции для VIGO не учитываются.'}
+                          ? (arrival >= CHARGE_SUGGEST_SOC
+                              ? `Найдено ${stationsFoundAlongRoute} станций с CCS/Type2, но ни одна не подходит для удобной остановки (нужен заезд с ~12–68% и запас пути после неё). Попробуйте более длинный маршрут или другой старт.`
+                              : `Найдено ${stationsFoundAlongRoute} станций, но до подходящей не доезжаем с запасом или дозарядка слишком мелкая. Увеличьте стартовый SOC или скорректируйте маршрут.`)
+                          : 'Не нашли станций с CCS или Type2 в коридоре 5 км от маршрута (EVRACE + OSM). GBT-only для VIGO не учитываются.'}
                       </p>
                     )}
                     {chargingSuggestionStatus === 'error' && (
@@ -1182,24 +1111,13 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                         : null
                     }
                   />
-                  <div className={`flex gap-2 p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
+                  <div className={`p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
                     <a
-                      href={yandexRouteLinks.mapsHref}
-                      onClick={openYandexMaps}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={`flex-1 rounded-lg px-3 py-2 text-center text-[11px] font-medium ${isDark ? 'bg-slate-900/80 text-slate-400 hover:text-slate-200' : 'bg-slate-100 text-slate-600 hover:text-slate-800'}`}
-                    >
-                      Яндекс Карты
-                    </a>
-                    <a
-                      href={yandexRouteLinks.naviHref}
+                      href={typeof yandexNaviHref === 'string' ? '#' : yandexNaviHref.web}
                       onClick={openYandexNavi}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={`flex-1 rounded-lg px-3 py-2 text-center text-[11px] font-medium ${isDark ? 'bg-slate-900/80 text-slate-400 hover:text-slate-200' : 'bg-slate-100 text-slate-600 hover:text-slate-800'}`}
+                      className={`block w-full rounded-lg px-3 py-2.5 text-center text-[12px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200 hover:bg-slate-800' : 'bg-white text-slate-800 border border-slate-200'}`}
                     >
-                      Яндекс Навигатор
+                      Открыть в Яндекс Навигаторе
                     </a>
                   </div>
                 </div>
