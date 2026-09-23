@@ -1,22 +1,20 @@
-// Forces a full live re-fetch of the EVRACE registry and persists it to Redis, regardless of
-// current cache freshness. Wired up in vercel.json to run once a day (Vercel Hobby only allows
-// daily cron schedules — see https://vercel.com/docs/cron-jobs/usage-and-pricing). This exists
-// so the cache is kept warm even without user traffic; in normal operation the
-// stale-while-revalidate refresh in api/_lib/evrace.ts already keeps it warm as users hit
-// /api/evrace/stations, so this is mainly a safety net (and a way to warm the cache right after
-// a fresh deploy, since a brand-new Redis key means the very first real user request would
-// otherwise have to wait on a live fetch).
+// Daily (or manual) EVRACE snapshot refresh → Upstash Redis.
 //
-// Can also be triggered manually, e.g. right after deploying:
-//   curl -H "Authorization: Bearer $CRON_SECRET" https://<your-domain>/api/cron/evrace-refresh
+// Vercel Hobby: one cron per day. After a fresh deploy, trigger once manually so the
+// first user request does not see an empty registry:
+//   curl -H "Authorization: Bearer $CRON_SECRET" https://<domain>/api/cron/evrace-refresh
+//
+// Refresh is sequential with delays (Cloudflare rate-limits parallel scrapes).
 import { forceRefreshEvraceCache } from '../_lib/evrace';
 
 export const config = { maxDuration: 60 };
 
 export default async function handler(req: any, res: any) {
-  // Vercel automatically sends `Authorization: Bearer $CRON_SECRET` on scheduled cron
-  // invocations when the CRON_SECRET env var is set. If it isn't set, allow the call through
-  // (useful for local dev), but this endpoint should not be left open on a public deployment.
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    res.setHeader('Allow', 'GET, POST');
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
   const expected = process.env.CRON_SECRET;
   if (expected) {
     const auth = req.headers.authorization || '';
