@@ -595,7 +595,17 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   };
 
   const calculateRouteProfile = async (destOverride?: { lat: number; lon: number; displayName: string }) => {
-    if (!destOverride && !destinationAddress.trim()) { setRouteError('Введите адрес точки Б'); return; }
+    // Guard: onClick may pass a MouseEvent if wired as onClick={calculateRouteProfile}.
+    const dest =
+      destOverride &&
+      typeof destOverride === 'object' &&
+      typeof (destOverride as { lat?: unknown }).lat === 'number' &&
+      typeof (destOverride as { lon?: unknown }).lon === 'number' &&
+      Number.isFinite((destOverride as { lat: number }).lat) &&
+      Number.isFinite((destOverride as { lon: number }).lon)
+        ? destOverride
+        : undefined;
+    if (!dest && !destinationAddress.trim()) { setRouteError('Введите адрес точки Б'); return; }
     if (startMode === 'address' && !startAddress.trim()) { setRouteError('Введите адрес точки А'); return; }
     setRouteLoading(true); setRouteError(''); setRouteElevation(null); setRouteWeather(null); setRouteForecast(null);
     const onProgress = (p: RouteProgress) => setRouteStatus(p.message);
@@ -609,13 +619,25 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       } else if (startPin) { start = { lat: startPin.lat, lon: startPin.lon, displayName: startAddress.trim() }; }
       else { setRouteStatus('Ищем начальный адрес…'); start = await geocodeAddress(startAddress.trim()); }
       let destination: { lat:number; lon:number; displayName:string };
-      if (destOverride) {
-        destination = destOverride;
-      } else if (destinationPin) {
+      if (dest) {
+        destination = dest;
+      } else if (
+        destinationPin &&
+        Number.isFinite(destinationPin.lat) &&
+        Number.isFinite(destinationPin.lon)
+      ) {
         destination = { lat: destinationPin.lat, lon: destinationPin.lon, displayName: destinationAddress.trim() };
       } else {
         setRouteStatus('Ищем адрес назначения…');
         destination = await geocodeAddress(destinationAddress.trim());
+      }
+      if (
+        !Number.isFinite(start.lat) ||
+        !Number.isFinite(start.lon) ||
+        !Number.isFinite(destination.lat) ||
+        !Number.isFinite(destination.lon)
+      ) {
+        throw new Error('Не удалось определить координаты. Выберите адрес из списка или укажите точку на карте.');
       }
       const data = await buildRouteElevation(start.lat,start.lon,destination.lat,destination.lon,destination.displayName,onProgress);
       setRouteElevation(data); setDistanceKm(data.distanceKm);
@@ -1154,7 +1176,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         </CollapsibleDetails>
 
         <button
-          onClick={calculateRouteProfile}
+          onClick={() => { void calculateRouteProfile(); }}
           disabled={routeLoading}
           className="w-full rounded-xl bg-cyan-600 hover:bg-cyan-500 py-3.5 text-sm font-bold text-white disabled:opacity-60 flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-sm shadow-cyan-600/20"
         >
