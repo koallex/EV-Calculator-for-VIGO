@@ -125,7 +125,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [routeWeather, setRouteWeather] = useState<{ temperature:number; windSpeed:number; windDirection:number; weatherCode:number; precipitation:number; routeBearing:number; etaMinutes:number; arrivalDate: Date; samples: RouteWeatherSample[] } | null>(null);
   const [routeForecast, setRouteForecast] = useState<{ consumption:number; energyKwh:number; arrivalSoc:number; windLabel:string; weatherLabel:string; precipitationLabel:string; relativeWindAngle:number; driverStyleFactor:number; driverStyleSource:string; climateLabel:string; climateImpactPct:number; climateDeltaKwh100:number; speedImpactPct:number; breakdown?: any } | null>(null);
   // Mid-route charging suggestion — computed whenever the forecast arrival SoC drops under 20%.
-  // "loading"/"unavailable" keep the UI from silently showing nothing while Overpass is queried
+  // "loading"/"unavailable" keep the UI from silently showing nothing while EVRACE/OSM are queried
   // or when no reachable Type2/CCS2 station was found along the route.
   const [chargingSuggestion, setChargingSuggestion] = useState<{
     station: ChargingStation;
@@ -215,8 +215,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     return () => window.clearTimeout(timer);
   }, [resultHighlight, routeForecast]);
 
-  // Mid-route charging suggestion: triggers whenever the forecast arrival SoC drops under 20%
-  // (the threshold Александр asked for), looks up OSM charging stations along the route,
+  // Mid-route charging suggestion: triggers whenever the forecast arrival SoC drops under 20%,
+  // loads the EVRACE Belarus registry with OSM/Overpass as a fallback/supplement,
   // filters to ones the Vigo can actually plug into (CCS2/Type2), and works out both which
   // station to recommend and how far to charge there. See services/chargingStations.ts and
   // utils/chargingPlanner.ts for how the station search and the charge-time model work.

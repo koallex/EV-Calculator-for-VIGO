@@ -1,12 +1,10 @@
-// Charging-station lookup from OpenStreetMap, via the public Overpass API — no key, no
-// per-request quota tied to an account. Data is tagged `amenity=charging_station` (the same
-// tag MapComplete's "Charging stations" theme reads: https://mapcomplete.org/charging_stations),
-// licensed ODbL: free to store and reuse locally as long as OpenStreetMap is credited, which
-// the map attribution already does (see mapTiles.ts).
+// Charging-station lookup for VIGO.
+// Primary source for Belarus: EVRACE public station registry API.
+// Secondary source: OpenStreetMap / Overpass for stations missing from EVRACE.
 //
-// Explicitly NOT sourced by scraping Yandex/Google Maps search results — that's against those
-// services' terms even for just extracting names+addresses, and the terms of service violation
-// risk isn't worth it for data that's available legitimately here anyway.
+// EVRACE is used for address, connector and power information whenever a station
+// exists in both sources. OSM remains a fallback so the app does not depend on one
+// provider being complete or available.
 
 export interface ChargingStation {
   id: string;
@@ -19,30 +17,31 @@ export interface ChargingStation {
   fee?: string;
   hasType2: boolean;
   hasCcs2: boolean;
-  /** True when OSM marks the station as a charging point but does not specify connector type. */
+  /** True when the source marks a charging station but does not specify connector type. */
   connectorTypeUnknown: boolean;
-  /** Rated output per connector type, in kW, when OSM has it tagged. */
+  /** Rated output per connector type, in kW, when available. */
   type2PowerKw?: number;
   ccs2PowerKw?: number;
-  /** Nearest distance from the station to the route polyline, km — used to filter to "along the route". */
   distanceFromRouteKm: number;
-  /** distanceFromStartKm of the nearest route point — where along A→B this station sits. */
   distanceAlongRouteKm: number;
+  /** Source used for this station record. */
+  source?: 'evrace' | 'osm' | 'merged';
 }
 
 export interface RouteRefPoint { lat: number; lon: number; distanceFromStartKm: number; }
 
-// kumi.systems mirrors the same Overpass dataset; used as a fallback if the main instance is
-// rate-limiting or briefly down, same pattern as most Overpass-consuming apps use.
+const EVRACE_API = 'https://evrace.by/api/stations-page';
+const EVRACE_CACHE_KEY = 'vigo_evrace_stations_v1';
+const EVRACE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
 ];
 
-// Stations get added/removed far more often than terrain elevation does, so this cache is
-// deliberately shorter-lived than the 30-day elevation cache in routeElevation.ts.
 const CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
-const CACHE_PREFIX = 'vigo_charging_stations_v3_';
+const CACHE_PREFIX = 'vigo_charging_stations_v4_';
+const EVRACE_MATCH_DISTANCE_KM = 0.08; // 80 m: same physical location in two datasets.
 
 const haversineKm = (aLat: number, aLon: number, bLat: number, bLon: number) => {
   const R = 6371, r = Math.PI / 180;
@@ -51,9 +50,10 @@ const haversineKm = (aLat: number, aLon: number, bLat: number, bLon: number) => 
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
 };
 
-const parsePowerKw = (raw?: string): number | undefined => {
-  if (!raw) return undefined;
-  const m = raw.match(/([\d.]+)/);
+const parsePowerKw = (raw?: unknown): number | undefined => {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  const m = String(raw).replace(',', '.').match(/([\d.]+)/);
   return m ? Number(m[1]) : undefined;
 };
 
@@ -64,8 +64,224 @@ const buildAddress = (tags: Record<string, string>): string => {
   return [street, city].filter(Boolean).join(', ');
 };
 
-// Keep only a small number of route points for each Overpass request. The query itself is
-// split into route chunks, so we do not need one huge `around:` expression for the whole trip.
+const asFiniteNumber = (...values: unknown[]): number | undefined => {
+  for (const value of values) {
+    const n = typeof value === 'number' ? value : Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+};
+
+const textValue = (...values: unknown[]): string | undefined => {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+  }
+  return undefined;
+};
+
+const normalizeConnector = (value: unknown): string => {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '')
+    .replace('type2c', 'type2');
+};
+
+const isCcs = (value: unknown) => {
+  const s = normalizeConnector(value);
+  return s === 'ccs' || s === 'ccs2' || s === 'ccscombo' || s === 'combo2' || s === 'type2combo';
+};
+
+const isType2 = (value: unknown) => {
+  const s = normalizeConnector(value);
+  return s === 'type2' || s === 'type2ac' || s === 'actype2';
+};
+
+const collectPoleObjects = (record: any): any[] => {
+  const arrays = [record?.poles, record?.guns, record?.connectors, record?.guns_list, record?.plugs];
+  const out: any[] = [];
+  for (const value of arrays) if (Array.isArray(value)) out.push(...value);
+  return out;
+};
+
+const stationFromEvraceRecord = (record: any, index: number): ChargingStation | null => {
+  const lat = asFiniteNumber(
+    record?.lat, record?.latitude, record?.y,
+    record?.location?.lat, record?.location?.latitude,
+    record?.coordinates?.lat, record?.coordinates?.latitude,
+  );
+  const lon = asFiniteNumber(
+    record?.lng, record?.lon, record?.longitude, record?.x,
+    record?.location?.lng, record?.location?.lon, record?.location?.longitude,
+    record?.coordinates?.lng, record?.coordinates?.lon, record?.coordinates?.longitude,
+  );
+  if (lat === undefined || lon === undefined) return null;
+
+  const poles = collectPoleObjects(record);
+  const connectorValues: unknown[] = [
+    record?.gun1_type, record?.gun2_type, record?.gun3_type, record?.gun4_type,
+    record?.connector, record?.connector_type,
+    ...poles.flatMap((p: any) => [p?.type, p?.connector, p?.connector_type, p?.gun_type, p?.socket, p?.standard]),
+  ];
+  const ccsValues = connectorValues.filter(isCcs);
+  const type2Values = connectorValues.filter(isType2);
+  const incompatibleValues = connectorValues.map(normalizeConnector).filter(s => s === 'chademo' || s === 'gbt' || s === 'gbtac' || s === 'tesla' || s === 'teslasupercharger' || s === 'tesladestination');
+  const hasCcs2 = ccsValues.length > 0;
+  const hasType2 = type2Values.length > 0;
+
+  const ccsPowers = [
+    record?.ccs2_power, record?.ccs_power, record?.dc_power,
+    ...poles.filter((p: any) => isCcs(p?.type ?? p?.connector ?? p?.connector_type ?? p?.standard))
+      .flatMap((p: any) => [p?.power_kw, p?.power, p?.kw, p?.dc_power]),
+  ].map(parsePowerKw).filter((v): v is number => v !== undefined);
+  const type2Powers = [
+    record?.type2_power, record?.ac_power,
+    ...poles.filter((p: any) => isType2(p?.type ?? p?.connector ?? p?.connector_type ?? p?.standard))
+      .flatMap((p: any) => [p?.power_kw, p?.power, p?.kw, p?.ac_power]),
+  ].map(parsePowerKw).filter((v): v is number => v !== undefined);
+
+  // EVRACE's public registry is Belarus-only. If a record has coordinates but no explicit
+  // connector information, keep it rather than losing a real station due to incomplete data.
+  const connectorTypeUnknown = !hasCcs2 && !hasType2 && incompatibleValues.length === 0;
+
+  const id = textValue(record?.external_id, record?.id, record?.station_id, record?.location_id) || `row-${index}`;
+  const city = textValue(record?.city, record?.town, record?.settlement);
+  const address = textValue(
+    record?.address, record?.location_address, record?.location_name,
+    [city, textValue(record?.street, record?.street_name), textValue(record?.house, record?.house_number)].filter(Boolean).join(', '),
+  ) || '';
+
+  return {
+    id: `evrace:${id}`,
+    lat,
+    lon,
+    name: textValue(record?.name, record?.location, record?.location_name, record?.operator, 'Зарядная станция') || 'Зарядная станция',
+    address,
+    operator: textValue(record?.operator, record?.operator_name, record?.network),
+    access: textValue(record?.access),
+    fee: textValue(record?.fee),
+    hasType2,
+    hasCcs2,
+    connectorTypeUnknown,
+    type2PowerKw: type2Powers.length ? Math.max(...type2Powers) : parsePowerKw(record?.ac_power),
+    ccs2PowerKw: ccsPowers.length ? Math.max(...ccsPowers) : parsePowerKw(record?.dc_power),
+    distanceFromRouteKm: Infinity,
+    distanceAlongRouteKm: 0,
+    source: 'evrace',
+  };
+};
+
+const extractStationRecords = (payload: any): any[] => {
+  if (Array.isArray(payload)) return payload;
+  const candidates = [payload?.stations, payload?.items, payload?.rows, payload?.results, payload?.data, payload?.records];
+  for (const candidate of candidates) if (Array.isArray(candidate)) return candidate;
+  return [];
+};
+
+const extractTotal = (payload: any): number | undefined => asFiniteNumber(
+  payload?.total, payload?.count, payload?.totalCount, payload?.pagination?.total,
+  payload?.meta?.total, payload?.data?.total,
+);
+
+const fetchEvracePage = async (limit: number, offset: number): Promise<{ records: any[]; total?: number }> => {
+  const url = `${EVRACE_API}?limit=${limit}&offset=${offset}`;
+  const res = await fetch(url, { headers: { Accept: 'application/json', 'Accept-Language': 'ru' } });
+  if (!res.ok) throw new Error(`EVRACE ${res.status}`);
+  const payload = await res.json();
+  return { records: extractStationRecords(payload), total: extractTotal(payload) };
+};
+
+const loadEvraceStations = async (): Promise<ChargingStation[]> => {
+  try {
+    const cachedRaw = localStorage.getItem(EVRACE_CACHE_KEY);
+    if (cachedRaw) {
+      const cached = JSON.parse(cachedRaw);
+      if (cached.expiresAt > Date.now() && Array.isArray(cached.stations)) return cached.stations as ChargingStation[];
+    }
+  } catch { /* ignore cache */ }
+
+  // EVRACE accepts limit/offset pagination. Use a large page first so the normal case needs
+  // only 2–3 requests for the whole Belarus registry. If the API enforces a smaller limit,
+  // continue with the actual returned page size.
+  const first = await fetchEvracePage(1000, 0);
+  const firstRecords = first.records;
+  if (!firstRecords.length) return [];
+
+  const total = first.total;
+  const pageSize = firstRecords.length;
+  const offsets: number[] = [];
+  if (total !== undefined && total > pageSize) {
+    for (let offset = pageSize; offset < total; offset += pageSize) offsets.push(offset);
+  } else if (total === undefined && pageSize >= 1000) {
+    offsets.push(1000, 2000, 3000, 4000);
+  }
+
+  const pages = await Promise.all(offsets.map(async offset => {
+    try { return await fetchEvracePage(pageSize, offset); } catch { return { records: [] as any[] }; }
+  }));
+
+  const records = [firstRecords, ...pages.map(p => p.records)].flat();
+  const stations = records
+    .map((record, index) => stationFromEvraceRecord(record, index))
+    .filter((s): s is ChargingStation => !!s);
+
+  // Deduplicate records that point to the same physical location.
+  const deduped: ChargingStation[] = [];
+  for (const station of stations) {
+    const duplicate = deduped.find(existing => haversineKm(existing.lat, existing.lon, station.lat, station.lon) <= EVRACE_MATCH_DISTANCE_KM);
+    if (!duplicate) deduped.push(station);
+    else {
+      // Keep the richer record if the API exposes the same location more than once.
+      duplicate.hasCcs2 ||= station.hasCcs2;
+      duplicate.hasType2 ||= station.hasType2;
+      duplicate.connectorTypeUnknown = duplicate.connectorTypeUnknown && station.connectorTypeUnknown;
+      duplicate.ccs2PowerKw = Math.max(duplicate.ccs2PowerKw ?? 0, station.ccs2PowerKw ?? 0) || undefined;
+      duplicate.type2PowerKw = Math.max(duplicate.type2PowerKw ?? 0, station.type2PowerKw ?? 0) || undefined;
+      if (!duplicate.address && station.address) duplicate.address = station.address;
+      if (!duplicate.operator && station.operator) duplicate.operator = station.operator;
+    }
+  }
+
+  try {
+    localStorage.setItem(EVRACE_CACHE_KEY, JSON.stringify({ expiresAt: Date.now() + EVRACE_CACHE_TTL_MS, stations: deduped }));
+  } catch { /* ignore cache */ }
+  return deduped;
+};
+
+/** Returns nearest point on the actual route polyline, not nearest sampled route point. */
+const nearestPointOnRoute = (lat: number, lon: number, points: RouteRefPoint[]) => {
+  if (points.length === 1) return { distanceKm: haversineKm(lat, lon, points[0].lat, points[0].lon), alongKm: points[0].distanceFromStartKm };
+
+  let bestDistance = Infinity;
+  let bestAlong = 0;
+  const latScale = 111.32;
+  const lonScale = 111.32 * Math.max(0.2, Math.cos(lat * Math.PI / 180));
+  const px = lon * lonScale;
+  const py = lat * latScale;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i], b = points[i + 1];
+    const ax = a.lon * lonScale, ay = a.lat * latScale;
+    const bx = b.lon * lonScale, by = b.lat * latScale;
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 > 1e-12 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
+    const qx = ax + dx * t, qy = ay + dy * t;
+    const distance = Math.hypot(px - qx, py - qy);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      const segmentKm = Math.max(0, b.distanceFromStartKm - a.distanceFromStartKm);
+      bestAlong = a.distanceFromStartKm + segmentKm * t;
+    }
+  }
+  return { distanceKm: bestDistance, alongKm: bestAlong };
+};
+
+const stationOnRoute = (station: ChargingStation, points: RouteRefPoint[], bufferKm: number): ChargingStation | null => {
+  const nearest = nearestPointOnRoute(station.lat, station.lon, points);
+  if (nearest.distanceKm > bufferKm) return null;
+  return { ...station, distanceFromRouteKm: Number(nearest.distanceKm.toFixed(2)), distanceAlongRouteKm: nearest.alongKm };
+};
+
 const sampleRouteForQuery = (points: RouteRefPoint[], stepKm = 10): RouteRefPoint[] => {
   if (!points.length) return [];
   const sampled: RouteRefPoint[] = [points[0]];
@@ -88,93 +304,48 @@ const routeChunks = (points: RouteRefPoint[], chunkKm = 120): RouteRefPoint[][] 
     current.push(p);
     if (p.distanceFromStartKm - chunkStart >= chunkKm) {
       chunks.push(current);
-      // Overlap the boundary point so a station close to a chunk edge is never missed.
       current = [p];
       chunkStart = p.distanceFromStartKm;
     }
   }
-  if (current.length >= 1) chunks.push(current);
+  if (current.length) chunks.push(current);
   return chunks;
 };
 
 const bboxForChunk = (chunk: RouteRefPoint[], bufferKm: number) => {
   const lats = chunk.map(p => p.lat);
   const lons = chunk.map(p => p.lon);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLon = Math.min(...lons);
-  const maxLon = Math.max(...lons);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats), minLon = Math.min(...lons), maxLon = Math.max(...lons);
   const midLat = (minLat + maxLat) / 2;
   const latPad = bufferKm / 111.32;
   const lonPad = bufferKm / (111.32 * Math.max(0.2, Math.cos(midLat * Math.PI / 180)));
   return { minLat: minLat - latPad, maxLat: maxLat + latPad, minLon: minLon - lonPad, maxLon: maxLon + lonPad };
 };
 
-const distanceToRouteKm = (lat: number, lon: number, points: RouteRefPoint[]) => {
-  if (points.length === 1) {
-    return { distanceKm: haversineKm(lat, lon, points[0].lat, points[0].lon), distanceAlongRouteKm: points[0].distanceFromStartKm };
-  }
-
-  // Find the closest point on the actual route polyline, not merely the closest
-  // sampled point. This is important because Overpass search boxes are deliberately
-  // sampled coarsely for speed (10 km), while a station may sit between two samples.
-  // Use a local equirectangular projection for each segment; the segments are short
-  // enough that the approximation is more than adequate for a 3 km route buffer.
-  const latRad = lat * Math.PI / 180;
-  const kmPerDegLat = 111.32;
-  const kmPerDegLon = 111.32 * Math.max(0.2, Math.cos(latRad));
-  let bestDistance = Infinity;
-  let bestAlong = points[0].distanceFromStartKm;
-
-  for (let i = 0; i < points.length - 1; i++) {
-    const a = points[i];
-    const b = points[i + 1];
-    const ax = (a.lon - lon) * kmPerDegLon;
-    const ay = (a.lat - lat) * kmPerDegLat;
-    const bx = (b.lon - lon) * kmPerDegLon;
-    const by = (b.lat - lat) * kmPerDegLat;
-    const dx = bx - ax;
-    const dy = by - ay;
-    const len2 = dx * dx + dy * dy;
-    const t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
-    const px = ax + t * dx;
-    const py = ay + t * dy;
-    const distance = Math.hypot(px, py);
-
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      const segmentLengthKm = haversineKm(a.lat, a.lon, b.lat, b.lon);
-      bestAlong = a.distanceFromStartKm + segmentLengthKm * t;
-    }
-  }
-
-  return { distanceKm: bestDistance, distanceAlongRouteKm: bestAlong };
-};
-
-const stationFromElement = (el: any, points: RouteRefPoint[], bufferKm: number): ChargingStation | null => {
+const stationFromOsmElement = (el: any): ChargingStation | null => {
   const tags = el.tags || {};
   const lat = el.lat ?? el.center?.lat;
   const lon = el.lon ?? el.center?.lon;
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-
-  const nearest = distanceToRouteKm(lat, lon, points);
-  if (nearest.distanceKm > bufferKm) return null;
-
+  const hasType2 = !!(tags['socket:type2'] || tags['socket:type2:output'] || tags['socket:type2_c'] || tags['socket:type2_c:output']);
+  const hasCcs2 = !!(tags['socket:type2_combo'] || tags['socket:type2_combo:output'] || tags['socket:ccs2'] || tags['socket:ccs2:output'] || tags['socket:ccs'] || tags['socket:ccs:output'] || tags['socket:ccs_combo'] || tags['socket:ccs_combo:output'] || tags['socket:combo-2'] || tags['socket:combo-2:output'] || tags['socket:combo2'] || tags['socket:combo2:output']);
+  const hasAnyConnector = hasType2 || hasCcs2 || tags['socket:chademo'] || tags['socket:chademo:output'] || tags['socket:tesla_supercharger'] || tags['socket:tesla_destination'];
   return {
-    id: `${el.type}/${el.id}`,
+    id: `osm:${el.type}/${el.id}`,
     lat, lon,
     name: tags.name || tags.operator || 'Зарядная станция',
     address: buildAddress(tags),
     operator: tags.operator,
     access: tags.access,
     fee: tags.fee,
-    hasType2: !!(tags['socket:type2'] || tags['socket:type2:output'] || tags['socket:type2_c'] || tags['socket:type2_c:output']),
-    hasCcs2: !!(tags['socket:type2_combo'] || tags['socket:type2_combo:output'] || tags['socket:ccs2'] || tags['socket:ccs2:output'] || tags['socket:ccs'] || tags['socket:ccs:output'] || tags['socket:ccs_combo'] || tags['socket:ccs_combo:output'] || tags['socket:combo-2'] || tags['socket:combo-2:output'] || tags['socket:combo2'] || tags['socket:combo2:output']),
-    connectorTypeUnknown: !(tags['socket:type2'] || tags['socket:type2:output'] || tags['socket:type2_c'] || tags['socket:type2_c:output'] || tags['socket:type2_combo'] || tags['socket:type2_combo:output'] || tags['socket:ccs2'] || tags['socket:ccs2:output'] || tags['socket:ccs'] || tags['socket:ccs:output'] || tags['socket:ccs_combo'] || tags['socket:ccs_combo:output'] || tags['socket:combo-2'] || tags['socket:combo-2:output'] || tags['socket:combo2'] || tags['socket:combo2:output'] || tags['socket:chademo'] || tags['socket:chademo:output'] || tags['socket:tesla_supercharger'] || tags['socket:tesla_destination']),
+    hasType2,
+    hasCcs2,
+    connectorTypeUnknown: !hasAnyConnector,
     type2PowerKw: parsePowerKw(tags['socket:type2:output'] || tags['socket:type2_c:output']),
     ccs2PowerKw: parsePowerKw(tags['socket:type2_combo:output'] || tags['socket:ccs2:output'] || tags['socket:ccs:output'] || tags['socket:ccs_combo:output'] || tags['socket:combo-2:output'] || tags['socket:combo2:output']),
-    distanceFromRouteKm: Number(nearest.distanceKm.toFixed(2)),
-    distanceAlongRouteKm: nearest.distanceAlongRouteKm,
+    distanceFromRouteKm: Infinity,
+    distanceAlongRouteKm: 0,
+    source: 'osm',
   };
 };
 
@@ -183,21 +354,69 @@ const cacheKeyForRoute = (points: RouteRefPoint[]): string => {
   return `${CACHE_PREFIX}${a.lat.toFixed(2)}_${a.lon.toFixed(2)}_${b.lat.toFixed(2)}_${b.lon.toFixed(2)}_${Math.round(b.distanceFromStartKm)}`;
 };
 
-/** Dongfeng Vigo charges via CCS Type 2 (DC fast) or plain Type 2 (AC) — this filters out
- *  stations offering neither (CHAdeMO-only lots, Tesla-proprietary connectors, etc.). */
-export const stationSupportsVigo = (s: ChargingStation) => {
-  // OSM coverage is incomplete: many real stations are mapped as charging_station
-  // but have no socket:* tag at all. Do not throw those stations away.
-  // Explicitly incompatible-only stations are still excluded.
-  return s.hasType2 || s.hasCcs2 || s.connectorTypeUnknown;
+export const stationSupportsVigo = (s: ChargingStation) => s.hasType2 || s.hasCcs2 || s.connectorTypeUnknown;
+
+const mergeStationSources = (evrace: ChargingStation[], osm: ChargingStation[]): ChargingStation[] => {
+  const merged = [...evrace];
+  for (const candidate of osm) {
+    const same = merged.find(existing => haversineKm(existing.lat, existing.lon, candidate.lat, candidate.lon) <= EVRACE_MATCH_DISTANCE_KM);
+    if (!same) { merged.push(candidate); continue; }
+    same.source = 'merged';
+    same.hasCcs2 ||= candidate.hasCcs2;
+    same.hasType2 ||= candidate.hasType2;
+    same.connectorTypeUnknown = same.connectorTypeUnknown && candidate.connectorTypeUnknown;
+    same.ccs2PowerKw = Math.max(same.ccs2PowerKw ?? 0, candidate.ccs2PowerKw ?? 0) || undefined;
+    same.type2PowerKw = Math.max(same.type2PowerKw ?? 0, candidate.type2PowerKw ?? 0) || undefined;
+    if (!same.address && candidate.address) same.address = candidate.address;
+    if ((!same.name || same.name === 'Зарядная станция') && candidate.name) same.name = candidate.name;
+    if (!same.operator && candidate.operator) same.operator = candidate.operator;
+  }
+  return merged;
 };
 
-export async function fetchChargingStationsAlongRoute(
-  points: RouteRefPoint[],
-  bufferKm = 3,
-): Promise<ChargingStation[]> {
-  if (points.length < 2) return [];
+const fetchOsmStationsAlongRoute = async (points: RouteRefPoint[], bufferKm: number): Promise<ChargingStation[]> => {
+  const sampled = sampleRouteForQuery(points, 10);
+  const chunks = routeChunks(sampled, 120);
+  const results = new Map<string, ChargingStation>();
+  let successfulRequests = 0;
+  let lastError: unknown = null;
+  const workerCount = Math.min(3, chunks.length);
+  let nextIndex = 0;
 
+  const worker = async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= chunks.length) return;
+      const bbox = bboxForChunk(chunks[index], bufferKm);
+      const south = bbox.minLat.toFixed(5), west = bbox.minLon.toFixed(5), north = bbox.maxLat.toFixed(5), east = bbox.maxLon.toFixed(5);
+      const query = `[out:json][timeout:12];(nwr["amenity"="charging_station"](${south},${west},${north},${east});nwr["man_made"="charge_point"](${south},${west},${north},${east});nwr["amenity"="fuel"]["fuel:electricity"="yes"](${south},${west},${north},${east}););out center tags;`;
+      for (const endpoint of OVERPASS_ENDPOINTS) {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 14000);
+        try {
+          const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `data=${encodeURIComponent(query)}`, signal: controller.signal });
+          if (!res.ok) throw new Error(`Overpass ${res.status}`);
+          const data = await res.json();
+          successfulRequests++;
+          for (const el of data.elements || []) {
+            const station = stationFromOsmElement(el);
+            if (!station) continue;
+            const onRoute = stationOnRoute(station, points, bufferKm);
+            if (onRoute) results.set(station.id, onRoute);
+          }
+          break;
+        } catch (e) { lastError = e; }
+        finally { window.clearTimeout(timeout); }
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  if (!successfulRequests && chunks.length) throw new Error(`Не удалось получить данные OSM: ${String(lastError)}`);
+  return Array.from(results.values());
+};
+
+export async function fetchChargingStationsAlongRoute(points: RouteRefPoint[], bufferKm = 3): Promise<ChargingStation[]> {
+  if (points.length < 2) return [];
   const cacheKey = cacheKeyForRoute(points);
   try {
     const cached = localStorage.getItem(cacheKey);
@@ -207,65 +426,34 @@ export async function fetchChargingStationsAlongRoute(
     }
   } catch { /* ignore cache */ }
 
-  const sampled = sampleRouteForQuery(points, 10);
-  const chunks = routeChunks(sampled, 120);
-  const results = new Map<string, ChargingStation>();
-  let successfulRequests = 0;
-  let lastError: unknown = null;
+  // EVRACE is the fast primary source. It contains the Belarusian registry with address,
+  // connector and power information. Failure here must not prevent the OSM fallback.
+  let evraceStations: ChargingStation[] = [];
+  try {
+    const allEvrace = await loadEvraceStations();
+    evraceStations = allEvrace
+      .map(station => stationOnRoute(station, points, bufferKm))
+      .filter((s): s is ChargingStation => !!s);
+  } catch { /* EVRACE unavailable; OSM remains available. */ }
 
-  // Three concurrent requests is enough to make long routes fast without hammering public
-  // Overpass instances. Each chunk has its own timeout and fallback endpoint.
-  const workerCount = Math.min(3, chunks.length);
-  let nextIndex = 0;
-  const worker = async () => {
-    while (true) {
-      const index = nextIndex++;
-      if (index >= chunks.length) return;
-      const chunk = chunks[index];
-      const bbox = bboxForChunk(chunk, bufferKm);
-      const south = bbox.minLat.toFixed(5);
-      const west = bbox.minLon.toFixed(5);
-      const north = bbox.maxLat.toFixed(5);
-      const east = bbox.maxLon.toFixed(5);
-      const query = `[out:json][timeout:12];(nwr["amenity"="charging_station"](${south},${west},${north},${east});nwr["man_made"="charge_point"](${south},${west},${north},${east});nwr["amenity"="fuel"]["fuel:electricity"="yes"](${south},${west},${north},${east}););out center tags;`;
-
-      for (const endpoint of OVERPASS_ENDPOINTS) {
-        const controller = new AbortController();
-        const timeout = window.setTimeout(() => controller.abort(), 14000);
-        try {
-          const res = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `data=${encodeURIComponent(query)}`,
-            signal: controller.signal,
-          });
-          if (!res.ok) throw new Error(`Overpass ${res.status}`);
-          const data = await res.json();
-          successfulRequests++;
-          for (const el of data.elements || []) {
-            const station = stationFromElement(el, points, bufferKm);
-            if (station) results.set(station.id, station);
-          }
-          break;
-        } catch (e) {
-          lastError = e;
-        } finally {
-          window.clearTimeout(timeout);
-        }
-      }
-    }
-  };
-
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
-
-  if (!successfulRequests && chunks.length) {
-    throw new Error(`Не удалось получить данные о зарядках: ${String(lastError)}`);
+  let osmStations: ChargingStation[] = [];
+  try {
+    osmStations = await fetchOsmStationsAlongRoute(points, bufferKm);
+  } catch {
+    // If EVRACE already gave us stations, a temporary Overpass failure should not turn the
+    // whole feature into an error. Only throw when both sources failed below.
   }
 
-  const stations = Array.from(results.values()).sort((a, b) => a.distanceAlongRouteKm - b.distanceAlongRouteKm);
-  try {
-    localStorage.setItem(cacheKey, JSON.stringify({ expiresAt: Date.now() + CACHE_TTL_MS, stations }));
-  } catch { /* ignore cache errors */ }
+  if (!evraceStations.length && !osmStations.length) {
+    // Preserve the old behavior of surfacing a real provider failure to the UI only when
+    // neither source could provide anything.
+    throw new Error('Не удалось получить данные о зарядных станциях');
+  }
+
+  const stations = mergeStationSources(evraceStations, osmStations)
+    .filter(stationSupportsVigo)
+    .sort((a, b) => a.distanceAlongRouteKm - b.distanceAlongRouteKm);
+
+  try { localStorage.setItem(cacheKey, JSON.stringify({ expiresAt: Date.now() + CACHE_TTL_MS, stations })); } catch { /* ignore cache */ }
   return stations;
 }
-
