@@ -65,12 +65,15 @@ const buildAddress = (tags: Record<string, string>): string => {
 // Thins the route down to one point roughly every `stepKm` before building the Overpass
 // `around:` filter — querying every raw route point (there can be hundreds) would make the
 // request URL/body unnecessarily huge without meaningfully changing which stations are found.
-const sampleRouteForQuery = (points: RouteRefPoint[], stepKm = 8): RouteRefPoint[] => {
+const sampleRouteForQuery = (points: RouteRefPoint[], stepKm = 3): RouteRefPoint[] => {
   if (!points.length) return [];
   const sampled: RouteRefPoint[] = [points[0]];
   let last = points[0].distanceFromStartKm;
   for (const p of points) {
-    if (p.distanceFromStartKm - last >= stepKm) { sampled.push(p); last = p.distanceFromStartKm; }
+    if (p.distanceFromStartKm - last >= stepKm) {
+      sampled.push(p);
+      last = p.distanceFromStartKm;
+    }
   }
   const lastPoint = points[points.length - 1];
   if (sampled[sampled.length - 1] !== lastPoint) sampled.push(lastPoint);
@@ -80,6 +83,72 @@ const sampleRouteForQuery = (points: RouteRefPoint[], stepKm = 8): RouteRefPoint
 const cacheKeyForRoute = (points: RouteRefPoint[]): string => {
   const a = points[0], b = points[points.length - 1];
   return `${CACHE_PREFIX}${a.lat.toFixed(2)}_${a.lon.toFixed(2)}_${b.lat.toFixed(2)}_${b.lon.toFixed(2)}_${Math.round(b.distanceFromStartKm)}`;
+};
+
+const routeDistanceKm = (lat: number, lon: number, points: RouteRefPoint[]) => {
+  let nearestDist = Infinity;
+  let nearestAlong = 0;
+  for (const p of points) {
+    const d = haversineKm(lat, lon, p.lat, p.lon);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearestAlong = p.distanceFromStartKm;
+    }
+  }
+  return { nearestDist, nearestAlong };
+};
+
+// Overpass's `around:` filter accepts exactly ONE centre per filter. The previous
+// implementation tried to put many lat/lon triples into one `around:` expression;
+// Overpass rejects that query. Instead we use small route chunks and a normal bounding
+// box. This is also substantially cheaper for long routes than one giant `around` union.
+const buildRouteChunks = (points: RouteRefPoint[], chunkKm = 60): RouteRefPoint[][] => {
+  const chunks: RouteRefPoint[][] = [];
+  let chunk: RouteRefPoint[] = [];
+  let chunkStart = points[0]?.distanceFromStartKm ?? 0;
+  for (const p of points) {
+    if (!chunk.length) chunkStart = p.distanceFromStartKm;
+    if (chunk.length && p.distanceFromStartKm - chunkStart > chunkKm) {
+      chunks.push(chunk);
+      chunk = [chunk[chunk.length - 1], p];
+      chunkStart = p.distanceFromStartKm;
+    } else {
+      chunk.push(p);
+    }
+  }
+  if (chunk.length) chunks.push(chunk);
+  return chunks;
+};
+
+const chunkBbox = (chunk: RouteRefPoint[], bufferKm: number) => {
+  const latBuffer = bufferKm / 111.32;
+  const avgLat = chunk.reduce((sum, p) => sum + p.lat, 0) / chunk.length;
+  const lonBuffer = bufferKm / (111.32 * Math.max(0.15, Math.cos(avgLat * Math.PI / 180)));
+  const south = Math.min(...chunk.map(p => p.lat)) - latBuffer;
+  const north = Math.max(...chunk.map(p => p.lat)) + latBuffer;
+  const west = Math.min(...chunk.map(p => p.lon)) - lonBuffer;
+  const east = Math.max(...chunk.map(p => p.lon)) + lonBuffer;
+  return `${south.toFixed(5)},${west.toFixed(5)},${north.toFixed(5)},${east.toFixed(5)}`;
+};
+
+const fetchOverpassChunk = async (chunk: RouteRefPoint[], bufferKm: number) => {
+  const bbox = chunkBbox(chunk, bufferKm);
+  const query = `[out:json][timeout:20];(nwr["amenity"="charging_station"](${bbox});nwr["man_made"="charge_point"](${bbox}););out center tags;`;
+  let lastError: unknown = null;
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: `data=${encodeURIComponent(query)}`,
+      });
+      if (!res.ok) throw new Error(`Overpass ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw new Error(`Overpass chunk failed: ${String(lastError)}`);
 };
 
 /** Dongfeng Vigo charges via CCS Type 2 (DC fast) or plain Type 2 (AC) — this filters out
@@ -99,57 +168,57 @@ export async function fetchChargingStationsAlongRoute(
       const parsed = JSON.parse(cached);
       if (parsed.expiresAt > Date.now() && Array.isArray(parsed.stations)) return parsed.stations as ChargingStation[];
     }
-  } catch { /* corrupt/unavailable cache entry — just refetch */ }
+  } catch { /* ignore cache failures */ }
 
-  const sampled = sampleRouteForQuery(points, 8);
-
-  // Overpass `around:` accepts exactly one center point: (around:radius,lat,lon).
-  // The previous implementation tried to put many centers into one `around:` clause,
-  // which makes Overpass reject the query. Build a valid union of small circles instead.
-  const radiusM = Math.round(bufferKm * 1000);
-  const clauses = sampled.flatMap(p => [
-    `node["amenity"="charging_station"](around:${radiusM},${p.lat.toFixed(5)},${p.lon.toFixed(5)});`,
-    `way["amenity"="charging_station"](around:${radiusM},${p.lat.toFixed(5)},${p.lon.toFixed(5)});`,
-    `node["man_made"="charge_point"](around:${radiusM},${p.lat.toFixed(5)},${p.lon.toFixed(5)});`,
-  ]);
-
-  // Keep the request reasonably small. One query per route is still much cheaper than
-  // querying every raw GPS/OSRM point, while every `around:` expression remains valid.
-  const query = `[out:json][timeout:25];(${clauses.join('')});out center tags;`;
-
-  let data: any = null;
+  const sampled = sampleRouteForQuery(points, 3);
+  const chunks = buildRouteChunks(sampled, 60);
+  const allElements: any[] = [];
+  const seen = new Set<string>();
+  let successfulChunks = 0;
   let lastError: unknown = null;
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
-        body: `data=${encodeURIComponent(query)}`,
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`Overpass ${res.status}${text ? `: ${text.slice(0, 180)}` : ''}`);
-      }
-      data = await res.json();
-      break;
-    } catch (e) { lastError = e; }
-  }
-  if (!data) throw new Error(`Не удалось получить данные о зарядках: ${String(lastError)}`);
 
-  const stations: ChargingStation[] = (data.elements || [])
+  // Keep concurrency low enough not to hammer public Overpass instances.
+  const worker = async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= chunks.length) return;
+      try {
+        const data = await fetchOverpassChunk(chunks[index], bufferKm);
+        successfulChunks++;
+        for (const el of (data.elements || [])) {
+          const key = `${el.type}/${el.id}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            allElements.push(el);
+          }
+        }
+      } catch (e) {
+        lastError = e;
+      }
+    }
+  };
+
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(3, chunks.length) }, () => worker());
+  await Promise.all(workers);
+
+  // A total API failure is different from a valid empty result.
+  if (successfulChunks === 0 && chunks.length > 0) {
+    throw new Error(`Не удалось запросить данные о зарядках Overpass: ${String(lastError)}`);
+  }
+
+  const stations: ChargingStation[] = allElements
     .map((el: any) => {
       const tags = el.tags || {};
       const lat = el.lat ?? el.center?.lat;
       const lon = el.lon ?? el.center?.lon;
-      let nearestDistAlong = 0;
-      let nearestDist = Infinity;
-      for (const p of points) {
-        const d = haversineKm(lat, lon, p.lat, p.lon);
-        if (d < nearestDist) { nearestDist = d; nearestDistAlong = p.distanceFromStartKm; }
-      }
-      const station: ChargingStation = {
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+      const { nearestDist, nearestAlong } = routeDistanceKm(lat, lon, points);
+      return {
         id: `${el.type}/${el.id}`,
-        lat, lon,
+        lat,
+        lon,
         name: tags.name || tags.operator || 'Зарядная станция',
         address: buildAddress(tags),
         operator: tags.operator,
@@ -160,15 +229,15 @@ export async function fetchChargingStationsAlongRoute(
         type2PowerKw: parsePowerKw(tags['socket:type2:output']),
         ccs2PowerKw: parsePowerKw(tags['socket:type2_combo:output'] || tags['socket:ccs2:output'] || tags['socket:ccs:output']),
         distanceFromRouteKm: Number(nearestDist.toFixed(2)),
-        distanceAlongRouteKm: nearestDistAlong,
-      };
-      return station;
+        distanceAlongRouteKm: nearestAlong,
+      } as ChargingStation;
     })
-    .filter((s: ChargingStation) => Number.isFinite(s.lat) && Number.isFinite(s.lon) && s.distanceFromRouteKm <= bufferKm);
+    .filter((s: ChargingStation | null): s is ChargingStation => !!s && s.distanceFromRouteKm <= bufferKm);
 
   try {
     localStorage.setItem(cacheKey, JSON.stringify({ expiresAt: Date.now() + CACHE_TTL_MS, stations }));
-  } catch { /* storage full/unavailable — degrade gracefully, still return the fresh fetch */ }
+  } catch { /* ignore cache failures */ }
 
   return stations;
 }
+
