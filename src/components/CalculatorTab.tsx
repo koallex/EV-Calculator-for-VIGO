@@ -245,22 +245,15 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const openYandexNavi = (e: React.MouseEvent) => {
     if (yandexNaviHref === '#' || typeof yandexNaviHref === 'string') return;
     e.preventDefault();
+    e.stopPropagation();
     const { app, web } = yandexNaviHref;
-    // Navigate to app scheme in the same tab first (most reliable on iOS/Android).
-    const start = Date.now();
-    const onHide = () => { document.removeEventListener('visibilitychange', onVis); };
-    const onVis = () => {
-      if (document.hidden) onHide();
-    };
-    document.addEventListener('visibilitychange', onVis);
-    window.location.href = app;
-    window.setTimeout(() => {
-      document.removeEventListener('visibilitychange', onVis);
-      // If still visible after ~0.8s, app likely missing — open web Navi.
-      if (!document.hidden && Date.now() - start >= 700) {
-        window.location.href = web;
-      }
-    }, 800);
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+    // On phones only the Navi app scheme — a delayed https fallback was also opening Maps.
+    if (isMobile) {
+      window.location.href = app;
+      return;
+    }
+    window.open(web, '_blank', 'noopener,noreferrer');
   };
 
   const searchChargingStations = useCallback(async () => {
@@ -338,7 +331,13 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           );
           const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
           const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
-          const finishSocAfterCharge = Math.min(100, routeForecast.arrivalSoc + chargeAddedSoc);
+          // Finish SOC = leave station at targetSoc, then burn energy for the remaining km to B.
+          // (Old formula arrivalSoc + chargeAdded was wrong: early charge + long remaining leg
+          // still looked almost like the unassisted arrival.)
+          const finishSocAfterCharge = Math.max(
+            0,
+            Math.min(100, targetSoc - (remainingEnergyKwh / batteryCap) * 100),
+          );
 
           // Lower score is better.
           const socWindowPenalty = Math.abs(socAtStation - IDEAL_ARRIVAL_SOC) * (mustCharge ? 1.8 : 1.2);
