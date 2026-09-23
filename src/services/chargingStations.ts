@@ -365,7 +365,7 @@ const fetchOsmStationsAlongRoute = async (points: RouteRefPoint[], bufferKm: num
   const results = new Map<string, ChargingStation>();
   let successfulRequests = 0;
   let lastError: unknown = null;
-  const workerCount = Math.min(3, chunks.length);
+  const workerCount = Math.min(2, chunks.length);
   let nextIndex = 0;
 
   const worker = async () => {

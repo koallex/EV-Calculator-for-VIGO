@@ -25,6 +25,7 @@ export default async function handler(req: any, res: any) {
     const stats = await getEvraceStats();
 
     res.setHeader('Cache-Control', 'public, s-maxage=21600, stale-while-revalidate=86400');
+    res.setHeader('X-EVRACE-Cache', stats.cached ? (stats.stale ? 'stale' : 'warm') : 'cold');
     return res.status(200).json({
       source: 'evrace',
       groups,
