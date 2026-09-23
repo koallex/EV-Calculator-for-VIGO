@@ -22,6 +22,7 @@ import {
   ArrowUpDown,
   ChartNoAxesCombined,
   LocateFixed,
+  PlugZap,
 } from 'lucide-react';
 import { UserSettings, RoadType, TripSession } from '../types';
 import { BatteryVisual } from './BatteryVisual';
@@ -31,6 +32,8 @@ import { triggerHaptic } from '../utils/haptics';
 import { saveLastRouteForecast } from '../utils/routeForecastBridge';
 import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
+import { fetchChargingStationsAlongRoute, stationSupportsVigo, ChargingStation } from '../services/chargingStations';
+import { estimateChargingSession, findOptimalChargeTargetSoc, DEFAULT_UNKNOWN_STATION_POWER_KW, ChargeConnector } from '../utils/chargingPlanner';
 import { RouteMap } from './RouteMap';
 import { LocationPickerModal } from './LocationPickerModal';
 import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts';
@@ -121,6 +124,22 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [plannedMaxSpeedKmH, setPlannedMaxSpeedKmH] = useState(120);
   const [routeWeather, setRouteWeather] = useState<{ temperature:number; windSpeed:number; windDirection:number; weatherCode:number; precipitation:number; routeBearing:number; etaMinutes:number; arrivalDate: Date; samples: RouteWeatherSample[] } | null>(null);
   const [routeForecast, setRouteForecast] = useState<{ consumption:number; energyKwh:number; arrivalSoc:number; windLabel:string; weatherLabel:string; precipitationLabel:string; relativeWindAngle:number; driverStyleFactor:number; driverStyleSource:string; climateLabel:string; climateImpactPct:number; climateDeltaKwh100:number; speedImpactPct:number; breakdown?: any } | null>(null);
+  // Mid-route charging suggestion — computed whenever the forecast arrival SoC drops under 20%.
+  // "loading"/"unavailable" keep the UI from silently showing nothing while Overpass is queried
+  // or when no reachable Type2/CCS2 station was found along the route.
+  const [chargingSuggestion, setChargingSuggestion] = useState<{
+    station: ChargingStation;
+    connector: ChargeConnector;
+    socAtStation: number;
+    targetSoc: number;
+    minRequiredSoc: number;
+    session: { minutes: number; energyKwh: number; avgPowerKw: number };
+    /** True when the station has no power tag in OSM, so the session estimate above used the
+     *  conservative DEFAULT_UNKNOWN_STATION_POWER_KW assumption rather than a real reading —
+     *  worth flagging, since actual time can differ a lot either way. */
+    stationPowerAssumed: boolean;
+  } | null>(null);
+  const [chargingSuggestionStatus, setChargingSuggestionStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>('idle');
   const [gpsStatus, setGpsStatus] = useState<'searching' | 'ok' | 'error'>('searching');
   // Last known device position, kept only to center the map-picker modal near the user
   // instead of defaulting to Minsk when they open it (weather fetch above already has this
@@ -195,6 +214,75 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     }, 120);
     return () => window.clearTimeout(timer);
   }, [resultHighlight, routeForecast]);
+
+  // Mid-route charging suggestion: triggers whenever the forecast arrival SoC drops under 20%
+  // (the threshold Александр asked for), looks up OSM charging stations along the route,
+  // filters to ones the Vigo can actually plug into (CCS2/Type2), and works out both which
+  // station to recommend and how far to charge there. See services/chargingStations.ts and
+  // utils/chargingPlanner.ts for how the station search and the charge-time model work.
+  useEffect(() => {
+    if (!routeElevation || !routeForecast || routeForecast.arrivalSoc >= 20) {
+      setChargingSuggestion(null);
+      setChargingSuggestionStatus('idle');
+      return;
+    }
+    let cancelled = false;
+    setChargingSuggestionStatus('loading');
+    (async () => {
+      try {
+        const stations = await fetchChargingStationsAlongRoute(routeElevation.points, 3);
+        if (cancelled) return;
+        const batteryCap = settings.batteryCapacityKwh || 51.87;
+        const totalDistanceKm = routeElevation.distanceKm;
+        const totalEnergyKwh = routeForecast.energyKwh;
+        // First-pass approximation: consumption spread proportionally to distance travelled
+        // rather than re-running the full segment-by-segment physics model per candidate point.
+        // Good enough to decide "is this station reachable" and "how much charging is needed
+        // from here" — not a replacement for the calibrated per-segment forecast above it.
+        const socAtDistance = (distanceKm: number) =>
+          startSoc - (totalEnergyKwh * (distanceKm / Math.max(0.001, totalDistanceKm)) / batteryCap) * 100;
+
+        const reachable = stations
+          .filter(stationSupportsVigo)
+          .map((station) => ({ station, socAtStation: socAtDistance(station.distanceAlongRouteKm) }))
+          .filter(({ socAtStation }) => socAtStation >= ARRIVAL_RESERVE_SOC);
+
+        if (!reachable.length) {
+          if (!cancelled) { setChargingSuggestion(null); setChargingSuggestionStatus('unavailable'); }
+          return;
+        }
+
+        // Prefer CCS2 (DC fast) over Type2-only, then the furthest-along reachable station —
+        // covering as much distance as possible before the one stop needed.
+        reachable.sort((a, b) => {
+          if (a.station.hasCcs2 !== b.station.hasCcs2) return a.station.hasCcs2 ? -1 : 1;
+          return b.station.distanceAlongRouteKm - a.station.distanceAlongRouteKm;
+        });
+        const { station, socAtStation } = reachable[0];
+        const connector: ChargeConnector = station.hasCcs2 ? 'ccs2' : 'type2';
+        const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
+        // OSM often has no power tag for a station at all — treat that as "unknown", not as
+        // "as fast as the car can physically take" (see DEFAULT_UNKNOWN_STATION_POWER_KW).
+        const stationPowerAssumed = rawStationMaxPowerKw === undefined;
+        const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
+
+        const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
+        const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
+        const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + ARRIVAL_RESERVE_SOC);
+
+        const targetSoc = findOptimalChargeTargetSoc(socAtStation, minRequiredSoc, connector, stationMaxPowerKw);
+        const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
+
+        if (!cancelled) {
+          setChargingSuggestion({ station, connector, socAtStation, targetSoc, minRequiredSoc, session, stationPowerAssumed });
+          setChargingSuggestionStatus('ready');
+        }
+      } catch {
+        if (!cancelled) { setChargingSuggestion(null); setChargingSuggestionStatus('error'); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [routeElevation, routeForecast, startSoc, settings.batteryCapacityKwh]);
 
   const calculateBearing = (lat1:number, lon1:number, lat2:number, lon2:number) => {
     const r=Math.PI/180, y=Math.sin((lon2-lon1)*r)*Math.cos(lat2*r), x=Math.cos(lat1*r)*Math.sin(lat2*r)-Math.sin(lat1*r)*Math.cos(lat2*r)*Math.cos((lon2-lon1)*r);
@@ -911,6 +999,51 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   </div>
                 </div>
 
+                {/* Mid-route charging suggestion — shown whenever forecast arrival SoC < 20% */}
+                {arrival < 20 && (
+                  <div className={`mt-3 rounded-xl border p-3 ${isDark ? 'bg-sky-950/30 border-sky-800/50' : 'bg-sky-50 border-sky-200'}`}>
+                    <div className={`flex items-center gap-1.5 text-xs font-bold ${isDark ? 'text-sky-300' : 'text-sky-800'}`}>
+                      <PlugZap className="w-3.5 h-3.5" /> Зарядка в пути
+                    </div>
+                    {chargingSuggestionStatus === 'loading' && (
+                      <p className={`mt-1 text-[11px] flex items-center gap-1.5 ${isDark ? 'text-sky-200/70' : 'text-sky-700'}`}>
+                        <Loader2 className="w-3 h-3 animate-spin" /> Ищем станции вдоль маршрута…
+                      </p>
+                    )}
+                    {chargingSuggestionStatus === 'unavailable' && (
+                      <p className={`mt-1 text-[11px] ${isDark ? 'text-sky-200/70' : 'text-sky-700'}`}>
+                        Не нашли на OSM зарядку с CCS2/Type2 в радиусе 3 км от маршрута, до которой хватит текущего заряда. Возможно, стоит увеличить стартовый SOC.
+                      </p>
+                    )}
+                    {chargingSuggestionStatus === 'error' && (
+                      <p className={`mt-1 text-[11px] ${isDark ? 'text-sky-200/70' : 'text-sky-700'}`}>
+                        Не удалось запросить данные о зарядках (Overpass). Попробуйте пересчитать маршрут ещё раз.
+                      </p>
+                    )}
+                    {chargingSuggestionStatus === 'ready' && chargingSuggestion && (
+                      <>
+                        <p className={`mt-1 text-[11px] ${isDark ? 'text-sky-200/90' : 'text-sky-900'}`}>
+                          <span className="font-semibold">{chargingSuggestion.station.name}</span>
+                          {chargingSuggestion.station.address ? ` · ${chargingSuggestion.station.address}` : ''}
+                          {' · '}~{Math.round(chargingSuggestion.station.distanceAlongRouteKm)} км от старта
+                        </p>
+                        <p className={`mt-1 text-[11px] ${isDark ? 'text-sky-200/70' : 'text-sky-700'}`}>
+                          {chargingSuggestion.connector === 'ccs2' ? 'CCS2' : 'Type2 (AC)'} · подъедете с ~{Math.round(chargingSuggestion.socAtStation)}% ·
+                          {' '}заряжать до <span className="font-semibold">{Math.round(chargingSuggestion.targetSoc)}%</span> (~{chargingSuggestion.session.minutes} мин, {chargingSuggestion.session.energyKwh.toFixed(1)} кВт⋅ч{chargingSuggestion.session.avgPowerKw ? `, ~${chargingSuggestion.session.avgPowerKw} кВт ср.` : ''})
+                        </p>
+                        <p className={`mt-1 text-[10px] ${isDark ? 'text-sky-300/50' : 'text-sky-600/80'}`}>
+                          Цель — доехать до Б с запасом ≥{ARRIVAL_RESERVE_SOC}%, дальше заряжать невыгодно по времени: скорость зарядки к этой точке уже заметно падает.
+                        </p>
+                        {chargingSuggestion.stationPowerAssumed && (
+                          <p className={`mt-1 text-[10px] ${isDark ? 'text-amber-400/80' : 'text-amber-700'}`}>
+                            ⚠ Мощность станции не указана в OSM — время оценено по осторожному допущению ≤{DEFAULT_UNKNOWN_STATION_POWER_KW} кВт. Если это мощная станция (~160 кВт+) без других машин на ней — реально может выйти заметно быстрее.
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {/* Low-reserve action banner */}
                 {statusTone === 'low' && (
                   <div className={`mt-3 rounded-xl border p-3 ${isDark ? 'bg-rose-950/40 border-rose-700/50' : 'bg-rose-50 border-rose-300'}`}>
@@ -1169,7 +1302,15 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 </div>
 
                 <div className={`rounded-xl border overflow-hidden ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                  <RouteMap points={routeElevation.points} isDark={isDark} />
+                  <RouteMap
+                    points={routeElevation.points}
+                    isDark={isDark}
+                    chargingStop={
+                      chargingSuggestionStatus === 'ready' && chargingSuggestion
+                        ? { lat: chargingSuggestion.station.lat, lon: chargingSuggestion.station.lon, name: chargingSuggestion.station.name, address: chargingSuggestion.station.address }
+                        : null
+                    }
+                  />
                 </div>
 
                 {(() => {
