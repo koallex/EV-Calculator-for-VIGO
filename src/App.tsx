@@ -27,6 +27,16 @@ import { LoginScreen, AuthUser } from './components/LoginScreen';
 import { AdminPanel } from './components/AdminPanel';
 
 export default function App() {
+  // Public usage telemetry: records an app open even when the visitor never
+  // completes authentication. No IP address or password is sent to this endpoint.
+  useEffect(() => {
+    void fetch('/api/analytics/visit', {
+      method: 'POST',
+      credentials: 'same-origin',
+      keepalive: true,
+    }).catch(() => {});
+  }, []);
+
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [showAdmin, setShowAdmin] = useState(false);
