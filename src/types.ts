@@ -1,7 +1,21 @@
 export type ThemeMode = 'dark' | 'light' | 'oled';
 
 export interface UserSettings {
-  batteryCapacityKwh: number; // default 51.87
+  batteryCapacityKwh: number; // default 51.87 (Dongfeng Vigo)
+  /** Active vehicle profile id from vehicleProfiles catalog (e.g. dongfeng-vigo). */
+  vehicleProfileId?: string;
+  /** Battery / trim variant id within the profile (e.g. 51.87, 42.3). */
+  vehicleVariantId?: string;
+  /** Curb weight used for elevation / mass model (kg). */
+  curbWeightKg?: number;
+  /** Multiplier on the shared speed-consumption curve (Vigo baseline = 1). */
+  consumptionScale?: number;
+  /** Heat pump present — reduces estimated winter HVAC electrical load. */
+  hasHeatPump?: boolean;
+  /** On-board AC max power (kW), informational / charge-time estimates. */
+  acMaxKw?: number;
+  /** Vehicle DC peak charge power (kW). */
+  dcMaxKw?: number;
   currency: string; // e.g. 'Br', '₽', '$', '€', '₸'
   regionPreset?: 'belarus' | 'russia' | 'custom';
   
