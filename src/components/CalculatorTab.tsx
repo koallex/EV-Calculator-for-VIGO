@@ -310,15 +310,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       setNearbyFreeList(results);
       setNearbyFreeStatus('ready');
       if (!results.length) {
-        const wantsGbt = vehicleConnectors.includes('gbt');
-        const wantsCcs = vehicleConnectors.includes('ccs2');
-        setNearbyFreeError(
-          wantsGbt && !wantsCcs
-            ? 'Свободных GB/T рядом не найдено.'
-            : wantsCcs
-              ? 'Свободных CCS рядом не найдено.'
-              : 'Свободных подходящих зарядок рядом не найдено.',
-        );
+        setNearbyFreeError('Свободных подходящих зарядок рядом не найдено.');
       }
     } catch (e) {
       setNearbyFreeStatus('error');
@@ -1397,7 +1389,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             }`}
           >
             {nearbyFreeStatus === 'loading' ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /> Ищем свободные CCS…</>
+              <><Loader2 className="w-4 h-4 animate-spin" /> Ищем свободные зарядки…</>
             ) : (
               <><PlugZap className="w-4 h-4" /> Ближайшая свободная зарядка</>
             )}
