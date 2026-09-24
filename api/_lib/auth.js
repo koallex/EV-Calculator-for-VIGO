@@ -21,9 +21,126 @@ const LOGIN_MAX_ATTEMPTS = 5;
 // existing users structure remains unchanged.
 const LOGIN_DAILY_KEY = 'vigo:loginstats:daily';
 const LOGIN_USER_STATS_PREFIX = 'vigo:loginstats:user:';
+const VISIT_DAILY_KEY = 'vigo:visitstats:daily';
+const VISITOR_DAILY_PREFIX = 'vigo:visitstats:visitors:';
+const VISITOR_COOKIE = 'vigo_visitor';
+const VISITOR_COOKIE_TTL = 60 * 60 * 24 * 180;
+const VISIT_USER_STATS_PREFIX = 'vigo:visitstats:user:';
+
 
 function dateKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
+}
+
+
+function getCookie(req, name) {
+  const raw = req.headers.cookie || '';
+  const parts = raw.split(';');
+  for (const part of parts) {
+    const [key, ...value] = part.trim().split('=');
+    if (key === name) return value.join('=') || null;
+  }
+  return null;
+}
+
+function makeVisitorId() {
+  return crypto.randomBytes(24).toString('base64url');
+}
+
+function visitorCookieOptions() {
+  return `Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${VISITOR_COOKIE_TTL}`;
+}
+
+export async function recordAppVisit(req, res) {
+  const day = dateKey();
+  const sessionUser = await getSession(req);
+  let visitorId = getCookie(req, VISITOR_COOKIE);
+
+  if (!visitorId) {
+    visitorId = makeVisitorId();
+    res.setHeader('Set-Cookie', `${VISITOR_COOKIE}=${visitorId}; ${visitorCookieOptions()}`);
+  }
+
+  try {
+    // One counter for every real page/app open.
+    await redis.hincrby(VISIT_DAILY_KEY, day, 1);
+
+    // One unique browser visitor per day. The random ID never leaves the server.
+    await redis.sadd(`${VISITOR_DAILY_PREFIX}${day}`, visitorId);
+    await redis.expire(`${VISITOR_DAILY_PREFIX}${day}`, 60 * 60 * 24 * 62);
+
+    if (sessionUser?.login) {
+      const key = `${VISIT_USER_STATS_PREFIX}${sessionUser.login.trim().toLowerCase()}`;
+      await redis.hincrby(key, 'total', 1);
+      await redis.hincrby(key, `day:${day}`, 1);
+      await redis.hset(key, { login: sessionUser.login, lastOpenAt: new Date().toISOString() });
+    } else {
+      await redis.hincrby(VISIT_DAILY_KEY, `anonymous:${day}`, 1);
+    }
+
+    return { ok: true, authenticated: Boolean(sessionUser), visitorIdSet: true };
+  } catch (error) {
+    console.error('App visit statistics error:', error);
+    return { ok: false, authenticated: Boolean(sessionUser) };
+  }
+}
+
+export async function getAppUsageStatistics(logins = []) {
+  const days = [];
+  const today = new Date();
+  for (let i = 29; i >= 0; i -= 1) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - i);
+    days.push(dateKey(d));
+  }
+
+  try {
+    const dailyRaw = await redis.hgetall(VISIT_DAILY_KEY);
+    const daily = [];
+    for (const day of days) {
+      const unique = Number(await redis.scard(`${VISITOR_DAILY_PREFIX}${day}`) || 0);
+      daily.push({
+        day,
+        opens: Number(dailyRaw?.[day] || 0),
+        anonymousOpens: Number(dailyRaw?.[`anonymous:${day}`] || 0),
+        unique,
+      });
+    }
+
+    const visitorSets = days.map(day => `${VISITOR_DAILY_PREFIX}${day}`);
+    const uniqueVisitorIds = visitorSets.length ? await redis.sunion(...visitorSets) : [];
+    const unique30 = Array.isArray(uniqueVisitorIds) ? uniqueVisitorIds.length : 0;
+
+    const users = [];
+    for (const login of logins) {
+      if (!login?.login) continue;
+      const key = `${VISIT_USER_STATS_PREFIX}${login.login.trim().toLowerCase()}`;
+      const raw = await redis.hgetall(key);
+      users.push({
+        login: login.login,
+        total: Number(raw?.total || 0),
+        lastOpenAt: raw?.lastOpenAt || null,
+        last30Days: days.reduce((sum, day) => sum + Number(raw?.[`day:${day}`] || 0), 0),
+      });
+    }
+
+    return {
+      daily,
+      totals: {
+        opens30Days: daily.reduce((sum, item) => sum + item.opens, 0),
+        anonymousOpens30Days: daily.reduce((sum, item) => sum + item.anonymousOpens, 0),
+        uniqueVisitors30Days: unique30,
+      },
+      users,
+    };
+  } catch (error) {
+    console.error('Read app usage statistics error:', error);
+    return {
+      daily: days.map(day => ({ day, opens: 0, anonymousOpens: 0, unique: 0 })),
+      totals: { opens30Days: 0, anonymousOpens30Days: 0, uniqueVisitors30Days: 0 },
+      users: logins.map(user => ({ login: user.login, total: 0, lastOpenAt: null, last30Days: 0 })),
+    };
+  }
 }
 
 export async function recordSuccessfulUserLogin(user) {
