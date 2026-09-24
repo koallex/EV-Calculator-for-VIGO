@@ -25,21 +25,13 @@ import { SettingsTab } from './components/SettingsTab';
 import { AddTripModal } from './components/AddTripModal';
 import { LoginScreen, AuthUser } from './components/LoginScreen';
 import { AdminPanel } from './components/AdminPanel';
+import { AboutProject } from './components/AboutProject';
 
 export default function App() {
-  // Public usage telemetry: records an app open even when the visitor never
-  // completes authentication. No IP address or password is sent to this endpoint.
-  useEffect(() => {
-    void fetch('/api/analytics/visit', {
-      method: 'POST',
-      credentials: 'same-origin',
-      keepalive: true,
-    }).catch(() => {});
-  }, []);
-
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const [settings, setSettings] = useState<UserSettings>(loadSettings);
   const [sessions, setSessions] = useState<TripSession[]>(loadSessions);
   const [activeTab, setActiveTab] = useState<TabType>('calculator');
@@ -208,6 +200,7 @@ export default function App() {
         currentUser={authUser}
         onOpenAdmin={() => setShowAdmin(true)}
         onLogout={handleLogout}
+        onOpenAbout={() => setShowAbout(true)}
       />
 
       {/* Main Content Area */}
@@ -322,6 +315,12 @@ export default function App() {
         theme={settings.theme}
         isHudTracking={isHudTracking}
       />}
+
+      <AboutProject
+        isOpen={showAbout}
+        onClose={() => setShowAbout(false)}
+        isDark={settings.theme !== 'light'}
+      />
 
       {/* Add Trip Modal */}
       <AddTripModal
