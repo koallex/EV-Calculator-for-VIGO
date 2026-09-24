@@ -30,7 +30,8 @@ export interface VehicleProfile {
   /** Short label for selects, e.g. "Dongfeng Vigo". */
   displayName: string;
   body: 'hatch' | 'crossover' | 'sedan' | 'suv';
-  connectors: Array<'ccs2' | 'type2'>;
+  /** Ports on the car — filter stations by CCS2 / Type2 / GB/T. */
+  connectors: Array<'ccs2' | 'type2' | 'gbt'>;
   variants: VehicleVariant[];
   notes?: string;
 }
@@ -189,8 +190,9 @@ export const VEHICLE_PROFILES: VehicleProfile[] = [
     name: 'S05',
     displayName: 'Deepal S05',
     body: 'crossover',
-    connectors: ['ccs2', 'type2'],
-    notes: 'Популярный середняк в РБ. Тепловой насос на EU/топ версиях.',
+    // Китайский рынок / поставки в РБ: родной разъём GB/T (AC+DC). CCS2 только с адаптером.
+    connectors: ['gbt'],
+    notes: 'В РБ обычно GB/T. Станции фильтруются по GB/T. Тепловой насос на многих версиях.',
     variants: [
       {
         id: '56.1',
