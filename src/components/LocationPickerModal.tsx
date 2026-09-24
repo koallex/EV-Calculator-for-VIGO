@@ -1,36 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import { X, MapPin, Check, Loader2, LocateFixed } from 'lucide-react';
-import { Icon } from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import { reverseGeocode } from '../services/routeElevation';
 import { triggerHaptic } from '../utils/haptics';
-import { getBaseTileUrl, MAP_TILE_ATTRIBUTION } from '../utils/mapTiles';
-
-// Default Leaflet marker assets don't resolve correctly under Vite's bundling; build an
-// explicit icon from the CDN-hosted images (same approach used nowhere else yet in this
-// app since RouteMap only used CircleMarker, not a draggable pin marker).
-const pinIcon = new Icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-});
+import { loadYandexMaps } from '../utils/yandexMaps';
 
 interface PickedPoint { lat: number; lon: number; }
-
-function ClickCatcher({ onPick }: { onPick: (p: PickedPoint) => void }) {
-  useMapEvents({
-    click(e) {
-      onPick({ lat: e.latlng.lat, lon: e.latlng.lng });
-    },
-  });
-  return null;
-}
 
 interface LocationPickerModalProps {
   isOpen: boolean;
@@ -55,10 +30,17 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
   onConfirm,
   hapticFeedback,
 }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
+  const ymapsRef = useRef<any>(null);
+  const placemarkRef = useRef<any>(null);
+  const onPickRef = useRef<(p: PickedPoint) => void>(() => {});
+
   const [point, setPoint] = useState<PickedPoint | null>(null);
   const [label, setLabel] = useState('');
   const [resolving, setResolving] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [mapError, setMapError] = useState(false);
   const center: [number, number] = initialCenter ? [initialCenter.lat, initialCenter.lon] : FALLBACK_CENTER;
 
   // Reset picked point each time the modal is (re)opened for a fresh pick.
@@ -78,6 +60,57 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
       setResolving(false);
     }
   };
+  onPickRef.current = handlePick;
+
+  // Create the map once, when the modal opens. Destroyed on close so a stale instance never
+  // lingers under the next open.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    setMapError(false);
+
+    loadYandexMaps()
+      .then((ymaps) => {
+        if (cancelled || !containerRef.current) return;
+        ymapsRef.current = ymaps;
+        const map = new ymaps.Map(
+          containerRef.current,
+          { center, zoom: 12, controls: ['zoomControl'] },
+          { suppressMapOpenBlock: false },
+        );
+        map.events.add('click', (e: any) => {
+          const coords = e.get('coords');
+          onPickRef.current({ lat: coords[0], lon: coords[1] });
+        });
+        mapRef.current = map;
+      })
+      .catch(() => setMapError(true));
+
+    return () => {
+      cancelled = true;
+      mapRef.current?.destroy?.();
+      mapRef.current = null;
+      placemarkRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  // Move/create the pin placemark whenever a point is picked, and recenter on it.
+  useEffect(() => {
+    const map = mapRef.current;
+    const ymaps = ymapsRef.current;
+    if (!map || !ymaps || !point) return;
+
+    const coords: [number, number] = [point.lat, point.lon];
+    if (placemarkRef.current) {
+      placemarkRef.current.geometry.setCoordinates(coords);
+    } else {
+      const placemark = new ymaps.Placemark(coords, {}, { preset: 'islands#redDotIconWithCaption' });
+      map.geoObjects.add(placemark);
+      placemarkRef.current = placemark;
+    }
+    map.setCenter(coords, Math.max(map.getZoom(), 13), { duration: 200 });
+  }, [point]);
 
   const handleLocateMe = () => {
     if (!navigator.geolocation) return;
@@ -125,13 +158,13 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
             </div>
 
             <div className="relative flex-1 min-h-0 location-picker-map">
-              <MapContainer center={center} zoom={12} zoomControl={false} attributionControl={false} className="w-full h-full">
-                <TileLayer url={getBaseTileUrl(isDark)} attribution={MAP_TILE_ATTRIBUTION} />
-                <ClickCatcher onPick={handlePick} />
-                {point && <Marker position={[point.lat, point.lon]} icon={pinIcon} />}
-                {/* Place-name labels above the pin marker, on their own pane, so city names
-                    stay legible under/near the marker instead of being covered by it. */}
-              </MapContainer>
+              <div ref={containerRef} className="absolute inset-0" />
+
+              {mapError && (
+                <div className={`absolute inset-0 z-[400] flex items-center justify-center px-4 text-center text-xs ${isDark ? 'bg-slate-950/90 text-rose-300' : 'bg-white/95 text-rose-600'}`}>
+                  Не удалось загрузить Яндекс Карты. Проверьте подключение и ключ API.
+                </div>
+              )}
 
               <button
                 type="button"
