@@ -1,4 +1,4 @@
-import { authenticate, setSessionCookie, checkLoginRateLimit, recordFailedLoginAttempt, clearLoginAttempts } from "../_lib/auth.js";
+import { authenticate, setSessionCookie, checkLoginRateLimit, recordFailedLoginAttempt, clearLoginAttempts, recordSuccessfulUserLogin } from "../_lib/auth.js";
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -23,6 +23,7 @@ export default async function handler(req: any, res: any) {
     }
     await clearLoginAttempts(req, login);
     await setSessionCookie(res, user);
+    await recordSuccessfulUserLogin(user);
     return res.status(200).json({ user });
   } catch (error) {
     console.error("Login error:", error);
