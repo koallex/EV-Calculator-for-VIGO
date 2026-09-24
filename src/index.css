@@ -87,6 +87,11 @@ input[type=range]::-moz-range-thumb {
 .route-map--compact {
   height: 220px;
 }
+.route-map-shell--fill,
+.route-map--fill {
+  height: 100%;
+  width: 100%;
+}
 .route-map-yandex {
   height: 100%;
   width: 100%;

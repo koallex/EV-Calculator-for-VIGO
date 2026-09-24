@@ -19,6 +19,8 @@ interface RouteMapProps {
   currentPosition?: { lat: number; lon: number } | null;
   /** Compact height for HUD embed. */
   compact?: boolean;
+  /** Stretch to parent (fullscreen HUD background). */
+  fill?: boolean;
 }
 
 // Renders the route on Yandex Maps. The map's logo, copyright and "Открыть в Яндекс Картах"
@@ -33,6 +35,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   chargingStops,
   currentPosition = null,
   compact = false,
+  fill = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -303,8 +306,16 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   }, []);
 
   return (
-    <div className={`route-map-shell overflow-hidden ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
-      <div className={`route-map ${compact ? 'route-map--compact' : ''}`}>
+    <div
+      className={`route-map-shell overflow-hidden ${fill ? 'route-map-shell--fill' : ''} ${
+        isDark ? 'bg-slate-950' : 'bg-slate-100'
+      }`}
+    >
+      <div
+        className={`route-map ${compact && !fill ? 'route-map--compact' : ''} ${
+          fill ? 'route-map--fill' : ''
+        }`}
+      >
         <div ref={containerRef} className="route-map-yandex" />
         {loadError && (
           <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-rose-300 bg-slate-950/85">
