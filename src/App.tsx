@@ -36,12 +36,8 @@ export default function App() {
   const [sessions, setSessions] = useState<TripSession[]>(loadSessions);
   const [activeTab, setActiveTab] = useState<TabType>('calculator');
   const [isHudTracking, setIsHudTracking] = useState(false);
-  // Route plan transferred from Calculator → HUD (destination + start SoC)
-  const [hudPlan, setHudPlan] = useState<{
-    destination: string;
-    startSoc: number;
-    plannedSpeedKmH?: number;
-  } | null>(null);
+  // Route plan transferred from Calculator → HUD (destination + start SoC + optional charge stops)
+  const [hudPlan, setHudPlan] = useState<import('./components/HudTab').HudRoutePlan | null>(null);
 
   // Modals
   const [isAddTripOpen, setIsAddTripOpen] = useState(false);
