@@ -292,6 +292,43 @@ export const VEHICLE_PROFILES: VehicleProfile[] = [
 export const DEFAULT_VEHICLE_PROFILE_ID = 'dongfeng-vigo';
 export const DEFAULT_VEHICLE_VARIANT_ID = '51.87';
 
+export type ConnectorOverride =
+  | 'auto'
+  | 'ccs2'
+  | 'gbt'
+  | 'type2'
+  | 'ccs2_type2'
+  | 'ccs2_gbt';
+
+const OVERRIDE_TO_CONNECTORS: Record<Exclude<ConnectorOverride, 'auto'>, Array<'ccs2' | 'type2' | 'gbt'>> = {
+  ccs2: ['ccs2'],
+  gbt: ['gbt'],
+  type2: ['type2'],
+  ccs2_type2: ['ccs2', 'type2'],
+  ccs2_gbt: ['ccs2', 'gbt'],
+};
+
+/**
+ * Effective charge ports for filtering stations / planning stops.
+ * `connectorOverride` from settings replaces the profile default when not 'auto'.
+ */
+export function resolveEffectiveConnectors(
+  profileId?: string | null,
+  connectorOverride?: ConnectorOverride | string | null,
+): Array<'ccs2' | 'type2' | 'gbt'> {
+  const override = (connectorOverride || 'auto') as ConnectorOverride;
+  if (override !== 'auto' && OVERRIDE_TO_CONNECTORS[override as Exclude<ConnectorOverride, 'auto'>]) {
+    return [...OVERRIDE_TO_CONNECTORS[override as Exclude<ConnectorOverride, 'auto'>]];
+  }
+  return [...getVehicleProfile(profileId).connectors];
+}
+
+export function formatConnectorsLabel(connectors: Array<'ccs2' | 'type2' | 'gbt'>): string {
+  return connectors
+    .map((c) => (c === 'gbt' ? 'GB/T' : c === 'ccs2' ? 'CCS2' : 'Type2'))
+    .join(' / ');
+}
+
 export function getVehicleProfile(profileId?: string | null): VehicleProfile {
   return (
     VEHICLE_PROFILES.find((p) => p.id === profileId) ||
