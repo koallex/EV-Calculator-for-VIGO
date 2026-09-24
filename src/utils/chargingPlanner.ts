@@ -37,7 +37,7 @@ const VIGO_AC_MAX_POWER_KW = 6.6;
 // surface to the user that this is an assumption, not a real reading, when it's used.
 export const DEFAULT_UNKNOWN_STATION_POWER_KW = 50;
 
-export type ChargeConnector = 'ccs2' | 'type2';
+export type ChargeConnector = 'ccs2' | 'type2' | 'gbt';
 
 const interpolateCurve = (curve: { soc: number; powerKw: number }[], soc: number): number => {
   const s = Math.max(0, Math.min(100, soc));
