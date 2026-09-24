@@ -48,21 +48,36 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         ? [chargingStop]
         : [];
 
-  // The animation is deliberately independent from the map's object lifecycle.
-  // Yandex gets ONE Polyline instance; only its geometry coordinates are updated.
-  // Markers are never recreated during animation and setBounds is called only once
-  // when the route data changes.
+  // Route lifecycle is completely independent from charging-stop markers.
+  // Adding/removing a charger must NEVER remove/recreate the route polyline or
+  // restart its animation. This is important because the animation owns the
+  // current Polyline instance while it progressively updates its geometry.
+  const startMarkerRef = useRef<any>(null);
+  const endMarkerRef = useRef<any>(null);
+  const chargerMarkersRef = useRef<any[]>([]);
+
+  // Build the route objects only when the actual route geometry changes.
   useEffect(() => {
     const map = mapRef.current;
     const ymaps = ymapsRef.current;
     if (!map || !ymaps || positions.length < 2) return;
 
-    // Remove/recreate objects only when the route itself changes, never per animation frame.
-    map.geoObjects.removeAll();
-    polylineRef.current = null;
+    // Remove only the previous route objects. Charger markers are managed by
+    // the separate effect below and are intentionally left untouched here.
+    if (polylineRef.current) {
+      map.geoObjects.remove(polylineRef.current);
+      polylineRef.current = null;
+    }
+    if (startMarkerRef.current) {
+      map.geoObjects.remove(startMarkerRef.current);
+      startMarkerRef.current = null;
+    }
+    if (endMarkerRef.current) {
+      map.geoObjects.remove(endMarkerRef.current);
+      endMarkerRef.current = null;
+    }
 
     const initialPositions = positions.slice(0, Math.min(2, positions.length));
-
     const polyline = new ymaps.Polyline(
       initialPositions,
       {},
@@ -72,62 +87,41 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         strokeOpacity: 0.92,
       },
     );
+
     map.geoObjects.add(polyline);
     polylineRef.current = polyline;
 
     if (start) {
-      map.geoObjects.add(
-        new ymaps.Placemark(
-          start,
-          { hintContent: 'А' },
-          {
-            preset: 'islands#circleIcon',
-            iconColor: '#22d3ee',
-          },
-        ),
+      const marker = new ymaps.Placemark(
+        start,
+        { hintContent: 'А' },
+        {
+          preset: 'islands#circleIcon',
+          iconColor: '#22d3ee',
+        },
       );
+      map.geoObjects.add(marker);
+      startMarkerRef.current = marker;
     }
 
     if (end) {
-      map.geoObjects.add(
-        new ymaps.Placemark(
-          end,
-          { hintContent: 'Б' },
-          {
-            preset: 'islands#circleIcon',
-            iconColor: '#ef4444',
-          },
-        ),
+      const marker = new ymaps.Placemark(
+        end,
+        { hintContent: 'Б' },
+        {
+          preset: 'islands#circleIcon',
+          iconColor: '#ef4444',
+        },
       );
+      map.geoObjects.add(marker);
+      endMarkerRef.current = marker;
     }
 
-    stops.forEach((stop, i) => {
-      map.geoObjects.add(
-        new ymaps.Placemark(
-          [stop.lat, stop.lon],
-          {
-            balloonContentHeader: stops.length > 1 ? `${i + 1}. ${stop.name}` : stop.name,
-            balloonContentBody: stop.address || '',
-            hintContent: stop.name,
-          },
-          {
-            preset: 'islands#darkOrangeStretchyIcon',
-            iconContent: '⚡',
-          },
-        ),
-      );
-    });
-
-    // Fit the map exactly once for this route. Do not derive bounds from the
-    // animated polyline because at this moment it contains only its first points.
-    // Calculate the viewport from the COMPLETE route plus charging stops.
-    const allBoundsPoints = [
-      ...positions,
-      ...stops.map((stop) => [stop.lat, stop.lon] as [number, number]),
-    ];
-    if (allBoundsPoints.length > 1) {
-      const lats = allBoundsPoints.map(([lat]) => lat);
-      const lons = allBoundsPoints.map(([, lon]) => lon);
+    // Fit the map only when the route itself changes.
+    const allRoutePoints = positions;
+    if (allRoutePoints.length > 1) {
+      const lats = allRoutePoints.map(([lat]) => lat);
+      const lons = allRoutePoints.map(([, lon]) => lon);
       const bounds: [[number, number], [number, number]] = [
         [Math.min(...lats), Math.min(...lons)],
         [Math.max(...lats), Math.max(...lons)],
@@ -138,13 +132,63 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     }
 
     return () => {
+      // Do not call removeAll() here. Only detach the route objects that this
+      // effect owns. The charger effect and its markers remain independent.
       if (polylineRef.current === polyline) {
+        map.geoObjects.remove(polyline);
         polylineRef.current = null;
       }
+      if (startMarkerRef.current) {
+        map.geoObjects.remove(startMarkerRef.current);
+        startMarkerRef.current = null;
+      }
+      if (endMarkerRef.current) {
+        map.geoObjects.remove(endMarkerRef.current);
+        endMarkerRef.current = null;
+      }
     };
-    // Route geometry / charging stops changed: rebuild objects once.
+    // Route geometry only. Charging stops deliberately excluded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, JSON.stringify(positions), JSON.stringify(stops)]);
+  }, [mapReady, JSON.stringify(positions)]);
+
+  // Charging markers have their own lifecycle. Changing charging stops never
+  // touches the route Polyline, route markers, animation, or map bounds.
+  useEffect(() => {
+    const map = mapRef.current;
+    const ymaps = ymapsRef.current;
+    if (!map || !ymaps) return;
+
+    chargerMarkersRef.current.forEach((marker) => {
+      map.geoObjects.remove(marker);
+    });
+    chargerMarkersRef.current = [];
+
+    stops.forEach((stop, i) => {
+      const marker = new ymaps.Placemark(
+        [stop.lat, stop.lon],
+        {
+          balloonContentHeader: stops.length > 1 ? `${i + 1}. ${stop.name}` : stop.name,
+          balloonContentBody: stop.address || '',
+          hintContent: stop.name,
+        },
+        {
+          preset: 'islands#darkOrangeStretchyIcon',
+          iconContent: '⚡',
+        },
+      );
+      map.geoObjects.add(marker);
+      chargerMarkersRef.current.push(marker);
+    });
+
+    return () => {
+      chargerMarkersRef.current.forEach((marker) => {
+        map.geoObjects.remove(marker);
+      });
+      chargerMarkersRef.current = [];
+    };
+    // Only charging stops control this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, JSON.stringify(stops)]);
 
   // Progressive draw-in: update the existing Yandex Polyline geometry.
   // No geoObjects.removeAll(), marker recreation, or setBounds() occurs here.
@@ -209,6 +253,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     return () => {
       cancelled = true;
       polylineRef.current = null;
+      startMarkerRef.current = null;
+      endMarkerRef.current = null;
+      chargerMarkersRef.current = [];
       mapRef.current?.destroy?.();
       mapRef.current = null;
       ymapsRef.current = null;
