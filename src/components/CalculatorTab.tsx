@@ -33,8 +33,9 @@ import { saveLastRouteForecast } from '../utils/routeForecastBridge';
 import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress } from '../services/routeElevation';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
-import { fetchChargingStationsAlongRoute, stationSupportsVigo, ChargingStation } from '../services/chargingStations';
+import { fetchChargingStationsAlongRoute, stationSupportsConnectors, ChargingStation } from '../services/chargingStations';
 import { findNearbyFreeCcsChargers, FreeChargerResult } from '../services/nearbyFreeCharging';
+import { getVehicleProfile } from '../data/vehicleProfiles';
 import { estimateChargingSession, findOptimalChargeTargetSoc, DEFAULT_UNKNOWN_STATION_POWER_KW, ChargeConnector } from '../utils/chargingPlanner';
 import { RouteMap } from './RouteMap';
 import { LocationPickerModal } from './LocationPickerModal';
@@ -297,17 +298,30 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       if (!origin) {
         throw new Error('Нужна геолокация или точка А на карте');
       }
-      const { results } = await findNearbyFreeCcsChargers(origin, { radiusKm: 40, limit: 10 });
+      const vehicleConnectors = getVehicleProfile(settings.vehicleProfileId).connectors;
+      const { results } = await findNearbyFreeCcsChargers(origin, {
+        radiusKm: 40,
+        limit: 10,
+        vehicleConnectors,
+      });
       setNearbyFreeList(results);
       setNearbyFreeStatus('ready');
       if (!results.length) {
-        setNearbyFreeError('Свободных CCS рядом не найдено.');
+        const wantsGbt = vehicleConnectors.includes('gbt');
+        const wantsCcs = vehicleConnectors.includes('ccs2');
+        setNearbyFreeError(
+          wantsGbt && !wantsCcs
+            ? 'Свободных GB/T рядом не найдено.'
+            : wantsCcs
+              ? 'Свободных CCS рядом не найдено.'
+              : 'Свободных подходящих зарядок рядом не найдено.',
+        );
       }
     } catch (e) {
       setNearbyFreeStatus('error');
       setNearbyFreeError(e instanceof Error ? e.message : String(e));
     }
-  }, [startMode, gpsCoords, startPin]);
+  }, [startMode, gpsCoords, startPin, settings.vehicleProfileId]);
 
   const applyFreeChargerAsDestination = (item: FreeChargerResult) => {
     // Short label so the destination field doesn't overflow the route form.
@@ -338,7 +352,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     try {
       const stations = await fetchChargingStationsAlongRoute(routeElevation.points, force ? 8 : 5);
       if (cancelled) return;
-      const vigoStations = stations.filter(stationSupportsVigo);
+      const vehicleConnectors = getVehicleProfile(settings.vehicleProfileId).connectors;
+      const vigoStations = stations.filter((s) => stationSupportsConnectors(s, vehicleConnectors));
       setStationsFoundAlongRoute(vigoStations.length);
       const batteryCap = settings.batteryCapacityKwh || 51.87;
       const totalDistanceKm = routeElevation.distanceKm;
@@ -397,8 +412,21 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
           const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
           const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + finishReserveSoc);
-          const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
-          const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
+          const connector: ChargeConnector = (() => {
+            // Prefer a connector the active vehicle actually has.
+            if (vehicleConnectors.includes('gbt') && station.hasGbt) return 'gbt';
+            if (vehicleConnectors.includes('ccs2') && (station.hasCcs2 || station.connectorTypeUnknown)) return 'ccs2';
+            if (vehicleConnectors.includes('type2') && station.hasType2) return 'type2';
+            if (station.hasCcs2 || station.connectorTypeUnknown) return 'ccs2';
+            if (station.hasGbt) return 'gbt';
+            return 'type2';
+          })();
+          const rawStationMaxPowerKw =
+            connector === 'gbt'
+              ? station.gbtPowerKw ?? station.ccs2PowerKw
+              : connector === 'ccs2'
+                ? station.ccs2PowerKw
+                : station.type2PowerKw;
           const stationPowerAssumed = rawStationMaxPowerKw === undefined;
           const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
           // Target = energy for remaining km + comfort finish reserve (no forced 80%).
@@ -480,8 +508,20 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             if (station.distanceAlongRouteKm < 5) return null;
             const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
             const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + ARRIVAL_RESERVE_SOC);
-            const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
-            const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
+            const connector: ChargeConnector = (() => {
+              if (vehicleConnectors.includes('gbt') && station.hasGbt) return 'gbt';
+              if (vehicleConnectors.includes('ccs2') && (station.hasCcs2 || station.connectorTypeUnknown)) return 'ccs2';
+              if (vehicleConnectors.includes('type2') && station.hasType2) return 'type2';
+              if (station.hasCcs2 || station.connectorTypeUnknown) return 'ccs2';
+              if (station.hasGbt) return 'gbt';
+              return 'type2';
+            })();
+            const rawStationMaxPowerKw =
+              connector === 'gbt'
+                ? station.gbtPowerKw ?? station.ccs2PowerKw
+                : connector === 'ccs2'
+                  ? station.ccs2PowerKw
+                  : station.type2PowerKw;
             const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
             const desiredTarget = Math.min(
               90,
@@ -577,8 +617,20 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         const remainingEnergyKwh = energyPerKm * remainingKm;
         if (remainingKm < MIN_TAIL_KM) return null; // no stop in the tail of the route
         const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + reserveAtB);
-        const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
-        const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
+        const connector: ChargeConnector = (() => {
+          if (vehicleConnectors.includes('gbt') && station.hasGbt) return 'gbt';
+          if (vehicleConnectors.includes('ccs2') && (station.hasCcs2 || station.connectorTypeUnknown)) return 'ccs2';
+          if (vehicleConnectors.includes('type2') && station.hasType2) return 'type2';
+          if (station.hasCcs2 || station.connectorTypeUnknown) return 'ccs2';
+          if (station.hasGbt) return 'gbt';
+          return 'type2';
+        })();
+        const rawStationMaxPowerKw =
+          connector === 'gbt'
+            ? station.gbtPowerKw ?? station.ccs2PowerKw
+            : connector === 'ccs2'
+              ? station.ccs2PowerKw
+              : station.type2PowerKw;
         const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
         const desiredTarget = minRequiredSoc;
         const targetSoc = findOptimalChargeTargetSoc(socAtStation, desiredTarget, connector, stationMaxPowerKw, {
@@ -659,8 +711,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           );
           const connector = prev.connector;
           const stationMax =
-            (connector === 'ccs2' ? prev.station.ccs2PowerKw : prev.station.type2PowerKw) ??
-            DEFAULT_UNKNOWN_STATION_POWER_KW;
+            (connector === 'gbt'
+              ? prev.station.gbtPowerKw ?? prev.station.ccs2PowerKw
+              : connector === 'ccs2'
+                ? prev.station.ccs2PowerKw
+                : prev.station.type2PowerKw) ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
           const targetSoc = findOptimalChargeTargetSoc(prev.socAtStation, bumpTarget, connector, stationMax, {
             maxTargetSoc: Math.min(90, Math.max(bumpTarget, bumpTarget + 3)),
             marginalRateThreshold: 0.5,
@@ -1365,10 +1420,15 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       {item.distanceKm < 1
                         ? `${Math.round(item.distanceKm * 1000)} м`
                         : `${item.distanceKm.toFixed(1)} км`}
-                      {' · '}CCS свободно {item.freeCcs}
-                      {item.station.ccs2PowerKw
-                        ? ` · ${Math.round(item.station.ccs2PowerKw)} кВт`
-                        : ''}
+                      {' · '}
+                      {item.matchedConnector === 'gbt' ? 'GB/T' : 'CCS'} свободно {item.freeCcs}
+                      {(() => {
+                        const kw =
+                          item.matchedConnector === 'gbt'
+                            ? item.station.gbtPowerKw ?? item.station.ccs2PowerKw
+                            : item.station.ccs2PowerKw;
+                        return kw ? ` · ${Math.round(kw)} кВт` : '';
+                      })()}
                       {item.operator ? ` · ${item.operator}` : ''}
                     </div>
                   </button>
@@ -1530,8 +1590,16 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                                 {' · '}~{Math.round(stop.station.distanceAlongRouteKm)} км
                               </p>
                               <p className={`mt-0.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                                {stop.connector === 'ccs2' ? 'CCS' : 'Type2'}
-                                {(stop.connector === 'ccs2' ? stop.station.ccs2PowerKw : stop.station.type2PowerKw) ? ` · ${Math.round(stop.connector === 'ccs2' ? stop.station.ccs2PowerKw! : stop.station.type2PowerKw!)} кВт` : ''}
+                                {stop.connector === 'gbt' ? 'GB/T' : stop.connector === 'ccs2' ? 'CCS' : 'Type2'}
+                                {(() => {
+                                  const kw =
+                                    stop.connector === 'gbt'
+                                      ? stop.station.gbtPowerKw ?? stop.station.ccs2PowerKw
+                                      : stop.connector === 'ccs2'
+                                        ? stop.station.ccs2PowerKw
+                                        : stop.station.type2PowerKw;
+                                  return kw ? ` · ${Math.round(kw)} кВт` : '';
+                                })()}
                                 {' · '}~{Math.round(stop.socAtStation)}%
                                 {!chargingSearchForced && <> → {Math.round(stop.targetSoc)}%</>}
                                 {' · '}{stop.session.minutes} мин

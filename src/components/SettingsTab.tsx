@@ -501,6 +501,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   {' · '}
                   {form.hasHeatPump ?? variant.hasHeatPump ? 'тепловой насос' : 'без ТН (ТЭН)'}
                   {' · '}DC до {Math.round(form.dcMaxKw || variant.dcMaxKw)} кВт
+                  {' · '}
+                  {getVehicleProfile(form.vehicleProfileId).connectors
+                    .map((c) => (c === 'gbt' ? 'GB/T' : c === 'ccs2' ? 'CCS2' : 'Type2'))
+                    .join(' / ')}
                 </p>
               );
             })()}
