@@ -344,16 +344,16 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       const socAtDistance = (distanceKm: number) =>
         startSoc - (totalEnergyKwh * (distanceKm / Math.max(0.001, totalDistanceKm)) / batteryCap) * 100;
 
-      // Charge only as much as needed to reach B (or the next leg) with a comfortable
-      // finish reserve — not a fixed ~80% session. Example: if 45% at the plug is enough
-      // for ~22% at B, stop at ~45%, not 80%.
+      // Charge only as much as needed for the remaining leg. Finish SOC is a band, not a
+      // hard point: prefer ~22%, accept down to ~15% rather than a micro-stop in the last km.
       const IDEAL_ARRIVAL_SOC = 30;
-      const COMFORT_FINISH_SOC = 22; // target band ~20–25% on arrival at B after planned stops
+      const FINISH_SOC_TARGET = 22; // preferred when we do charge
+      const FINISH_SOC_MIN = 15; // acceptable: no extra stop just to climb 15→22%
+      const MIN_USEFUL_CHARGE_SOC = 8; // skip stops that only add a few %
+      const MIN_TAIL_KM = 35; // avoid stations in the last ~35 km for tiny top-ups
 
-      // Auto-suggest when finish SOC < 20%: plan a stop so arrival can reach comfort reserve.
-      // Manual (button) when finish SOC >= 20%: optional stop along the route.
       const mustCharge = routeForecast.arrivalSoc < CHARGE_SUGGEST_SOC;
-      const finishReserveSoc = mustCharge ? COMFORT_FINISH_SOC : ARRIVAL_RESERVE_SOC;
+      const finishReserveSoc = mustCharge ? FINISH_SOC_TARGET : ARRIVAL_RESERVE_SOC;
 
       let candidates = vigoStations
         .map((station) => ({
@@ -368,11 +368,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           if (socAtStation < ARRIVAL_RESERVE_SOC) return false;
           if (station.distanceAlongRouteKm < 8 && socAtStation > 65) return false;
           if (mustCharge) {
-            // Need a real top-up so finish can reach ~20% comfort.
             if (socAtStation >= 70) return false;
             if (socAtStation >= 55 && chargeNeeded < 8) return false;
             if (chargeNeeded < 2) return false;
-            if (remainingKm < Math.min(20, totalDistanceKm * 0.12) && chargeNeeded < 10) return false;
+            // No near-finish micro-stop: last kilometres are better spent arriving at 15–20%.
+            if (remainingKm < MIN_TAIL_KM && chargeNeeded < MIN_USEFUL_CHARGE_SOC) return false;
+            if (remainingKm < Math.min(20, totalDistanceKm * 0.1) && chargeNeeded < 12) return false;
           } else {
             // Optional stop (comfortable finish): still offer a mid-route CCS even when
             // arrival SOC is already fine — user pressed the button on purpose.
@@ -381,7 +382,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             if (remainingKm < Math.min(12, totalDistanceKm * 0.08)) return false;
             if (station.distanceAlongRouteKm < Math.min(10, totalDistanceKm * 0.06)) return false;
             // At least a small top-up possible toward ~80–90%
-            if (Math.min(90, COMFORT_FINISH_SOC + 60) - socAtStation < 5 && socAtStation > 75) return false;
+            if (Math.min(90, FINISH_SOC_TARGET + 60) - socAtStation < 5 && socAtStation > 75) return false;
           }
           return true;
         })
@@ -519,8 +520,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         return;
       }
 
-      // Multi-stop plan for long trips: chain stops until projected finish SOC is comfortable
-      // or we hit the stop limit. Each next leg starts from the previous targetSoc.
+      // Multi-stop plan: chain stops until finish SOC is in the acceptable band
+      // [FINISH_SOC_MIN … FINISH_SOC_TARGET+], without a micro-stop near B.
       const MAX_STOPS = 4;
       const MIN_GAP_KM = 25;
       const plan: typeof candidates = [];
@@ -528,64 +529,126 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       let socCursor = startSoc;
       const energyPerKm = totalEnergyKwh / Math.max(0.001, totalDistanceKm);
 
+      const buildStopCandidate = (
+        station: (typeof vigoStations)[0],
+        socAtStation: number,
+        reserveAtB: number,
+      ) => {
+        const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
+        const remainingEnergyKwh = energyPerKm * remainingKm;
+        if (remainingKm < MIN_TAIL_KM) return null; // no stop in the tail of the route
+        const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + reserveAtB);
+        const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
+        const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
+        const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
+        const desiredTarget = minRequiredSoc;
+        const targetSoc = findOptimalChargeTargetSoc(socAtStation, desiredTarget, connector, stationMaxPowerKw, {
+          maxTargetSoc: Math.min(90, Math.max(desiredTarget, desiredTarget + 3)),
+          marginalRateThreshold: 0.5,
+        });
+        const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
+        if (chargeAddedSoc < MIN_USEFUL_CHARGE_SOC) return null;
+        const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
+        if (session.minutes <= 0) return null;
+        const finishSocAfterCharge = Math.max(0, Math.min(100, targetSoc - (remainingEnergyKwh / batteryCap) * 100));
+        const score =
+          session.minutes +
+          station.distanceFromRouteKm * 5 +
+          Math.abs(socAtStation - IDEAL_ARRIVAL_SOC) * 1.5 +
+          (socAtStation > 50 ? (socAtStation - 50) * 1.5 : 0);
+        return {
+          station,
+          connector,
+          socAtStation,
+          targetSoc,
+          minRequiredSoc,
+          session,
+          chargeAddedSoc,
+          finishSocAfterCharge,
+          stationPowerAssumed: rawStationMaxPowerKw === undefined,
+          score,
+        };
+      };
+
       for (let n = 0; n < MAX_STOPS; n++) {
         const remainingFromCursor = Math.max(0, totalDistanceKm - cursorKm);
-        const projectedFinish = socCursor - energyPerKm * remainingFromCursor * 100 / batteryCap;
-        // After first stop, keep chaining only while finish would still be tight.
-        if (n > 0 && projectedFinish >= CHARGE_SUGGEST_SOC) break;
+        const projectedFinish = socCursor - (energyPerKm * remainingFromCursor * 100) / batteryCap;
+        // Accept the band: e.g. 18% is fine — do not add a last stop for +4%.
+        if (projectedFinish >= FINISH_SOC_MIN) break;
 
-        const pool = (n === 0 ? candidates : vigoStations.map((station) => {
-          const dist = station.distanceAlongRouteKm;
-          if (dist < cursorKm + MIN_GAP_KM) return null;
-          const socAtStation = socCursor - energyPerKm * (dist - cursorKm) * 100 / batteryCap;
-          if (socAtStation < ARRIVAL_RESERVE_SOC) return null;
-          if (socAtStation > 68) return null;
-          const remainingKm = Math.max(0, totalDistanceKm - dist);
-          const remainingEnergyKwh = energyPerKm * remainingKm;
-          const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + COMFORT_FINISH_SOC);
-          const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
-          const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
-          const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
-          // Only charge enough for remaining distance + comfort finish (~22%), not a fixed 80%.
-          const desiredTarget = minRequiredSoc;
-          const targetSoc = findOptimalChargeTargetSoc(socAtStation, desiredTarget, connector, stationMaxPowerKw, {
-            maxTargetSoc: Math.min(90, Math.max(desiredTarget, desiredTarget + 3)),
-            marginalRateThreshold: 0.5,
-          });
-          const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
-          if (chargeAddedSoc < 3) return null;
-          const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
-          const finishSocAfterCharge = Math.max(0, Math.min(100, targetSoc - (remainingEnergyKwh / batteryCap) * 100));
-          const score =
-            session.minutes +
-            station.distanceFromRouteKm * 5 +
-            Math.abs(socAtStation - 30) * 1.5 +
-            (socAtStation > 50 ? (socAtStation - 50) * 1.5 : 0);
-          return {
-            station,
-            connector,
-            socAtStation,
-            targetSoc,
-            minRequiredSoc,
-            session,
-            chargeAddedSoc,
-            finishSocAfterCharge,
-            stationPowerAssumed: rawStationMaxPowerKw === undefined,
-            score,
-          };
-        }).filter((x): x is NonNullable<typeof x> => !!x)
-          .filter((c) => c.session.minutes > 0)
-          .sort((a, b) => a.score - b.score));
+        const pool = (
+          n === 0
+            ? candidates
+            : vigoStations
+                .map((station) => {
+                  const dist = station.distanceAlongRouteKm;
+                  if (dist < cursorKm + MIN_GAP_KM) return null;
+                  const socAtStation =
+                    socCursor - (energyPerKm * (dist - cursorKm) * 100) / batteryCap;
+                  if (socAtStation < ARRIVAL_RESERVE_SOC) return null;
+                  if (socAtStation > 70) return null;
+                  return buildStopCandidate(station, socAtStation, FINISH_SOC_TARGET);
+                })
+                .filter((x): x is NonNullable<typeof x> => !!x)
+                .sort((a, b) => a.score - b.score)
+        );
 
         if (!pool.length) break;
-        const pick = pool[0];
+        // Prefer stops that leave a real leg after them (already filtered), meaningful charge.
+        const pick = pool.find((c) => c.chargeAddedSoc >= MIN_USEFUL_CHARGE_SOC) ?? pool[0];
+        if (pick.chargeAddedSoc < MIN_USEFUL_CHARGE_SOC) break;
+
         plan.push(pick);
         cursorKm = pick.station.distanceAlongRouteKm;
         socCursor = pick.targetSoc;
-        // If this stop already gets us home comfortably, stop planning more.
-        if (pick.finishSocAfterCharge >= COMFORT_FINISH_SOC) break;
+        if (pick.finishSocAfterCharge >= FINISH_SOC_MIN) break;
       }
 
+      // Drop a trailing micro-stop: charge a bit more on the previous one instead (or accept ≥ MIN).
+      if (plan.length >= 2) {
+        const last = plan[plan.length - 1];
+        const prev = plan[plan.length - 2];
+        if (last.chargeAddedSoc < MIN_USEFUL_CHARGE_SOC + 2 || last.finishSocAfterCharge - FINISH_SOC_MIN < 6) {
+          const remainingKmPrev = Math.max(0, totalDistanceKm - prev.station.distanceAlongRouteKm);
+          const remainingEnergyPrev = energyPerKm * remainingKmPrev;
+          const bumpTarget = Math.min(
+            90,
+            Math.max(
+              prev.targetSoc,
+              (remainingEnergyPrev / batteryCap) * 100 + FINISH_SOC_TARGET,
+            ),
+          );
+          const connector = prev.connector;
+          const stationMax =
+            (connector === 'ccs2' ? prev.station.ccs2PowerKw : prev.station.type2PowerKw) ??
+            DEFAULT_UNKNOWN_STATION_POWER_KW;
+          const targetSoc = findOptimalChargeTargetSoc(prev.socAtStation, bumpTarget, connector, stationMax, {
+            maxTargetSoc: Math.min(90, Math.max(bumpTarget, bumpTarget + 3)),
+            marginalRateThreshold: 0.5,
+          });
+          const session = estimateChargingSession(
+            prev.socAtStation,
+            targetSoc,
+            batteryCap,
+            connector,
+            stationMax,
+          );
+          const finishSocAfterCharge = Math.max(
+            0,
+            Math.min(100, targetSoc - (remainingEnergyPrev / batteryCap) * 100),
+          );
+          plan[plan.length - 2] = {
+            ...prev,
+            targetSoc,
+            session,
+            chargeAddedSoc: Math.max(0, targetSoc - prev.socAtStation),
+            finishSocAfterCharge,
+          };
+          plan.pop();
+        }
+      }
+
+      // If single (or last) stop still ends below MIN only slightly, leave it — band is soft.
       if (!plan.length) {
         setChargingSuggestion(null);
         setChargingStops([]);
@@ -595,14 +658,16 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
       if (!cancelled) {
         setChargingSuggestion(plan[0]);
-        setChargingStops(plan.map(({ station, connector, socAtStation, targetSoc, session, finishSocAfterCharge }) => ({
-          station,
-          connector,
-          socAtStation,
-          targetSoc,
-          session,
-          finishSocAfterCharge,
-        })));
+        setChargingStops(
+          plan.map(({ station, connector, socAtStation, targetSoc, session, finishSocAfterCharge }) => ({
+            station,
+            connector,
+            socAtStation,
+            targetSoc,
+            session,
+            finishSocAfterCharge,
+          })),
+        );
         setChargingSuggestionStatus('ready');
       }
     } catch (e) {
