@@ -1083,7 +1083,10 @@ export const HudTab: React.FC<HudTabProps> = ({
     // `undefined` here fills climatePowerOverrideKw (position 13) so passengers correctly lands
     // in position 14.
     undefined,
-    passengers
+    passengers,
+    settings.curbWeightKg ?? 1600,
+    settings.consumptionScale ?? 1,
+    settings.hasHeatPump ?? true,
   );
 
   // Range display is intentionally decoupled from passenger-count adjustments.
@@ -1108,7 +1111,10 @@ export const HudTab: React.FC<HudTabProps> = ({
     // the trailing `1` below lands in climatePowerOverrideKw (forcing a flat 1kW "climate" load
     // regardless of temperature) instead of passengers.
     undefined,
-    1
+    1,
+    settings.curbWeightKg ?? 1600,
+    settings.consumptionScale ?? 1,
+    settings.hasHeatPump ?? true,
   );
   // Keep the range calculation on a stable vehicle-level consumption basis.
   // Passenger count still affects the destination forecast above.
@@ -1464,13 +1470,15 @@ export const HudTab: React.FC<HudTabProps> = ({
           ],
           forecastWeather ? [{ distanceFromStartKm: distanceKm, weather: forecastWeather }] : [],
           { temperature: calcTemperature ?? 20, weatherCode: calcWeatherCode ?? 0, precipitation: calcPrecipitation ?? 0, windSpeed: calcWindSpeed ?? 0, windDirection: forecastWeather?.windDirection ?? currentHeading },
-          destinationSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, isTracking ? currentTripStyle.factor : undefined
+          destinationSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, isTracking ? currentTripStyle.factor : undefined, passengers, undefined,
+          settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true,
         );
         const destForecast = estimateTripConsumption(
           destinationSpeedKmH, calcTemperature, sessions, settings.batteryCapacityKwh, climateOn,
           calcWindSpeed, calcRelativeWindAngle, isTracking ? currentTripStyle.factor : undefined,
           calcWeatherCode, calcPrecipitation, { gainM: projectedGainM, lossM: projectedLossM, distanceKm },
-          etaMinutes ? etaMinutes / 60 : distanceKm / Math.max(5, destinationSpeedKmH), segmented.climatePowerKw, passengers
+          etaMinutes ? etaMinutes / 60 : distanceKm / Math.max(5, destinationSpeedKmH), segmented.climatePowerKw, passengers,
+          settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true,
         );
 
         const energyNeededKwh = segmented.energyKwh;
@@ -1564,9 +1572,10 @@ export const HudTab: React.FC<HudTabProps> = ({
         route.points,
         routeWeatherSamples.map(s => ({ distanceFromStartKm: s.distanceFromStartKm, weather: s.weather, routeBearing: s.routeBearing })),
         { temperature: calcTemperature ?? 20, weatherCode: calcWeatherCode ?? 0, precipitation: calcPrecipitation ?? 0, windSpeed: calcWindSpeed ?? 0, windDirection: forecastWeather?.windDirection ?? 0 },
-        destinationSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, isTracking ? currentTripStyle.factor : undefined
+        destinationSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, isTracking ? currentTripStyle.factor : undefined, passengers, undefined,
+        settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true,
       );
-      const destForecast = estimateTripConsumption(destinationSpeedKmH, calcTemperature, sessions, settings.batteryCapacityKwh, climateOn, segmented.avgWindSpeed, calcRelativeWindAngle, isTracking ? currentTripStyle.factor : undefined, calcWeatherCode, segmented.avgPrecipitation, { gainM, lossM, distanceKm: route.distanceKm }, segmented.durationHours, segmented.climatePowerKw, passengers);
+      const destForecast = estimateTripConsumption(destinationSpeedKmH, calcTemperature, sessions, settings.batteryCapacityKwh, climateOn, segmented.avgWindSpeed, calcRelativeWindAngle, isTracking ? currentTripStyle.factor : undefined, calcWeatherCode, segmented.avgPrecipitation, { gainM, lossM, distanceKm: route.distanceKm }, segmented.durationHours, segmented.climatePowerKw, passengers, settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true);
       const energyNeededKwh = segmented.energyKwh;
       const predictedSoc = Math.max(0, Number((liveDynamicSoc - (energyNeededKwh / batteryCap) * 100).toFixed(1)));
 

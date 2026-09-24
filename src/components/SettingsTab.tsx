@@ -20,6 +20,12 @@ import {
   exportBackupJSON,
   exportSessionsCSV,
 } from '../utils/storage';
+import {
+  VEHICLE_PROFILES,
+  getVehicleProfile,
+  getVehicleVariant,
+  applyVehicleVariantToSettings,
+} from '../data/vehicleProfiles';
 import { DecimalInput } from './DecimalInput';
 import { triggerHaptic } from '../utils/haptics';
 
@@ -404,31 +410,100 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             }`}
           >
             <Battery className={`w-4 h-4 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
-            Батарея Dongfeng Vigo
+            Автомобиль и батарея
           </h3>
 
-          <div className="space-y-1.5">
-            <div className="flex justify-between items-center text-xs">
-              <label className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                Полезная емкость батареи:
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                Модель
               </label>
-              <span className={`font-mono font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
-                {form.batteryCapacityKwh} кВт⋅ч
-              </span>
+              <select
+                value={form.vehicleProfileId || 'dongfeng-vigo'}
+                onChange={(e) => {
+                  const profileId = e.target.value;
+                  const profile = getVehicleProfile(profileId);
+                  const variant = profile.variants.find((v) => v.default) || profile.variants[0];
+                  setForm(applyVehicleVariantToSettings(form, profileId, variant.id));
+                  triggerHaptic('light', form.hapticFeedback);
+                }}
+                className={`w-full border px-3 py-2 rounded-xl text-sm font-semibold focus:outline-none transition-colors ${
+                  isDark
+                    ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
+                }`}
+              >
+                {VEHICLE_PROFILES.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.displayName}
+                  </option>
+                ))}
+              </select>
             </div>
-            <DecimalInput
-              value={form.batteryCapacityKwh}
-              onChange={(val) => setForm({ ...form, batteryCapacityKwh: val || 51.87 })}
-              suffix="кВт⋅ч"
-              className={`w-full border px-3 py-2 rounded-xl text-sm font-mono font-bold focus:outline-none transition-colors ${
-                isDark
-                  ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
-                  : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
-              }`}
-            />
-            <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              Заводская емкость Dongfeng Vigo составляет 51.87 кВт⋅ч.
-            </p>
+
+            {(() => {
+              const profile = getVehicleProfile(form.vehicleProfileId);
+              if (profile.variants.length <= 1) return null;
+              return (
+                <div className="space-y-1.5">
+                  <label className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                    Модификация батареи
+                  </label>
+                  <select
+                    value={form.vehicleVariantId || getVehicleVariant(form.vehicleProfileId).id}
+                    onChange={(e) => {
+                      setForm(applyVehicleVariantToSettings(form, form.vehicleProfileId || profile.id, e.target.value));
+                      triggerHaptic('light', form.hapticFeedback);
+                    }}
+                    className={`w-full border px-3 py-2 rounded-xl text-sm font-semibold focus:outline-none transition-colors ${
+                      isDark
+                        ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                        : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
+                    }`}
+                  >
+                    {profile.variants.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })()}
+
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-xs">
+                <label className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                  Ёмкость батареи (можно уточнить):
+                </label>
+                <span className={`font-mono font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
+                  {form.batteryCapacityKwh} кВт⋅ч
+                </span>
+              </div>
+              <DecimalInput
+                value={form.batteryCapacityKwh}
+                onChange={(val) => setForm({ ...form, batteryCapacityKwh: val || 51.87 })}
+                suffix="кВт⋅ч"
+                className={`w-full border px-3 py-2 rounded-xl text-sm font-mono font-bold focus:outline-none transition-colors ${
+                  isDark
+                    ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
+                }`}
+              />
+            </div>
+
+            {(() => {
+              const variant = getVehicleVariant(form.vehicleProfileId, form.vehicleVariantId);
+              return (
+                <p className={`text-[11px] leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {getVehicleProfile(form.vehicleProfileId).notes || ''}
+                  {' · '}Масса ~{Math.round(form.curbWeightKg || variant.curbWeightKg)} кг
+                  {' · '}
+                  {form.hasHeatPump ?? variant.hasHeatPump ? 'тепловой насос' : 'без ТН (ТЭН)'}
+                  {' · '}DC до {Math.round(form.dcMaxKw || variant.dcMaxKw)} кВт
+                </p>
+              );
+            })()}
           </div>
         </div>
 

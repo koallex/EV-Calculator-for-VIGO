@@ -872,14 +872,16 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       const segmented = estimateSegmentedRouteConsumption(
         data.points,
         samples.map(s => ({ distanceFromStartKm: s.distanceFromStartKm, weather: s.weather, routeBearing: s.routeBearing })),
-        fallbackWeather, plannedSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, undefined, passengers, plannedMaxSpeedKmH
+        fallbackWeather, plannedSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, undefined, passengers, plannedMaxSpeedKmH,
+        settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true,
       );
       const energyKwh = segmented.energyKwh;
       const arrivalSoc = Math.max(0, Number((startSoc - (energyKwh/(settings.batteryCapacityKwh||51.87))*100).toFixed(1)));
       const segmentedForecast = estimateTripConsumption(
         plannedSpeedKmH, segmented.avgTemperature, sessions, settings.batteryCapacityKwh, climateOn,
         segmented.avgWindSpeed, avgRelativeWindAngle, undefined, avgWeatherCode, segmented.avgPrecipitation,
-        {gainM:data.elevationGainM, lossM:data.elevationLossM, distanceKm:data.distanceKm}, segmented.durationHours, segmented.climatePowerKw, passengers
+        {gainM:data.elevationGainM, lossM:data.elevationLossM, distanceKm:data.distanceKm}, segmented.durationHours, segmented.climatePowerKw, passengers,
+        settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true,
       );
       const displayWeather = weatherMode === 'current' && samples.length ? samples[Math.min(samples.length - 1, Math.floor(samples.length / 2))].weather : { temperature: avgTemperature, windSpeed: avgWindSpeed, windDirection: manualWindDirection, weatherCode: avgWeatherCode, precipitation: avgPrecipitation };
       setRouteWeather({ ...displayWeather, temperature:Math.round(avgTemperature), windSpeed:Math.round(avgWindSpeed), precipitation:Number(avgPrecipitation.toFixed(1)), routeBearing, etaMinutes, arrivalDate, samples });
@@ -933,7 +935,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       speed,
       sessions,
       settings.batteryCapacityKwh,
-      climateOn, undefined, passengers, Math.max(plannedMaxSpeedKmH, speed)
+      climateOn, undefined, passengers, Math.max(plannedMaxSpeedKmH, speed),
+      settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true,
     );
     const energyKwh = breakdown.energyKwh;
     const arrivalSoc = Math.max(0, Number((startSoc - (energyKwh / (settings.batteryCapacityKwh || 51.87)) * 100).toFixed(1)));
@@ -942,7 +945,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       breakdown.avgWindSpeed, routeForecast?.relativeWindAngle ?? 0, undefined,
       routeWeather.weatherCode, breakdown.avgPrecipitation,
       { gainM: routeElevation.elevationGainM, lossM: routeElevation.elevationLossM, distanceKm: routeElevation.distanceKm },
-      breakdown.durationHours, breakdown.climatePowerKw, passengers
+      breakdown.durationHours, breakdown.climatePowerKw, passengers,
+      settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true,
     );
     return { speed, consumption: Number((energyKwh / routeElevation.distanceKm * 100).toFixed(2)), arrivalSoc, speedImpactPct: forecast.speedImpactPct, breakdown };
   };
