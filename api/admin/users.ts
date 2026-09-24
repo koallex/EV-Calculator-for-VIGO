@@ -3,6 +3,7 @@ import {
   deleteUser,
   getCurrentUser,
   listUsers,
+  getLoginStatistics,
 } from '../_lib/auth.js';
 
 export default async function handler(req: any, res: any) {
@@ -14,9 +15,9 @@ export default async function handler(req: any, res: any) {
   try {
     if (req.method === 'GET') {
       const users = await listUsers();
-      return res.status(200).json({
-        users: users.map(({ login, createdAt, disabled }) => ({ login, role: 'user', createdAt, disabled })),
-      });
+      const mappedUsers = users.map(({ login, createdAt, disabled }) => ({ login, role: 'user', createdAt, disabled }));
+      const stats = await getLoginStatistics(mappedUsers);
+      return res.status(200).json({ users: mappedUsers, loginStats: stats });
     }
 
     if (req.method === 'POST') {
