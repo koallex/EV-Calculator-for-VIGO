@@ -1038,6 +1038,27 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const predictedFullRangeKm = consumptionPer100Km > 0 ? (batteryCap / consumptionPer100Km) * 100 : 0;
   // Remaining range on current endSoc
   const remainingRangeKm = consumptionPer100Km > 0 ? (((endSoc / 100) * batteryCap) / consumptionPer100Km) * 100 : 0;
+
+  // Display-only ETA: keep the existing route time and add the already calculated
+  // charging-session time. This does not change any route/consumption calculations.
+  const totalChargingMinutes = chargingStops.reduce((sum, stop) => sum + Math.max(0, stop.session.minutes || 0), 0);
+  // Display-only final SOC: when a real charging plan is required, show the
+  // already calculated post-charge finish SOC directly in the main SOC block.
+  // Forced station display must not affect this value.
+  const displayedFinishSoc =
+    !chargingSearchForced && totalChargingMinutes > 0 && chargingStops.length > 0
+      ? chargingStops[chargingStops.length - 1].finishSocAfterCharge
+      : endSoc;
+  const hasChargingAdjustedFinishSoc =
+    !chargingSearchForced && totalChargingMinutes > 0 && chargingStops.length > 0;
+  const finishArrivalDate = routeWeather?.arrivalDate
+    ? new Date(routeWeather.arrivalDate.getTime() + totalChargingMinutes * 60000)
+    : null;
+  const finishWeatherSample = routeWeather?.samples?.length
+    ? routeWeather.samples[routeWeather.samples.length - 1]?.weather
+    : null;
+  const finishTemperature = finishWeatherSample?.temperature ?? routeWeather?.temperature ?? null;
+  const finishPrecipitation = finishWeatherSample?.precipitation ?? routeWeather?.precipitation ?? 0;
   const elevationAdjustedEnergyKwh = routeElevation ? Math.max(0, energyUsedKwh + routeElevation.netElevationEnergyKwh) : energyUsedKwh;
   const elevationAdjustedConsumption = routeElevation && routeElevation.distanceKm > 0 ? (elevationAdjustedEnergyKwh / routeElevation.distanceKm) * 100 : consumptionPer100Km;
 
@@ -1564,16 +1585,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                                 {!chargingSearchForced && <> → {Math.round(stop.targetSoc)}%</>}
                                 {' · '}{stop.session.minutes} мин
                               </p>
-                              {idx === arr.length - 1 && (
-                                <div className={`mt-2 flex items-baseline justify-between gap-2 rounded-lg px-3 py-2 ${isDark ? 'bg-cyan-500/10' : 'bg-cyan-50'}`}>
-                                  <span className={`text-[10px] ${isDark ? 'text-cyan-400/80' : 'text-cyan-700/70'}`}>
-                                    {arr.length > 1 ? 'После всех остановок на финише' : 'После зарядки на финише'}
-                                  </span>
-                                  <span className={`text-2xl font-black font-mono tabular-nums ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
-                                    {Math.round(stop.finishSocAfterCharge)}%
-                                  </span>
-                                </div>
-                              )}
                             </div>
                           ))}
                         </div>
@@ -1914,8 +1925,23 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>SOC на финише</span>
-                <span className={`text-xl font-black font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(endSoc)}%</span>
+                <div className="text-right">
+                  <span className={`text-xl font-black font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(displayedFinishSoc)}%</span>
+                  {hasChargingAdjustedFinishSoc && (
+                    <div className={`text-[9px] font-semibold leading-none mt-0.5 ${isDark ? 'text-cyan-500/70' : 'text-cyan-700/70'}`}>с учётом зарядки</div>
+                  )}
+                </div>
               </div>
+              {finishArrivalDate && (
+                <div className={`mt-1 text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  Прибытие {finishArrivalDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {totalChargingMinutes > 0 ? ` · зарядка ${totalChargingMinutes} мин` : ''}
+                  {finishTemperature !== null && (
+                    <> · {finishTemperature >= 0 ? '+' : ''}{Math.round(finishTemperature)}°C</>
+                  )}
+                  {finishPrecipitation > 0.05 ? ' · осадки' : ' · без осадков'}
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <button type="button" onClick={() => adjustValue(setEndSoc, -5, 0, Math.max(0, startSoc - 1))} className={`w-10 h-9 rounded-lg text-xs font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>
                 <input
