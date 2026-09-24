@@ -69,6 +69,13 @@ async function fetchLivePoles(operator: LiveOperator, ids: string[]) {
   return { poles, updated_at };
 }
 
+const parsePowerKw = (raw?: unknown): number | undefined => {
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  const m = String(raw).replace(',', '.').match(/([\d.]+)/);
+  return m ? Number(m[1]) : undefined;
+};
+
 /** Normalize EVRace group → lightweight station for nearby list */
 function groupToStation(group: any, index: number): ChargingStation | null {
   const poles = Array.isArray(group?.poles) ? group.poles : [];
@@ -97,6 +104,24 @@ function groupToStation(group: any, index: number): ChargingStation | null {
   }
   const hasCcs2 = guns.some((g) => isCcsLabel(g));
   const hasType2 = guns.some((g) => /type\s*2|type2/i.test(g));
+
+  // Max rated power from group / poles (same fields as chargingStations.ts)
+  const ccsPowers = [
+    group?.ccs2_power,
+    group?.ccs_power,
+    group?.dc_power,
+    ...poles.flatMap((p: any) => [p?.power_kw, p?.power, p?.kw, p?.dc_power]),
+  ]
+    .map(parsePowerKw)
+    .filter((v): v is number => v !== undefined && v > 0);
+  const type2Powers = [
+    group?.type2_power,
+    group?.ac_power,
+    ...poles.flatMap((p: any) => [p?.ac_power]),
+  ]
+    .map(parsePowerKw)
+    .filter((v): v is number => v !== undefined && v > 0);
+
   const id =
     String(group?.location_id ?? group?.slug ?? poles[0]?.external_id ?? index);
 
@@ -113,6 +138,8 @@ function groupToStation(group: any, index: number): ChargingStation | null {
     hasType2,
     hasCcs2,
     connectorTypeUnknown: !hasCcs2 && !hasType2,
+    ccs2PowerKw: ccsPowers.length ? Math.max(...ccsPowers) : undefined,
+    type2PowerKw: type2Powers.length ? Math.max(...type2Powers) : undefined,
     distanceFromRouteKm: 0,
     distanceAlongRouteKm: 0,
     source: 'evrace',
