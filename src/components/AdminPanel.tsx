@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, ShieldCheck, Trash2, UserRound, X, RefreshCw, LogOut } from 'lucide-react';
+import { Plus, ShieldCheck, Trash2, UserRound, X, RefreshCw, LogOut, BarChart3 } from 'lucide-react';
 
 interface AdminPanelProps {
   currentLogin: string;
@@ -14,6 +14,18 @@ interface AdminUser {
   disabled?: boolean;
 }
 
+interface LoginStatUser {
+  login: string;
+  total: number;
+  lastLoginAt?: string | null;
+  last30Days: number;
+}
+
+interface LoginStats {
+  daily: { day: string; count: number }[];
+  users: LoginStatUser[];
+}
+
 export const AdminPanel: React.FC<AdminPanelProps> = ({ currentLogin, onClose, onLogout }) => {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [login, setLogin] = useState('');
@@ -21,6 +33,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentLogin, onClose, o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [loginStats, setLoginStats] = useState<LoginStats>({ daily: [], users: [] });
 
   const loadUsers = async () => {
     setError('');
@@ -29,6 +42,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentLogin, onClose, o
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Не удалось загрузить пользователей.');
       setUsers(data.users || []);
+      setLoginStats(data.loginStats || { daily: [], users: [] });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки.');
     }
@@ -106,6 +120,61 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentLogin, onClose, o
 
       {message && <div className="rounded-xl border border-cyan-900/60 bg-cyan-950/30 px-3 py-2 text-xs text-cyan-300">{message}</div>}
       {error && <div className="rounded-xl border border-rose-900/60 bg-rose-950/30 px-3 py-2 text-xs text-rose-300">{error}</div>}
+
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <BarChart3 className="w-4 h-4 text-cyan-400" />
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">Статистика входов</h3>
+            <p className="mt-1 text-[10px] text-slate-500">Успешные входы пользователей за последние 30 дней</p>
+          </div>
+        </div>
+
+        {(() => {
+          const maxDaily = Math.max(1, ...loginStats.daily.map(item => item.count));
+          const total30 = loginStats.daily.reduce((sum, item) => sum + item.count, 0);
+          const active30 = loginStats.users.filter(item => item.last30Days > 0).length;
+          return (
+            <>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+                  <div className="text-[10px] text-slate-500">Входов за 30 дней</div>
+                  <div className="mt-1 text-xl font-black text-white">{total30}</div>
+                </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+                  <div className="text-[10px] text-slate-500">Активных пользователей</div>
+                  <div className="mt-1 text-xl font-black text-white">{active30}</div>
+                </div>
+              </div>
+
+              {loginStats.daily.length > 0 && (
+                <div className="h-28 flex items-end gap-1 mb-4">
+                  {loginStats.daily.map(item => (
+                    <div key={item.day} className="flex-1 h-full flex flex-col justify-end items-center gap-1" title={`${new Date(`${item.day}T00:00:00`).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}: ${item.count} входов`}>
+                      <div className="w-full rounded-t bg-cyan-500/70 min-h-[2px]" style={{ height: `${Math.max(2, (item.count / maxDaily) * 100)}%` }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {loginStats.users.map(stat => (
+                  <div key={stat.login} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white truncate">{stat.login}</div>
+                      <div className="text-[10px] text-slate-500">
+                        Всего: {stat.total} · за 30 дней: {stat.last30Days}
+                        {stat.lastLoginAt ? ` · последний вход ${new Date(stat.lastLoginAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ' · входов ещё не было'}
+                      </div>
+                    </div>
+                    <div className="text-lg font-black text-cyan-400 shrink-0">{stat.last30Days}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          );
+        })()}
+      </div>
 
       <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
         <div className="flex items-center justify-between mb-3">
