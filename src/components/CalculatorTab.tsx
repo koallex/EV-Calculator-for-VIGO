@@ -63,11 +63,8 @@ const MANUAL_PRECIPITATION_PRESETS: Record<'rain' | 'snow', Record<'light' | 'mo
   },
 };
 
-export type HudRoutePlan = {
-  destination: string;
-  startSoc: number;
-  plannedSpeedKmH?: number;
-};
+import type { HudRoutePlan } from './HudTab';
+export type { HudRoutePlan };
 
 interface CalculatorTabProps {
   settings: UserSettings;
@@ -1619,16 +1616,41 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               );
             })()}
 
-            {/* Send planned route to HUD for live tracking */}
+            {/* Send planned route to HUD for live tracking (incl. charge stops) */}
             {onSendToHud && destinationAddress.trim() && (
               <button
                 type="button"
                 onClick={() => {
                   triggerHaptic('success', settings.hapticFeedback);
+                  const totalKm = routeElevation?.distanceKm ?? distanceKm;
+                  const waypoints = [
+                    ...chargingStops.map((stop) => ({
+                      kind: 'charge' as const,
+                      name: stop.station.name || 'Зарядка',
+                      distanceAlongRouteKm: stop.station.distanceAlongRouteKm,
+                      lat: stop.station.lat,
+                      lon: stop.station.lon,
+                      plannedArrivalSoc: stop.socAtStation,
+                      chargeTargetSoc: stop.targetSoc,
+                      connectorLabel:
+                        stop.connector === 'gbt'
+                          ? 'GB/T'
+                          : stop.connector === 'ccs2'
+                            ? 'CCS'
+                            : 'Type2',
+                    })),
+                    {
+                      kind: 'destination' as const,
+                      name: destinationAddress.trim(),
+                      distanceAlongRouteKm: totalKm,
+                    },
+                  ];
                   onSendToHud({
                     destination: destinationAddress.trim(),
                     startSoc,
                     plannedSpeedKmH,
+                    totalDistanceKm: totalKm,
+                    waypoints,
                   });
                 }}
                 className={`w-full rounded-xl py-3.5 text-sm font-bold flex items-center justify-center gap-2 border transition-all active:scale-[0.98] ${
@@ -1638,7 +1660,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 }`}
               >
                 <Navigation className="w-5 h-5" />
-                Вести в HUD
+                {chargingStops.length > 0
+                  ? `Вести в HUD · ${chargingStops.length} зарядк${chargingStops.length === 1 ? 'а' : chargingStops.length < 5 ? 'и' : 'ок'}`
+                  : 'Вести в HUD'}
               </button>
             )}
 

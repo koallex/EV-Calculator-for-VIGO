@@ -31,6 +31,8 @@ import {
   Loader2,
   Flag,
   ChevronDown,
+  PlugZap,
+  SkipForward,
 } from 'lucide-react';
 import { UserSettings, TripSession } from '../types';
 import {
@@ -85,10 +87,29 @@ const CollapsibleDetails: React.FC<CollapsibleDetailsProps> = ({
   </div>
 );
 
+/** One leg of a multi-stop plan transferred from Calculator (charge stops + final B). */
+export type HudRouteWaypoint = {
+  kind: 'charge' | 'destination';
+  name: string;
+  /** Distance from trip start along the planned route, km. */
+  distanceAlongRouteKm: number;
+  lat?: number;
+  lon?: number;
+  /** Planned SoC when arriving at this point (before charge). */
+  plannedArrivalSoc?: number;
+  /** Planned SoC after charging (only for kind=charge). */
+  chargeTargetSoc?: number;
+  connectorLabel?: string;
+};
+
 export type HudRoutePlan = {
   destination: string;
   startSoc: number;
   plannedSpeedKmH?: number;
+  /** Full planned distance A→B (with stops on the way). */
+  totalDistanceKm?: number;
+  /** Intermediate charge stops + final destination, ordered by distanceAlongRouteKm. */
+  waypoints?: HudRouteWaypoint[];
 };
 
 interface HudTabProps {
@@ -208,6 +229,12 @@ export const HudTab: React.FC<HudTabProps> = ({
     driverStyleFactor?: number;
     breakdown?: any;
   } | null>(null);
+
+  /** Multi-stop plan from Calculator: charge legs + final B. */
+  const [routeWaypoints, setRouteWaypoints] = useState<HudRouteWaypoint[]>([]);
+  const [routeTotalDistanceKm, setRouteTotalDistanceKm] = useState<number | null>(null);
+  /** Index of the next waypoint the live SoC is aimed at. */
+  const [activeWaypointIndex, setActiveWaypointIndex] = useState(0);
 
   // Weather data fetched via GPS coordinates
   const [weather, setWeather] = useState<GpsWeather>({
@@ -341,11 +368,12 @@ export const HudTab: React.FC<HudTabProps> = ({
     onTrackingChange?.(isTracking);
   }, [isTracking, onTrackingChange]);
 
-  // Apply plan transferred from Calculator (destination + start SoC + optional speed)
+  // Apply plan transferred from Calculator (destination + start SoC + optional multi-stop plan)
   useEffect(() => {
     if (!hudPlan) return;
     if (hudPlan.destination?.trim()) {
       setDestinationQuery(hudPlan.destination.trim());
+      setDestinationMode('address');
       cachedDestRef.current = null; // force re-geocode for the new address
     }
     if (typeof hudPlan.startSoc === 'number' && hudPlan.startSoc > 0) {
@@ -353,6 +381,21 @@ export const HudTab: React.FC<HudTabProps> = ({
     }
     if (typeof hudPlan.plannedSpeedKmH === 'number' && hudPlan.plannedSpeedKmH > 0) {
       setManualAvgSpeedKmH(Math.min(150, Math.max(5, Math.round(hudPlan.plannedSpeedKmH))));
+    }
+    if (Array.isArray(hudPlan.waypoints) && hudPlan.waypoints.length > 0) {
+      const sorted = [...hudPlan.waypoints].sort(
+        (a, b) => a.distanceAlongRouteKm - b.distanceAlongRouteKm,
+      );
+      setRouteWaypoints(sorted);
+      setActiveWaypointIndex(0);
+    } else {
+      setRouteWaypoints([]);
+      setActiveWaypointIndex(0);
+    }
+    if (typeof hudPlan.totalDistanceKm === 'number' && hudPlan.totalDistanceKm > 0) {
+      setRouteTotalDistanceKm(hudPlan.totalDistanceKm);
+    } else {
+      setRouteTotalDistanceKm(null);
     }
     onHudPlanConsumed?.();
   }, [hudPlan, onHudPlanConsumed]);
@@ -1160,6 +1203,39 @@ export const HudTab: React.FC<HudTabProps> = ({
       ? Math.max(0, Number((liveDynamicSoc - (destinationResult.energyNeededKwh / batteryCap) * 100).toFixed(1)))
       : null;
 
+  // Multi-stop plan: remaining distance / SoC to the *next* waypoint (charge stop or B).
+  const activeWaypoint =
+    routeWaypoints.length > 0
+      ? routeWaypoints[Math.min(activeWaypointIndex, routeWaypoints.length - 1)]
+      : null;
+  const remainingKmToActiveWaypoint = activeWaypoint
+    ? Math.max(0, activeWaypoint.distanceAlongRouteKm - tripDistanceKm)
+    : null;
+  // Prefer scaling the last full-route energy estimate; otherwise use live range consumption.
+  const energyToActiveWaypointKwh =
+    remainingKmToActiveWaypoint != null
+      ? destinationResult != null && destinationResult.distanceKm > 0.5
+        ? (remainingKmToActiveWaypoint / destinationResult.distanceKm) * destinationResult.energyNeededKwh
+        : (remainingKmToActiveWaypoint / 100) * rangeConsumption
+      : null;
+  const liveSocAtActiveWaypoint =
+    energyToActiveWaypointKwh != null
+      ? Math.max(0, Number((liveDynamicSoc - (energyToActiveWaypointKwh / batteryCap) * 100).toFixed(1)))
+      : null;
+
+  // Auto-advance to the next leg when GPS distance along the trip has passed a waypoint.
+  useEffect(() => {
+    if (!routeWaypoints.length || !isTracking) return;
+    let idx = activeWaypointIndex;
+    while (
+      idx < routeWaypoints.length - 1 &&
+      tripDistanceKm >= routeWaypoints[idx].distanceAlongRouteKm - 0.25
+    ) {
+      idx += 1;
+    }
+    if (idx !== activeWaypointIndex) setActiveWaypointIndex(idx);
+  }, [tripDistanceKm, routeWaypoints, activeWaypointIndex, isTracking]);
+
   // Remaining battery kWh at live dynamic SoC
   const dynamicRemainingBatteryKwh = (liveDynamicSoc / 100) * batteryCap;
 
@@ -1822,6 +1898,106 @@ export const HudTab: React.FC<HudTabProps> = ({
           />
         )}
       </div>
+
+      {/* Multi-stop plan from Calculator: next charge / next leg */}
+      {activeWaypoint && (
+        <div
+          className={`rounded-2xl border px-3.5 py-2.5 shrink-0 ${
+            isDark ? 'bg-slate-900/95 border-amber-800/50' : 'bg-amber-50/70 border-amber-200'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {activeWaypoint.kind === 'charge' ? (
+                <PlugZap className={`w-5 h-5 shrink-0 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
+              ) : (
+                <Flag className={`w-5 h-5 shrink-0 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
+              )}
+              <div className="min-w-0">
+                <span className={`block text-[11px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                  {activeWaypoint.kind === 'charge' ? 'До зарядки' : 'До финиша'}
+                  {routeWaypoints.length > 1
+                    ? ` · ${Math.min(activeWaypointIndex + 1, routeWaypoints.length)}/${routeWaypoints.length}`
+                    : ''}
+                </span>
+                <span className={`block text-[12px] font-medium truncate ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                  {activeWaypoint.name}
+                  {activeWaypoint.connectorLabel ? ` · ${activeWaypoint.connectorLabel}` : ''}
+                </span>
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              {liveSocAtActiveWaypoint != null ? (
+                <span
+                  className={`font-mono font-black text-3xl leading-none tabular-nums ${
+                    liveSocAtActiveWaypoint < 10
+                      ? 'text-rose-500'
+                      : liveSocAtActiveWaypoint < 20
+                        ? 'text-amber-500'
+                        : isDark
+                          ? 'text-amber-300'
+                          : 'text-amber-700'
+                  }`}
+                >
+                  {Math.round(liveSocAtActiveWaypoint)}%
+                </span>
+              ) : (
+                <span className={`text-2xl font-bold tabular-nums ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>—</span>
+              )}
+              {remainingKmToActiveWaypoint != null && (
+                <span className={`block text-[11px] font-mono mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                  {remainingKmToActiveWaypoint < 1
+                    ? `${Math.round(remainingKmToActiveWaypoint * 1000)} м`
+                    : `${remainingKmToActiveWaypoint.toFixed(1)} км`}
+                </span>
+              )}
+            </div>
+          </div>
+          {activeWaypoint.kind === 'charge' && (
+            <p className={`mt-1.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+              План: приезд ~{activeWaypoint.plannedArrivalSoc != null ? Math.round(activeWaypoint.plannedArrivalSoc) : '—'}%
+              {activeWaypoint.chargeTargetSoc != null
+                ? ` → заряд до ~${Math.round(activeWaypoint.chargeTargetSoc)}%`
+                : ''}
+            </p>
+          )}
+          <div className="mt-2 flex gap-2">
+            {activeWaypointIndex < routeWaypoints.length - 1 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveWaypointIndex((i) => Math.min(i + 1, routeWaypoints.length - 1));
+                  triggerHaptic('light', settings.hapticFeedback);
+                }}
+                className={`flex-1 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold flex items-center justify-center gap-1 border ${
+                  isDark
+                    ? 'bg-slate-950 border-slate-700 text-slate-300'
+                    : 'bg-white border-slate-200 text-slate-700'
+                }`}
+              >
+                <SkipForward className="w-3.5 h-3.5" />
+                Следующая точка
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setRouteWaypoints([]);
+                setActiveWaypointIndex(0);
+                setRouteTotalDistanceKm(null);
+                triggerHaptic('light', settings.hapticFeedback);
+              }}
+              className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold border ${
+                isDark
+                  ? 'bg-slate-950 border-slate-700 text-slate-400'
+                  : 'bg-white border-slate-200 text-slate-500'
+              }`}
+            >
+              Сбросить план
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 4. Destination + result details */}
       <div
