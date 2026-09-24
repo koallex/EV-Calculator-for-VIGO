@@ -1045,12 +1045,15 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   // Display-only final SOC: when a real charging plan is required, show the
   // already calculated post-charge finish SOC directly in the main SOC block.
   // Forced station display must not affect this value.
-  const displayedFinishSoc =
-    !chargingSearchForced && totalChargingMinutes > 0 && chargingStops.length > 0
-      ? chargingStops[chargingStops.length - 1].finishSocAfterCharge
-      : endSoc;
-  const hasChargingAdjustedFinishSoc =
-    !chargingSearchForced && totalChargingMinutes > 0 && chargingStops.length > 0;
+  const chargingFinishSoc = !chargingSearchForced
+    ? (chargingStops.length > 0
+        ? chargingStops[chargingStops.length - 1].finishSocAfterCharge
+        : (chargingSuggestion && chargingSuggestion.chargeAddedSoc > 0
+            ? chargingSuggestion.finishSocAfterCharge
+            : null))
+    : null;
+  const hasChargingAdjustedFinishSoc = chargingFinishSoc !== null;
+  const displayedFinishSoc = chargingFinishSoc !== null ? chargingFinishSoc : endSoc;
   const finishArrivalDate = routeWeather?.arrivalDate
     ? new Date(routeWeather.arrivalDate.getTime() + totalChargingMinutes * 60000)
     : null;
