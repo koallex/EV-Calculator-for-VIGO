@@ -144,6 +144,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     stationPowerAssumed: boolean;
   } | null>(null);
   const [chargingSuggestionStatus, setChargingSuggestionStatus] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>('idle');
+  // True when the visible station list came from the explicit force-search action.
+  const [chargingSearchForced, setChargingSearchForced] = useState(false);
   /** Full plan: one or more stops on long trips (first stop mirrors chargingSuggestion). */
   const [chargingStops, setChargingStops] = useState<Array<{
     station: ChargingStation;
@@ -329,6 +331,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const searchChargingStations = useCallback(async (opts?: { force?: boolean }) => {
     if (!routeElevation || !routeForecast) return;
     const force = !!opts?.force;
+    setChargingSearchForced(force);
     let cancelled = false;
     setChargingSuggestionStatus('loading');
     setChargingStops([]);
@@ -1555,7 +1558,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                                 {' · '}~{Math.round(stop.station.distanceAlongRouteKm)} км
                               </p>
                               <p className={`mt-0.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                                {stop.connector === 'ccs2' ? 'CCS' : 'Type2'} · ~{Math.round(stop.socAtStation)}% → {Math.round(stop.targetSoc)}% · {stop.session.minutes} мин
+                                {stop.connector === 'ccs2' ? 'CCS' : 'Type2'}
+                                {(stop.connector === 'ccs2' ? stop.station.ccs2PowerKw : stop.station.type2PowerKw) ? ` · ${Math.round(stop.connector === 'ccs2' ? stop.station.ccs2PowerKw! : stop.station.type2PowerKw!)} кВт` : ''}
+                                {' · '}~{Math.round(stop.socAtStation)}%
+                                {!chargingSearchForced && <> → {Math.round(stop.targetSoc)}%</>}
+                                {' · '}{stop.session.minutes} мин
                               </p>
                               {idx === arr.length - 1 && (
                                 <div className={`mt-2 flex items-baseline justify-between gap-2 rounded-lg px-3 py-2 ${isDark ? 'bg-cyan-500/10' : 'bg-cyan-50'}`}>
