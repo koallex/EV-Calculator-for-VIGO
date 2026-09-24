@@ -84,17 +84,19 @@ input[type=range]::-moz-range-thumb {
   position: relative;
   height: 380px;
 }
-.route-map .leaflet-container {
+.route-map-yandex {
   height: 100%;
   width: 100%;
   background: #e2e8f0;
 }
-.route-map .leaflet-control-attribution { display: none; }
+/* Yandex's logo, copyright and "Открыть в Яндекс Картах" control render bottom-left by
+   default and must stay visible and unobstructed per the free-tier license — so our legend
+   lives top-left instead of bottom-left (where it sat for the old Leaflet map). */
 .route-map-legend {
   position: absolute;
-  z-index: 500;
+  z-index: 100;
   left: 10px;
-  bottom: 10px;
+  top: 10px;
   display: flex;
   gap: 8px;
   padding: 6px 8px;
@@ -186,17 +188,6 @@ input[type=range]::-moz-range-thumb {
   outline-offset: 2px;
 }
 
-.route-map-leaflet,
-.route-map .leaflet-container {
-  height: 100%;
-  width: 100%;
-  background: #e2e8f0;
-}
 .route-map-shell {
   border-radius: 0;
-}
-
-/* Location picker must sit above Leaflet route map panes (z-index up to ~700). */
-.location-picker-map .leaflet-container {
-  z-index: 1;
 }
