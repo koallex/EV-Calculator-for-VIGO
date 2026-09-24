@@ -1053,7 +1053,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             : null))
     : null;
   const hasChargingAdjustedFinishSoc = chargingFinishSoc !== null;
-  const displayedFinishSoc = chargingFinishSoc !== null ? chargingFinishSoc : endSoc;
   const finishArrivalDate = routeWeather?.arrivalDate
     ? new Date(routeWeather.arrivalDate.getTime() + totalChargingMinutes * 60000)
     : null;
@@ -1592,6 +1591,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                           ))}
                         </div>
                       )}
+                      {hasChargingAdjustedFinishSoc && (
+                        <div className={`mt-2 rounded-lg border px-3 py-2 ${isDark ? 'border-cyan-900/60 bg-cyan-950/30' : 'border-cyan-200 bg-cyan-50'}`}>
+                          <div className={`text-[10px] font-semibold ${isDark ? 'text-cyan-500' : 'text-cyan-700'}`}>После зарядки на финише</div>
+                          <div className={`text-lg font-black font-mono ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>{Math.round(chargingFinishSoc!)}%</div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1929,10 +1934,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               <div className="flex items-center justify-between mb-1.5">
                 <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>SOC на финише</span>
                 <div className="text-right">
-                  <span className={`text-xl font-black font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(displayedFinishSoc)}%</span>
-                  {hasChargingAdjustedFinishSoc && (
-                    <div className={`text-[9px] font-semibold leading-none mt-0.5 ${isDark ? 'text-cyan-500/70' : 'text-cyan-700/70'}`}>с учётом зарядки</div>
-                  )}
+                  <span className={`text-xl font-black font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(endSoc)}%</span>
                 </div>
               </div>
               {finishArrivalDate && (
