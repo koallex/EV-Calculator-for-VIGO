@@ -326,15 +326,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     void calculateRouteProfile({ lat: pin.lat, lon: pin.lon, displayName: name });
   };
 
-  const searchChargingStations = useCallback(async () => {
-
-
+  const searchChargingStations = useCallback(async (opts?: { force?: boolean }) => {
     if (!routeElevation || !routeForecast) return;
+    const force = !!opts?.force;
     let cancelled = false;
     setChargingSuggestionStatus('loading');
     setChargingStops([]);
     try {
-      const stations = await fetchChargingStationsAlongRoute(routeElevation.points, 5);
+      const stations = await fetchChargingStationsAlongRoute(routeElevation.points, force ? 8 : 5);
       if (cancelled) return;
       const vigoStations = stations.filter(stationSupportsVigo);
       setStationsFoundAlongRoute(vigoStations.length);
@@ -355,7 +354,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       const mustCharge = routeForecast.arrivalSoc < CHARGE_SUGGEST_SOC;
       const finishReserveSoc = mustCharge ? FINISH_SOC_TARGET : ARRIVAL_RESERVE_SOC;
 
-      let candidates = vigoStations
+            let candidates = vigoStations
         .map((station) => ({
           station,
           socAtStation: socAtDistance(station.distanceAlongRouteKm),
@@ -365,23 +364,28 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
           const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + finishReserveSoc);
           const chargeNeeded = minRequiredSoc - socAtStation;
+
+          // Forced search: any reachable VIGO stop with room after it — user asked explicitly.
+          if (force) {
+            if (socAtStation < 5) return false;
+            if (remainingKm < 12) return false;
+            if (station.distanceAlongRouteKm < 3) return false;
+            return true;
+          }
+
           if (socAtStation < ARRIVAL_RESERVE_SOC) return false;
           if (station.distanceAlongRouteKm < 8 && socAtStation > 65) return false;
           if (mustCharge) {
             if (socAtStation >= 70) return false;
             if (socAtStation >= 55 && chargeNeeded < 8) return false;
             if (chargeNeeded < 2) return false;
-            // No near-finish micro-stop: last kilometres are better spent arriving at 15–20%.
             if (remainingKm < MIN_TAIL_KM && chargeNeeded < MIN_USEFUL_CHARGE_SOC) return false;
             if (remainingKm < Math.min(20, totalDistanceKm * 0.1) && chargeNeeded < 12) return false;
           } else {
-            // Optional stop (comfortable finish): still offer a mid-route CCS even when
-            // arrival SOC is already fine — user pressed the button on purpose.
             if (socAtStation < 10) return false;
             if (socAtStation > 82) return false;
             if (remainingKm < Math.min(12, totalDistanceKm * 0.08)) return false;
             if (station.distanceAlongRouteKm < Math.min(10, totalDistanceKm * 0.06)) return false;
-            // At least a small top-up possible toward ~80–90%
             if (Math.min(90, FINISH_SOC_TARGET + 60) - socAtStation < 5 && socAtStation > 75) return false;
           }
           return true;
@@ -456,7 +460,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
       // Optional search with high finish SOC: if strict window found nothing, take the
       // best mid-route VIGO station with any positive charge session.
-      if (!candidates.length && !mustCharge) {
+      if (!candidates.length && (!mustCharge || force)) {
         candidates = vigoStations
           .map((station) => {
             const socAtStation = socAtDistance(station.distanceAlongRouteKm);
@@ -1470,13 +1474,27 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                         </button>
                       )}
                       {chargingSuggestionStatus === 'unavailable' && (
-                        <p className={`mt-1.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
-                          {stationsFoundAlongRoute > 0
-                            ? (arrival >= CHARGE_SUGGEST_SOC
-                                ? `Найдено ${stationsFoundAlongRoute} станций, но ни одна не подходит для удобной остановки.`
-                                : `Найдено ${stationsFoundAlongRoute} станций, но до подходящей не доезжаем с запасом.`)
-                            : 'Станций CCS/Type2 в коридоре 5 км не найдено.'}
-                        </p>
+                        <div className="mt-1.5 space-y-2">
+                          <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
+                            {stationsFoundAlongRoute > 0
+                              ? 'Подходящей остановки по правилам комфорта нет.'
+                              : 'Станций на маршруте не найдено.'}
+                          </p>
+                          {stationsFoundAlongRoute > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                triggerHaptic('light', settings.hapticFeedback);
+                                void searchChargingStations({ force: true });
+                              }}
+                              className={`w-full rounded-lg px-3 py-2 text-[12px] font-semibold ${
+                                isDark ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-50 text-cyan-800'
+                              }`}
+                            >
+                              Показать станции всё равно
+                            </button>
+                          )}
+                        </div>
                       )}
                       {chargingSuggestionStatus === 'error' && (
                         <p className={`mt-1.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
