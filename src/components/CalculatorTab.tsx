@@ -344,16 +344,16 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       const socAtDistance = (distanceKm: number) =>
         startSoc - (totalEnergyKwh * (distanceKm / Math.max(0.001, totalDistanceKm)) / batteryCap) * 100;
 
-      // Ideal stop: arrive at the charger around 25–40% SOC and take a meaningful charge
-      // toward ~80%. Tiny top-ups while the pack is still high (e.g. 74%→78% at km 52) look
-      // "fast" by session minutes but are the wrong plan for a long trip.
+      // Charge only as much as needed to reach B (or the next leg) with a comfortable
+      // finish reserve — not a fixed ~80% session. Example: if 45% at the plug is enough
+      // for ~22% at B, stop at ~45%, not 80%.
       const IDEAL_ARRIVAL_SOC = 30;
-      const PREFERRED_TARGET_SOC = 80;
+      const COMFORT_FINISH_SOC = 22; // target band ~20–25% on arrival at B after planned stops
 
-      // Auto-suggest when finish SOC < 20%: plan a stop so arrival can reach ~20%+ comfort.
-      // Manual (button) when finish SOC >= 20%: optional stop along the route, still no micro top-ups.
+      // Auto-suggest when finish SOC < 20%: plan a stop so arrival can reach comfort reserve.
+      // Manual (button) when finish SOC >= 20%: optional stop along the route.
       const mustCharge = routeForecast.arrivalSoc < CHARGE_SUGGEST_SOC;
-      const finishReserveSoc = mustCharge ? CHARGE_SUGGEST_SOC : ARRIVAL_RESERVE_SOC;
+      const finishReserveSoc = mustCharge ? COMFORT_FINISH_SOC : ARRIVAL_RESERVE_SOC;
 
       let candidates = vigoStations
         .map((station) => ({
@@ -381,7 +381,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             if (remainingKm < Math.min(12, totalDistanceKm * 0.08)) return false;
             if (station.distanceAlongRouteKm < Math.min(10, totalDistanceKm * 0.06)) return false;
             // At least a small top-up possible toward ~80–90%
-            if (Math.min(90, PREFERRED_TARGET_SOC) - socAtStation < 5) return false;
+            if (Math.min(90, COMFORT_FINISH_SOC + 60) - socAtStation < 5 && socAtStation > 75) return false;
           }
           return true;
         })
@@ -393,14 +393,18 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
           const stationPowerAssumed = rawStationMaxPowerKw === undefined;
           const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
-          // Aim for a real session toward ~80%, not the smallest top-up that barely meets reserve.
-          const desiredTarget = Math.max(minRequiredSoc, Math.min(90, PREFERRED_TARGET_SOC));
+          // Target = energy for remaining km + comfort finish reserve (no forced 80%).
+          const desiredTarget = minRequiredSoc;
           const targetSoc = findOptimalChargeTargetSoc(
             socAtStation,
             desiredTarget,
             connector,
             stationMaxPowerKw,
-            { maxTargetSoc: 90, marginalRateThreshold: 0.45 },
+            {
+              // Allow only a tiny efficiency pad above the true need.
+              maxTargetSoc: Math.min(90, Math.max(desiredTarget, desiredTarget + 3)),
+              marginalRateThreshold: 0.5,
+            },
           );
           const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
           const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
@@ -464,13 +468,19 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
             const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
             const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
-            const desiredTarget = Math.max(socAtStation + 8, Math.min(90, PREFERRED_TARGET_SOC));
+            const desiredTarget = Math.min(
+              90,
+              Math.max(socAtStation + 5, minRequiredSoc),
+            );
             const targetSoc = findOptimalChargeTargetSoc(
               socAtStation,
               desiredTarget,
               connector,
               stationMaxPowerKw,
-              { maxTargetSoc: 90, marginalRateThreshold: 0.45 },
+              {
+                maxTargetSoc: Math.min(90, Math.max(desiredTarget, desiredTarget + 3)),
+                marginalRateThreshold: 0.5,
+              },
             );
             const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
             if (chargeAddedSoc < 3) return null;
@@ -532,17 +542,18 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           if (socAtStation > 68) return null;
           const remainingKm = Math.max(0, totalDistanceKm - dist);
           const remainingEnergyKwh = energyPerKm * remainingKm;
-          const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + CHARGE_SUGGEST_SOC);
+          const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + COMFORT_FINISH_SOC);
           const connector: ChargeConnector = station.hasCcs2 || station.connectorTypeUnknown ? 'ccs2' : 'type2';
           const rawStationMaxPowerKw = connector === 'ccs2' ? station.ccs2PowerKw : station.type2PowerKw;
           const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
-          const desiredTarget = Math.max(minRequiredSoc, Math.min(90, 80));
+          // Only charge enough for remaining distance + comfort finish (~22%), not a fixed 80%.
+          const desiredTarget = minRequiredSoc;
           const targetSoc = findOptimalChargeTargetSoc(socAtStation, desiredTarget, connector, stationMaxPowerKw, {
-            maxTargetSoc: 90,
-            marginalRateThreshold: 0.45,
+            maxTargetSoc: Math.min(90, Math.max(desiredTarget, desiredTarget + 3)),
+            marginalRateThreshold: 0.5,
           });
           const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
-          if (chargeAddedSoc < 8) return null;
+          if (chargeAddedSoc < 3) return null;
           const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
           const finishSocAfterCharge = Math.max(0, Math.min(100, targetSoc - (remainingEnergyKwh / batteryCap) * 100));
           const score =
@@ -572,7 +583,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         cursorKm = pick.station.distanceAlongRouteKm;
         socCursor = pick.targetSoc;
         // If this stop already gets us home comfortably, stop planning more.
-        if (pick.finishSocAfterCharge >= CHARGE_SUGGEST_SOC) break;
+        if (pick.finishSocAfterCharge >= COMFORT_FINISH_SOC) break;
       }
 
       if (!plan.length) {
