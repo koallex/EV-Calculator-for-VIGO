@@ -17,6 +17,62 @@ const LOGIN_ATTEMPTS_PREFIX = 'vigo:loginattempts:';
 const LOGIN_ATTEMPT_WINDOW_SECONDS = 15 * 60; // 15-minute rolling lockout window
 const LOGIN_MAX_ATTEMPTS = 5;
 
+// Successful user-login statistics. Stored separately from credentials so the
+// existing users structure remains unchanged.
+const LOGIN_DAILY_KEY = 'vigo:loginstats:daily';
+const LOGIN_USER_STATS_PREFIX = 'vigo:loginstats:user:';
+
+function dateKey(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+export async function recordSuccessfulUserLogin(user) {
+  if (!user || user.role !== 'user' || !user.login) return;
+  const day = dateKey();
+  const now = new Date().toISOString();
+  const key = `${LOGIN_USER_STATS_PREFIX}${user.login.trim().toLowerCase()}`;
+  try {
+    await redis.hincrby(LOGIN_DAILY_KEY, day, 1);
+    await redis.hincrby(key, 'total', 1);
+    await redis.hset(key, { lastLoginAt: now, login: user.login });
+    await redis.hincrby(key, `day:${day}`, 1);
+  } catch (error) {
+    // Statistics are best-effort and must never prevent a successful login.
+    console.error('Login statistics error:', error);
+  }
+}
+
+export async function getLoginStatistics(logins = []) {
+  const days = [];
+  const today = new Date();
+  for (let i = 29; i >= 0; i -= 1) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - i);
+    days.push(dateKey(d));
+  }
+
+  try {
+    const dailyRaw = await redis.hgetall(LOGIN_DAILY_KEY);
+    const daily = days.map(day => ({ day, count: Number(dailyRaw?.[day] || 0) }));
+    const users = [];
+    for (const login of logins) {
+      if (!login?.login) continue;
+      const key = `${LOGIN_USER_STATS_PREFIX}${login.login.trim().toLowerCase()}`;
+      const raw = await redis.hgetall(key);
+      users.push({
+        login: login.login,
+        total: Number(raw?.total || 0),
+        lastLoginAt: raw?.lastLoginAt || null,
+        last30Days: days.reduce((sum, day) => sum + Number(raw?.[`day:${day}`] || 0), 0),
+      });
+    }
+    return { daily, users };
+  } catch (error) {
+    console.error('Read login statistics error:', error);
+    return { daily: days.map(day => ({ day, count: 0 })), users: logins.map(user => ({ login: user.login, total: 0, lastLoginAt: null, last30Days: 0 })) };
+  }
+}
+
 function getClientIp(req) {
   const forwarded = req.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded.length) return forwarded.split(',')[0].trim();
