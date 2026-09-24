@@ -1362,6 +1362,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                         ? `${Math.round(item.distanceKm * 1000)} м`
                         : `${item.distanceKm.toFixed(1)} км`}
                       {' · '}CCS свободно {item.freeCcs}
+                      {item.station.ccs2PowerKw
+                        ? ` · ${Math.round(item.station.ccs2PowerKw)} кВт`
+                        : ''}
                       {item.operator ? ` · ${item.operator}` : ''}
                     </div>
                   </button>
