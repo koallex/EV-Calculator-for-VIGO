@@ -59,6 +59,15 @@ export default function App() {
       .finally(() => setAuthChecking(false));
   }, []);
 
+  // Record an app-open event for the admin statistics. Fired once per mount
+  // (i.e. once per real app open), independent of auth state, and never
+  // allowed to break the app if it fails.
+  useEffect(() => {
+    fetch('/api/analytics/visit', { method: 'POST', credentials: 'same-origin' }).catch(() => {
+      // Statistics are best-effort; ignore network errors.
+    });
+  }, []);
+
   const handleLogout = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
