@@ -240,7 +240,8 @@ export const HudTab: React.FC<HudTabProps> = ({
   const [activeWaypointIndex, setActiveWaypointIndex] = useState(0);
   /** Route geometry from Calculator for map in HUD. */
   const [hudRoutePoints, setHudRoutePoints] = useState<RoutePoint[]>([]);
-  const [hudMapOpen, setHudMapOpen] = useState(true);
+  /** Collapsed by default so the phone HUD keeps STOP visible; user expands when needed. */
+  const [hudMapOpen, setHudMapOpen] = useState(false);
   /** Live GPS for map marker (updated while tracking). */
   const [mapLivePosition, setMapLivePosition] = useState<{ lat: number; lon: number } | null>(null);
   const lastMapPosUpdateRef = useRef(0);
@@ -415,7 +416,8 @@ export const HudTab: React.FC<HudTabProps> = ({
           distanceFromStartKm: p.distanceFromStartKm ?? i,
         })),
       );
-      setHudMapOpen(true);
+      // Keep map collapsed on transfer so mobile layout stays usable; user opens it.
+      setHudMapOpen(false);
     } else {
       setHudRoutePoints([]);
     }
@@ -1778,12 +1780,10 @@ export const HudTab: React.FC<HudTabProps> = ({
     }
   };
 
-  const hasHudMap = hudRoutePoints.length >= 2 && hudMapOpen;
-
   return (
     <div
       id="hud-tab-container"
-      className={`relative h-[calc(100vh-7.5rem)] min-h-[520px] max-h-[980px] overflow-hidden rounded-3xl select-none transition-all duration-200 ${
+      className={`relative flex h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] flex-col overflow-hidden rounded-3xl select-none transition-all duration-200 ${
         isMirrored ? 'scale-x-[-1]' : ''
       } ${
         isDark
@@ -1791,45 +1791,13 @@ export const HudTab: React.FC<HudTabProps> = ({
           : 'bg-white text-slate-900 border border-slate-200 shadow-xl'
       }`}
     >
-      {/* Fullscreen route map background (does not consume flex space) */}
-      {hasHudMap && (
-        <div className="absolute inset-0 z-0">
-          <RouteMap
-            points={hudRoutePoints}
-            isDark={isDark}
-            fill
-            currentPosition={isTracking ? mapLivePosition : null}
-            chargingStops={routeWaypoints
-              .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
-              .map((w) => ({
-                lat: w.lat!,
-                lon: w.lon!,
-                name: w.name,
-              }))}
-          />
-          {/* Soft scrim so overlays stay readable */}
-          <div
-            className={`pointer-events-none absolute inset-0 ${
-              isDark
-                ? 'bg-gradient-to-b from-slate-950/75 via-slate-950/25 to-slate-950/80'
-                : 'bg-gradient-to-b from-white/70 via-white/20 to-white/75'
-            }`}
-          />
-        </div>
-      )}
-
-      {/* Overlay UI: scrollable middle + sticky bottom controls */}
-      <div className="relative z-10 flex h-full min-h-0 flex-col">
-        <div
-          className={`flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-3 pb-2 ${
-            hasHudMap ? 'bg-transparent' : ''
-          }`}
-        >
+      {/* Scrollable body — map and cards live here; STOP stays in sticky footer */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-3 pb-2 [-webkit-overflow-scrolling:touch]">
       {/* 1. Status */}
       <div
         className={`flex items-center justify-between gap-2 border-b pb-1.5 shrink-0 ${
           isDark ? 'border-slate-800/80' : 'border-slate-200'
-        } ${hasHudMap ? (isDark ? 'bg-slate-950/55 backdrop-blur-md rounded-xl px-2 pt-1' : 'bg-white/70 backdrop-blur-md rounded-xl px-2 pt-1') : ''}`}
+        }`}
       >
         <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
           <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] border shrink-0 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
@@ -1986,6 +1954,54 @@ export const HudTab: React.FC<HudTabProps> = ({
           />
         )}
       </div>
+
+      {/* Route map — separate compact block (collapsed by default on first load after plan) */}
+      {hudRoutePoints.length >= 2 && (
+        <div
+          className={`rounded-2xl border overflow-hidden shrink-0 ${
+            isDark ? 'bg-slate-900/95 border-slate-700/80' : 'bg-white border-slate-200'
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setHudMapOpen((v) => !v);
+              triggerHaptic('light', settings.hapticFeedback);
+            }}
+            className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left ${
+              isDark ? 'text-slate-200' : 'text-slate-800'
+            }`}
+          >
+            <span className="flex items-center gap-2 text-[12px] font-bold">
+              <Navigation className={`w-4 h-4 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
+              Карта маршрута
+              {routeWaypoints.filter((w) => w.kind === 'charge').length > 0
+                ? ` · ${routeWaypoints.filter((w) => w.kind === 'charge').length} ⚡`
+                : ''}
+            </span>
+            <ChevronDown
+              className={`w-4 h-4 shrink-0 transition-transform ${hudMapOpen ? 'rotate-180' : ''} ${
+                isDark ? 'text-slate-500' : 'text-slate-400'
+              }`}
+            />
+          </button>
+          {hudMapOpen && (
+            <RouteMap
+              points={hudRoutePoints}
+              isDark={isDark}
+              compact
+              currentPosition={isTracking ? mapLivePosition : null}
+              chargingStops={routeWaypoints
+                .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
+                .map((w) => ({
+                  lat: w.lat!,
+                  lon: w.lon!,
+                  name: w.name,
+                }))}
+            />
+          )}
+        </div>
+      )}
 
       {/* Multi-stop plan from Calculator: next charge / next leg */}
       {activeWaypoint && (
@@ -2339,82 +2355,73 @@ export const HudTab: React.FC<HudTabProps> = ({
         </button>
       </div>
 
-        </div>
-        {/* end scrollable overlay content */}
-
-        {/* Sticky footer: always visible STOP / telemetry */}
-        <div
-          className={`shrink-0 space-y-2 border-t p-3 pt-2 ${
-            hasHudMap
-              ? isDark
-                ? 'border-slate-800/80 bg-slate-950/80 backdrop-blur-md'
-                : 'border-slate-200/80 bg-white/85 backdrop-blur-md'
-              : isDark
-                ? 'border-slate-800/80 bg-slate-950'
-                : 'border-slate-200 bg-white'
-          }`}
-        >
-      {/* 6. Controls */}
-      <div className="grid grid-cols-2 gap-2">
-        {isTracking ? (
-          <>
-            <button
-              type="button"
-              onClick={handleStopTracking}
-              className="py-3 rounded-xl bg-rose-600 text-white font-black text-[14px] flex items-center justify-center gap-2 active:scale-[0.98] shadow-lg shadow-rose-900/40"
-            >
-              <Square className="w-4 h-4 fill-current" /> СТОП
-            </button>
-            <button
-              type="button"
-              onClick={handleResetTracking}
-              className={`py-3 rounded-xl border font-bold text-[14px] flex items-center justify-center gap-2 active:scale-[0.98] ${
-                isDark
-                  ? 'bg-slate-800 text-slate-200 border-slate-700'
-                  : 'bg-slate-100 text-slate-700 border-slate-300'
-              }`}
-            >
-              <RotateCcw className="w-4 h-4" /> СБРОС
-            </button>
-          </>
-        ) : (
-          <div className={`col-span-2 text-center py-1 text-[12px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-            {trackingStopMessage || 'Введите адрес и SOC → Расчёт / СТАРТ'}
-          </div>
-        )}
       </div>
+      {/* end scrollable body */}
 
-      {/* 7. Telemetry */}
+      {/* Sticky footer: always on screen (STOP / telemetry) */}
       <div
-        className={`rounded-xl border grid grid-cols-3 divide-x ${
-          isDark ? 'bg-slate-900/70 border-slate-800 divide-slate-800' : 'bg-slate-50 border-slate-200 divide-slate-200'
+        className={`shrink-0 space-y-2 border-t px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] ${
+          isDark ? 'border-slate-800/80 bg-slate-950' : 'border-slate-200 bg-white'
         }`}
       >
-        <div className="py-1.5 text-center">
-          <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Дистанция</span>
-          <b className={`font-mono text-base tabular-nums ${isDark ? 'text-cyan-300' : 'text-cyan-600'}`}>
-            {tripDistanceKm.toFixed(1)}
-            <small className="text-[10px]"> км</small>
-          </b>
+        {/* 6. Controls */}
+        <div className="grid grid-cols-2 gap-2">
+          {isTracking ? (
+            <>
+              <button
+                type="button"
+                onClick={handleStopTracking}
+                className="py-3 rounded-xl bg-rose-600 text-white font-black text-[14px] flex items-center justify-center gap-2 active:scale-[0.98] shadow-lg shadow-rose-900/40"
+              >
+                <Square className="w-4 h-4 fill-current" /> СТОП
+              </button>
+              <button
+                type="button"
+                onClick={handleResetTracking}
+                className={`py-3 rounded-xl border font-bold text-[14px] flex items-center justify-center gap-2 active:scale-[0.98] ${
+                  isDark
+                    ? 'bg-slate-800 text-slate-200 border-slate-700'
+                    : 'bg-slate-100 text-slate-700 border-slate-300'
+                }`}
+              >
+                <RotateCcw className="w-4 h-4" /> СБРОС
+              </button>
+            </>
+          ) : (
+            <div className={`col-span-2 text-center py-1 text-[12px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              {trackingStopMessage || 'Введите адрес и SOC → Расчёт / СТАРТ'}
+            </div>
+          )}
         </div>
-        <div className="py-1.5 text-center">
-          <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>В пути</span>
-          <b className={`font-mono text-base tabular-nums ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-            {formatTime(elapsedSeconds)}
-          </b>
-        </div>
-        <div className="py-1.5 text-center">
-          <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Средняя</span>
-          <b className={`font-mono text-base tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
-            {avgTripSpeedKmH}
-            <small className="text-[10px]"> км/ч</small>
-          </b>
+
+        {/* 7. Telemetry */}
+        <div
+          className={`rounded-xl border grid grid-cols-3 divide-x ${
+            isDark ? 'bg-slate-900/70 border-slate-800 divide-slate-800' : 'bg-slate-50 border-slate-200 divide-slate-200'
+          }`}
+        >
+          <div className="py-1.5 text-center">
+            <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Дистанция</span>
+            <b className={`font-mono text-base tabular-nums ${isDark ? 'text-cyan-300' : 'text-cyan-600'}`}>
+              {tripDistanceKm.toFixed(1)}
+              <small className="text-[10px]"> км</small>
+            </b>
+          </div>
+          <div className="py-1.5 text-center">
+            <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>В пути</span>
+            <b className={`font-mono text-base tabular-nums ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+              {formatTime(elapsedSeconds)}
+            </b>
+          </div>
+          <div className="py-1.5 text-center">
+            <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Средняя</span>
+            <b className={`font-mono text-base tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
+              {avgTripSpeedKmH}
+              <small className="text-[10px]"> км/ч</small>
+            </b>
+          </div>
         </div>
       </div>
-        </div>
-        {/* end sticky footer */}
-      </div>
-      {/* end overlay UI */}
 
       {/* Completed Trip Summary Modal */}
       {completedTripSummary && (

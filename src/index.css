@@ -85,7 +85,12 @@ input[type=range]::-moz-range-thumb {
   height: 380px;
 }
 .route-map--compact {
-  height: 220px;
+  height: 160px;
+}
+@media (min-width: 480px) {
+  .route-map--compact {
+    height: 200px;
+  }
 }
 .route-map-shell--fill,
 .route-map--fill {
