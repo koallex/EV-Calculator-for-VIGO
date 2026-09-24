@@ -35,7 +35,7 @@ import { AddressAutocomplete } from './AddressAutocomplete';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
 import { fetchChargingStationsAlongRoute, stationSupportsConnectors, ChargingStation } from '../services/chargingStations';
 import { findNearbyFreeCcsChargers, FreeChargerResult } from '../services/nearbyFreeCharging';
-import { getVehicleProfile } from '../data/vehicleProfiles';
+import { resolveEffectiveConnectors } from '../data/vehicleProfiles';
 import { estimateChargingSession, findOptimalChargeTargetSoc, DEFAULT_UNKNOWN_STATION_POWER_KW, ChargeConnector } from '../utils/chargingPlanner';
 import { RouteMap } from './RouteMap';
 import { LocationPickerModal } from './LocationPickerModal';
@@ -298,7 +298,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       if (!origin) {
         throw new Error('Нужна геолокация или точка А на карте');
       }
-      const vehicleConnectors = getVehicleProfile(settings.vehicleProfileId).connectors;
+      const vehicleConnectors = resolveEffectiveConnectors(
+        settings.vehicleProfileId,
+        settings.connectorOverride,
+      );
       const { results } = await findNearbyFreeCcsChargers(origin, {
         radiusKm: 40,
         limit: 10,
@@ -321,7 +324,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       setNearbyFreeStatus('error');
       setNearbyFreeError(e instanceof Error ? e.message : String(e));
     }
-  }, [startMode, gpsCoords, startPin, settings.vehicleProfileId]);
+  }, [startMode, gpsCoords, startPin, settings.vehicleProfileId, settings.connectorOverride]);
 
   const applyFreeChargerAsDestination = (item: FreeChargerResult) => {
     // Short label so the destination field doesn't overflow the route form.
@@ -352,7 +355,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     try {
       const stations = await fetchChargingStationsAlongRoute(routeElevation.points, force ? 8 : 5);
       if (cancelled) return;
-      const vehicleConnectors = getVehicleProfile(settings.vehicleProfileId).connectors;
+      const vehicleConnectors = resolveEffectiveConnectors(
+        settings.vehicleProfileId,
+        settings.connectorOverride,
+      );
       const vigoStations = stations.filter((s) => stationSupportsConnectors(s, vehicleConnectors));
       setStationsFoundAlongRoute(vigoStations.length);
       const batteryCap = settings.batteryCapacityKwh || 51.87;

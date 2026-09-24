@@ -25,6 +25,9 @@ import {
   getVehicleProfile,
   getVehicleVariant,
   applyVehicleVariantToSettings,
+  resolveEffectiveConnectors,
+  formatConnectorsLabel,
+  type ConnectorOverride,
 } from '../data/vehicleProfiles';
 import { DecimalInput } from './DecimalInput';
 import { triggerHaptic } from '../utils/haptics';
@@ -492,8 +495,43 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               />
             </div>
 
+            <div className="space-y-1.5">
+              <label className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                Порт зарядки
+              </label>
+              <select
+                value={form.connectorOverride || 'auto'}
+                onChange={(e) => {
+                  setForm({
+                    ...form,
+                    connectorOverride: e.target.value as ConnectorOverride,
+                  });
+                  triggerHaptic('light', form.hapticFeedback);
+                }}
+                className={`w-full border px-3 py-2 rounded-xl text-sm font-semibold focus:outline-none transition-colors ${
+                  isDark
+                    ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
+                }`}
+              >
+                <option value="auto">
+                  Авто (профиль: {formatConnectorsLabel(getVehicleProfile(form.vehicleProfileId).connectors)})
+                </option>
+                <option value="ccs2">CCS2</option>
+                <option value="gbt">GB/T</option>
+                <option value="type2">Type2 (только AC)</option>
+                <option value="ccs2_type2">CCS2 + Type2</option>
+                <option value="ccs2_gbt">CCS2 + GB/T</option>
+              </select>
+              <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                Влияет на фильтр станций по маршруту и «ближайшую свободную зарядку».
+                Нужно, если у машины европорт, адаптер или профиль указан неверно.
+              </p>
+            </div>
+
             {(() => {
               const variant = getVehicleVariant(form.vehicleProfileId, form.vehicleVariantId);
+              const effective = resolveEffectiveConnectors(form.vehicleProfileId, form.connectorOverride);
               return (
                 <p className={`text-[11px] leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                   {getVehicleProfile(form.vehicleProfileId).notes || ''}
@@ -501,10 +539,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   {' · '}
                   {form.hasHeatPump ?? variant.hasHeatPump ? 'тепловой насос' : 'без ТН (ТЭН)'}
                   {' · '}DC до {Math.round(form.dcMaxKw || variant.dcMaxKw)} кВт
-                  {' · '}
-                  {getVehicleProfile(form.vehicleProfileId).connectors
-                    .map((c) => (c === 'gbt' ? 'GB/T' : c === 'ccs2' ? 'CCS2' : 'Type2'))
-                    .join(' / ')}
+                  {' · '}порты: {formatConnectorsLabel(effective)}
+                  {form.connectorOverride && form.connectorOverride !== 'auto' ? ' (вручную)' : ''}
                 </p>
               );
             })()}
