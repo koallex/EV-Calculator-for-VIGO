@@ -97,6 +97,13 @@ export function interpolateVigoSpeedConsumption(speedKmH: number): number {
 
 export const DEFAULT_SETTINGS: UserSettings = {
   batteryCapacityKwh: 51.87,
+  vehicleProfileId: 'dongfeng-vigo',
+  vehicleVariantId: '51.87',
+  curbWeightKg: 1526,
+  consumptionScale: 1.0,
+  hasHeatPump: false,
+  acMaxKw: 6.6,
+  dcMaxKw: 167,
   currency: 'Br',
   regionPreset: 'belarus',
   homeTariff: 0.27,
@@ -412,7 +419,11 @@ export interface ConsumptionForecast {
  *   - Cold conditions (heating via PTC/heat pump): increases linearly as temperature drops below 19°C.
  *   - Hot conditions (AC cooling compressor): increases linearly as temperature rises above 23°C.
  */
-export function calculateClimateImpact(temperatureC: number | undefined, climateOn: boolean): {
+export function calculateClimateImpact(
+  temperatureC: number | undefined,
+  climateOn: boolean,
+  hasHeatPump = true,
+): {
   impactPct: number;
   deltaKwh100: number;
   powerKw: number;
@@ -438,10 +449,8 @@ export function calculateClimateImpact(temperatureC: number | undefined, climate
     label = 'Климат · комфорт';
     description = 'Базовая электрическая нагрузка HVAC ~0,4 кВт';
   } else if (temp < 19) {
-    // Heat-pump vehicle: the heat pump carries most cabin heating, while a supplemental
-    // PTC heater assists increasingly in colder weather. These are planning estimates,
-    // not measured VIGO telemetry. The PTC share is intentionally moderate because cabin
-    // heat demand falls after the initial warm-up on a long trip.
+    // Baseline curve is calibrated for heat-pump + supplemental PTC (as on many modern EVs).
+    // Without a heat pump, cabin heat is mostly resistive PTC → higher electrical load.
     //
     // The 10-19°C branch is anchored to power=0.40 kW exactly at temp=19 (matching the
     // comfort-zone baseline above) and to power=0.82 kW at temp=10 (matching the next
@@ -457,9 +466,17 @@ export function calculateClimateImpact(temperatureC: number | undefined, climate
     } else {
       powerKw = 2.70 + (Math.abs(temp) - 20) * 0.110;
     }
-    powerKw = Math.min(3.8, Math.max(0.40, powerKw));
-    label = `Тепловой насос + ТЭН (${powerKw.toFixed(1)} кВт)`;
-    description = `Оценочная электрическая нагрузка теплового насоса с поддержкой ТЭН при ${temp}°C: ~${powerKw.toFixed(1)} кВт`;
+    if (!hasHeatPump) {
+      // PTC-only heating: ~35% more electrical power than HP+PTC at the same cabin demand.
+      powerKw *= 1.35;
+    }
+    powerKw = Math.min(hasHeatPump ? 3.8 : 5.0, Math.max(0.40, powerKw));
+    label = hasHeatPump
+      ? `Тепловой насос + ТЭН (${powerKw.toFixed(1)} кВт)`
+      : `Отопление ТЭН (${powerKw.toFixed(1)} кВт)`;
+    description = hasHeatPump
+      ? `Оценочная электрическая нагрузка теплового насоса с поддержкой ТЭН при ${temp}°C: ~${powerKw.toFixed(1)} кВт`
+      : `Оценочная нагрузка резистивного отопления (без ТН) при ${temp}°C: ~${powerKw.toFixed(1)} кВт`;
   } else {
     // Anchored to power=0.40 kW exactly at temp=23°C (matching the comfort-zone baseline)
     // so there is no jump crossing out of the comfort zone on the hot side either.
@@ -943,7 +960,13 @@ export function estimateTripConsumption(
   elevation?: { gainM: number; lossM: number; distanceKm: number },
   tripDurationHours?: number,
   climatePowerOverrideKw?: number,
-  passengers = 1
+  passengers = 1,
+  /** Curb weight of the selected vehicle profile (kg). Defaults to Vigo ~1526 / legacy 1600. */
+  curbWeightKg = 1600,
+  /** Multiplier on the shared speed curve (Vigo = 1). */
+  consumptionScale = 1,
+  /** Heat pump present — passed into HVAC model. */
+  hasHeatPump = true,
 ): ConsumptionForecast {
   // 1-4. Speed curve + cold-battery penalty + precipitation + relative-wind impact, shared
   // with the per-segment live calculation in HudTab (see computeFlatRoadConsumptionRate above).
@@ -958,10 +981,12 @@ export function estimateTripConsumption(
   const { effectiveSpeed, baseSpeedConsumption, tempMultiplier, precipMultiplier, windMultiplier, windImpactPct, windStatusText } = flatRoad;
   const passengerCount = Math.max(1, Math.min(5, Math.round(passengers)));
   const extraMassKg = (passengerCount - 1) * 75;
+  const baseMassKg = Math.max(900, curbWeightKg || 1600);
   // Passenger mass affects rolling/acceleration components, not aero drag. Approximate the
   // mass-sensitive share of the flat-road model at 12% of the road-load energy.
-  const massMultiplier = 1 + (extraMassKg / 1600) * 0.12;
-  const massAdjustedBaseSpeedConsumption = baseSpeedConsumption * massMultiplier;
+  const massMultiplier = 1 + (extraMassKg / baseMassKg) * 0.12;
+  const scale = Number.isFinite(consumptionScale) && consumptionScale > 0 ? consumptionScale : 1;
+  const massAdjustedBaseSpeedConsumption = baseSpeedConsumption * massMultiplier * scale;
 
   // Re-derive the precipitation descriptive fields (label/description/roadState) for the
   // return payload below; precipMultiplier itself already came from computeFlatRoadConsumptionRate.
@@ -969,7 +994,7 @@ export function estimateTripConsumption(
 
   // 2B. Cabin HVAC load. It is power in kW; when trip duration is known, actual energy is power × hours.
   const temp = temperatureC ?? 20; // Default optimal 20°C if weather not loaded
-  const climateInfo = calculateClimateImpact(temp, climateOn);
+  const climateInfo = calculateClimateImpact(temp, climateOn, hasHeatPump);
 
   // 5. Elevation profile: climbs cost potential energy, sustained descents return it via regen.
   // Physics: E = m*g*h. Climbing energy is reduced by drivetrain efficiency; descent energy is
@@ -983,7 +1008,7 @@ export function estimateTripConsumption(
     // Same physical constants as services/routeElevation.ts (calculateElevationEnergy), so a
     // route's elevation contribution comes out identical whichever code path computes it —
     // the live HUD trip (raw altitude-sensor meters) or the route planner (OSRM+elevation API).
-    const VEHICLE_MASS_KG = 1600 + (Math.max(1, Math.min(5, Math.round(passengers))) - 1) * 75;
+    const VEHICLE_MASS_KG = baseMassKg + (Math.max(1, Math.min(5, Math.round(passengers))) - 1) * 75;
     const G = 9.80665;
     const DRIVETRAIN_EFFICIENCY = 0.90; // energy lost to motor/inverter/gearbox while climbing
     const REGEN_EFFICIENCY = 0.65; // realistic fraction of descent potential energy recovered
@@ -1184,7 +1209,10 @@ export function estimateSegmentedRouteConsumption(
   climateOn = true,
   customDriverStyleFactor?: number,
   passengers = 1,
-  maxSpeedKmH?: number
+  maxSpeedKmH?: number,
+  curbWeightKg = 1600,
+  consumptionScale = 1,
+  hasHeatPump = true,
 ): SegmentedRouteBreakdown {
   if (points.length < 2) {
     return {
@@ -1360,7 +1388,7 @@ export function estimateSegmentedRouteConsumption(
     const segDuration = segmentDistance / segmentSpeed;
     const elevationGain = Math.max(0, (b.elevationM ?? 0) - (a.elevationM ?? 0));
     const elevationLoss = Math.max(0, (a.elevationM ?? 0) - (b.elevationM ?? 0));
-    const climatePower = calculateClimateImpact(weather.temperature, climateOn).powerKw;
+    const climatePower = calculateClimateImpact(weather.temperature, climateOn, hasHeatPump).powerKw;
     // Cabin warm-up curve: calculateClimateImpact's powerKw is the power needed to bring a
     // cold-soaked cabin up to comfort temperature (worst case — defrost, cold surfaces, full
     // delta-T for the heat pump/PTC to fight). That load is real but temporary: once the cabin
@@ -1390,19 +1418,20 @@ export function estimateSegmentedRouteConsumption(
       segmentSpeed, weather.temperature, sessions, batteryCapacityKwh, climateOn,
       weather.windSpeed, relativeWindAngle, styleFactor, weather.weatherCode, weather.precipitation,
       { gainM: elevationGain, lossM: elevationLoss, distanceKm: segmentDistance }, segDuration, effectiveClimatePower,
-      passengers
+      passengers, curbWeightKg, consumptionScale, hasHeatPump,
     );
     const segEnergy = segmentDistance / 100 * f.estimatedConsumption;
     // Keep the breakdown additive while preserving the exact segmented total produced by the
     // established estimator. The "base" line is the no-weather/no-climate speed baseline.
-    const speedBase = segmentDistance / 100 * interpolateVigoSpeedConsumption(segmentSpeed);
+    const scale = Number.isFinite(consumptionScale) && consumptionScale > 0 ? consumptionScale : 1;
+    const speedBase = segmentDistance / 100 * interpolateVigoSpeedConsumption(segmentSpeed) * scale;
     const tempDelta = speedBase * (f.temperatureImpactPct / 100);
     const windDelta = speedBase * (f.windImpactPct ?? 0) / 100;
     const precipDelta = speedBase * (f.precipitationImpactPct ?? 0) / 100;
     // Same passenger-adjusted mass as estimateTripConsumption's own elevation model, so this
     // breakdown line (and the regen credit below) stay consistent with what f.estimatedConsumption
     // actually charged for climbs/descents instead of silently assuming a 1-passenger vehicle.
-    const vehicleMassKg = 1600 + (Math.max(1, Math.min(5, Math.round(passengers))) - 1) * 75;
+    const vehicleMassKg = Math.max(900, curbWeightKg || 1600) + (Math.max(1, Math.min(5, Math.round(passengers))) - 1) * 75;
     const elevationNet = (vehicleMassKg * 9.80665 * elevationGain / 3.6e6 / 0.90) - (vehicleMassKg * 9.80665 * elevationLoss / 3.6e6 * 0.65);
     const climateEnergy = effectiveClimatePower * segDuration;
     const driverDelta = speedBase * (styleFactor - 1);
