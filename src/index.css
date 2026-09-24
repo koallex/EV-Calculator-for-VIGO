@@ -84,6 +84,9 @@ input[type=range]::-moz-range-thumb {
   position: relative;
   height: 380px;
 }
+.route-map--compact {
+  height: 220px;
+}
 .route-map-yandex {
   height: 100%;
   width: 100%;
