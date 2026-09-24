@@ -400,17 +400,24 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
           // Target = energy for remaining km + comfort finish reserve (no forced 80%).
           const desiredTarget = minRequiredSoc;
-          const targetSoc = findOptimalChargeTargetSoc(
-            socAtStation,
-            desiredTarget,
-            connector,
-            stationMaxPowerKw,
-            {
-              // Allow only a tiny efficiency pad above the true need.
-              maxTargetSoc: Math.min(90, Math.max(desiredTarget, desiredTarget + 3)),
-              marginalRateThreshold: 0.5,
-            },
-          );
+          // In forced mode the user explicitly asked to see a station even when the
+          // route already has enough SOC. Do not let the comfort/charge optimizer turn
+          // such a station into a zero-charge candidate and filter it out below. Give
+          // the displayed stop a small +5% charging session purely so it remains a
+          // valid station suggestion. Normal search keeps the existing optimization.
+          const targetSoc = force
+            ? Math.min(90, Math.max(socAtStation + 5, desiredTarget))
+            : findOptimalChargeTargetSoc(
+                socAtStation,
+                desiredTarget,
+                connector,
+                stationMaxPowerKw,
+                {
+                  // Allow only a tiny efficiency pad above the true need.
+                  maxTargetSoc: Math.min(90, Math.max(desiredTarget, desiredTarget + 3)),
+                  marginalRateThreshold: 0.5,
+                },
+              );
           const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
           const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
           // Finish SOC = leave station at targetSoc, then burn energy for the remaining km to B.
@@ -448,7 +455,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             score,
           };
         })
-        .filter(candidate => candidate.chargeAddedSoc >= 2 && candidate.session.minutes > 0)
+        .filter(candidate => (force ? candidate.chargeAddedSoc >= 1 : candidate.chargeAddedSoc >= 2) && candidate.session.minutes > 0)
         .sort((a, b) => {
           if (Math.abs(a.score - b.score) >= 3) return a.score - b.score;
           // Tie-break: later stop, then larger useful charge.
