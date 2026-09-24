@@ -1937,14 +1937,16 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   <span className={`text-xl font-black font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(endSoc)}%</span>
                 </div>
               </div>
-              {finishArrivalDate && (
-                <div className={`mt-1 text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  Прибытие {finishArrivalDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  {totalChargingMinutes > 0 ? ` · зарядка ${totalChargingMinutes} мин` : ''}
-                  {finishTemperature !== null && (
-                    <> · {finishTemperature >= 0 ? '+' : ''}{Math.round(finishTemperature)}°C</>
-                  )}
-                  {finishPrecipitation > 0.05 ? ' · осадки' : ' · без осадков'}
+              {routeWeather && (
+                <div className={`mt-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold ${isDark ? 'bg-slate-950/70 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
+                  <div>
+                    Прибытие: {finishArrivalDate?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) ?? '—'}
+                    {totalChargingMinutes > 0 ? ` · зарядка ${totalChargingMinutes} мин` : ''}
+                  </div>
+                  <div className={`mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Погода на финише: {finishTemperature !== null ? `${finishTemperature >= 0 ? '+' : ''}${Math.round(finishTemperature)}°C` : '—'}
+                    {finishPrecipitation > 0.05 ? ' · осадки' : ' · без осадков'}
+                  </div>
                 </div>
               )}
               <div className="flex items-center gap-2">
