@@ -1,5 +1,10 @@
-// Nearest free CCS chargers for VIGO using EVRace live operator feeds.
-import { stationSupportsVigo, type ChargingStation } from './chargingStations';
+// Nearest free DC chargers using EVRace live operator feeds.
+// Filtered by the active vehicle's connectors (CCS2 / GB/T / Type2).
+import {
+  stationSupportsConnectors,
+  type ChargingStation,
+  type VehicleConnector,
+} from './chargingStations';
 
 const LIVE_OPERATORS = ['forevo', 'malanka', 'zaryadka', 'batteryfly', 'evika'] as const;
 type LiveOperator = (typeof LIVE_OPERATORS)[number];
@@ -9,6 +14,8 @@ export interface FreeChargerResult {
   distanceKm: number;
   freeCcs: number;
   totalCcs: number;
+  /** Preferred connector family that matched (for UI). */
+  matchedConnector?: VehicleConnector;
   operator: string;
   updatedAt?: string | null;
   connectors: { label: string; status: string }[];
@@ -30,6 +37,20 @@ const isCcsLabel = (label: unknown) => {
     .toLowerCase()
     .replace(/[\s_-]+/g, '');
   return s.includes('ccs') || s === 'combo' || s === 'combo2';
+};
+
+const isGbtLabel = (label: unknown) => {
+  const s = String(label ?? '')
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+  return s.includes('gbt') || s.includes('gb/t') || s === 'guobiao';
+};
+
+/** Live connector matches what the vehicle needs (DC preferred). */
+const connectorMatchesVehicle = (label: unknown, vehicleConnectors: VehicleConnector[]) => {
+  if (vehicleConnectors.includes('gbt') && isGbtLabel(label)) return true;
+  if (vehicleConnectors.includes('ccs2') && isCcsLabel(label)) return true;
+  return false;
 };
 
 function operatorForLive(station: any): LiveOperator | null {
@@ -104,6 +125,7 @@ function groupToStation(group: any, index: number): ChargingStation | null {
   }
   const hasCcs2 = guns.some((g) => isCcsLabel(g));
   const hasType2 = guns.some((g) => /type\s*2|type2/i.test(g));
+  const hasGbt = guns.some((g) => isGbtLabel(g));
 
   // Max rated power from group / poles (same fields as chargingStations.ts)
   const ccsPowers = [
@@ -118,6 +140,13 @@ function groupToStation(group: any, index: number): ChargingStation | null {
     group?.type2_power,
     group?.ac_power,
     ...poles.flatMap((p: any) => [p?.ac_power]),
+  ]
+    .map(parsePowerKw)
+    .filter((v): v is number => v !== undefined && v > 0);
+  const gbtPowers = [
+    group?.gbt_power,
+    group?.gbt_dc_power,
+    ...poles.filter((p: any) => isGbtLabel(p?.gun1_type) || isGbtLabel(p?.gun2_type)).flatMap((p: any) => [p?.power_kw, p?.power, p?.kw, p?.dc_power]),
   ]
     .map(parsePowerKw)
     .filter((v): v is number => v !== undefined && v > 0);
@@ -137,9 +166,11 @@ function groupToStation(group: any, index: number): ChargingStation | null {
     operator: group?.operator || poles[0]?.operator,
     hasType2,
     hasCcs2,
-    connectorTypeUnknown: !hasCcs2 && !hasType2,
+    hasGbt,
+    connectorTypeUnknown: !hasCcs2 && !hasType2 && !hasGbt,
     ccs2PowerKw: ccsPowers.length ? Math.max(...ccsPowers) : undefined,
     type2PowerKw: type2Powers.length ? Math.max(...type2Powers) : undefined,
+    gbtPowerKw: gbtPowers.length ? Math.max(...gbtPowers) : undefined,
     distanceFromRouteKm: 0,
     distanceAlongRouteKm: 0,
     source: 'evrace',
@@ -150,10 +181,20 @@ function groupToStation(group: any, index: number): ChargingStation | null {
 
 export async function findNearbyFreeCcsChargers(
   origin: { lat: number; lon: number },
-  options: { radiusKm?: number; limit?: number } = {},
+  options: {
+    radiusKm?: number;
+    limit?: number;
+    /** Active vehicle ports; default CCS2 (Vigo). */
+    vehicleConnectors?: VehicleConnector[];
+  } = {},
 ): Promise<{ results: FreeChargerResult[]; searched: number; liveChecked: number }> {
   const radiusKm = options.radiusKm ?? 40;
   const limit = options.limit ?? 12;
+  const vehicleConnectors: VehicleConnector[] = options.vehicleConnectors?.length
+    ? options.vehicleConnectors
+    : ['ccs2', 'type2'];
+  const wantsDc =
+    vehicleConnectors.includes('ccs2') || vehicleConnectors.includes('gbt');
   const pad = radiusKm / 111;
   const lonPad = radiusKm / (111 * Math.max(0.2, Math.cos((origin.lat * Math.PI) / 180)));
   const params = new URLSearchParams({
@@ -173,7 +214,14 @@ export async function findNearbyFreeCcsChargers(
   groups.forEach((g: any, i: number) => {
     const s = groupToStation(g, i) as any;
     if (!s) return;
-    if (!stationSupportsVigo(s) || !s.hasCcs2) return;
+    if (!stationSupportsConnectors(s, vehicleConnectors)) return;
+    // Nearby "free DC" search requires a DC port the car can use
+    if (wantsDc) {
+      const hasDc =
+        (vehicleConnectors.includes('ccs2') && s.hasCcs2) ||
+        (vehicleConnectors.includes('gbt') && s.hasGbt);
+      if (!hasDc && !s.connectorTypeUnknown) return;
+    }
     const d = haversineKm(origin.lat, origin.lon, s.lat, s.lon);
     if (d > radiusKm) return;
     s.distanceFromRouteKm = d;
@@ -215,38 +263,49 @@ export async function findNearbyFreeCcsChargers(
     }),
   );
 
-  // Aggregate free CCS per station location
+  // Aggregate free matching DC connectors per station location
   const byStation = new Map<string, FreeChargerResult>();
   for (const [ext, livePole] of liveByExt) {
     const station = stationByExt.get(ext);
     if (!station) continue;
     const connectors = Array.isArray(livePole.connectors) ? livePole.connectors : [];
-    const ccs = connectors.filter((c: any) => isCcsLabel(c.label));
-    // If no connector labels, fall back to pole-level status when station has CCS
-    const freeCcs = ccs.length
-      ? ccs.filter((c: any) => c.status === 'available').length
-      : livePole.status === 'available' && station.hasCcs2
+    const matched = connectors.filter((c: any) => connectorMatchesVehicle(c.label, vehicleConnectors));
+    const stationHasWantedDc =
+      (vehicleConnectors.includes('ccs2') && station.hasCcs2) ||
+      (vehicleConnectors.includes('gbt') && station.hasGbt);
+    // If no connector labels, fall back to pole-level status when station has the wanted DC type
+    const freeCount = matched.length
+      ? matched.filter((c: any) => c.status === 'available').length
+      : livePole.status === 'available' && stationHasWantedDc
         ? 1
         : 0;
-    const totalCcs = ccs.length || (station.hasCcs2 ? 1 : 0);
-    if (freeCcs < 1) continue;
+    const totalCount = matched.length || (stationHasWantedDc ? 1 : 0);
+    if (freeCount < 1) continue;
+
+    const matchedConnector: VehicleConnector | undefined = vehicleConnectors.includes('gbt') &&
+      (station.hasGbt || matched.some((c: any) => isGbtLabel(c.label)))
+      ? 'gbt'
+      : vehicleConnectors.includes('ccs2')
+        ? 'ccs2'
+        : vehicleConnectors[0];
 
     const existing = byStation.get(station.id);
     if (existing) {
-      existing.freeCcs += freeCcs;
-      existing.totalCcs += totalCcs;
+      existing.freeCcs += freeCount;
+      existing.totalCcs += totalCount;
       existing.connectors.push(
-        ...ccs.map((c: any) => ({ label: String(c.label), status: String(c.status) })),
+        ...matched.map((c: any) => ({ label: String(c.label), status: String(c.status) })),
       );
     } else {
       byStation.set(station.id, {
         station,
         distanceKm: station.distanceFromRouteKm,
-        freeCcs,
-        totalCcs,
+        freeCcs: freeCount,
+        totalCcs: totalCount,
+        matchedConnector,
         operator: station.operator || '',
         updatedAt,
-        connectors: ccs.map((c: any) => ({
+        connectors: matched.map((c: any) => ({
           label: String(c.label),
           status: String(c.status),
         })),

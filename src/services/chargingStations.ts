@@ -17,11 +17,14 @@ export interface ChargingStation {
   fee?: string;
   hasType2: boolean;
   hasCcs2: boolean;
+  /** GB/T DC (Chinese standard) — common on China-market cars in Belarus. */
+  hasGbt?: boolean;
   /** True when the source marks a charging station but does not specify connector type. */
   connectorTypeUnknown: boolean;
   /** Rated output per connector type, in kW, when available. */
   type2PowerKw?: number;
   ccs2PowerKw?: number;
+  gbtPowerKw?: number;
   distanceFromRouteKm: number;
   distanceAlongRouteKm: number;
   /** Source used for this station record. */
@@ -109,6 +112,19 @@ const isType2 = (value: unknown) => {
   return s === 'type2' || s === 'type2ac' || s === 'actype2';
 };
 
+const isGbt = (value: unknown) => {
+  const s = normalizeConnector(value);
+  return (
+    s === 'gbt' ||
+    s === 'gbtac' ||
+    s === 'gbtdc' ||
+    s === 'gb/t' ||
+    s.includes('gbt') ||
+    s.includes('gb/t') ||
+    s === 'guobiao'
+  );
+};
+
 const collectPoleObjects = (record: any): any[] => {
   const arrays = [record?.poles, record?.guns, record?.connectors, record?.guns_list, record?.plugs];
   const out: any[] = [];
@@ -163,9 +179,13 @@ const stationFromEvraceRecord = (record: any, index: number): ChargingStation | 
   ];
   const ccsValues = connectorValues.filter(isCcs);
   const type2Values = connectorValues.filter(isType2);
-  const incompatibleValues = connectorValues.map(normalizeConnector).filter(s => s === 'chademo' || s === 'gbt' || s === 'gbtac' || s === 'tesla' || s === 'teslasupercharger' || s === 'tesladestination');
+  const gbtValues = connectorValues.filter(isGbt);
+  const incompatibleValues = connectorValues
+    .map(normalizeConnector)
+    .filter((s) => s === 'chademo' || s === 'tesla' || s === 'teslasupercharger' || s === 'tesladestination');
   const hasCcs2 = ccsValues.length > 0;
   const hasType2 = type2Values.length > 0;
+  const hasGbt = gbtValues.length > 0;
 
   const ccsPowers = [
     record?.ccs2_power, record?.ccs_power, record?.dc_power,
@@ -181,10 +201,17 @@ const stationFromEvraceRecord = (record: any, index: number): ChargingStation | 
       return values.some(isType2);
     }).flatMap((p: any) => [p?.power_kw, p?.power, p?.kw, p?.ac_power]),
   ].map(parsePowerKw).filter((v): v is number => v !== undefined);
+  const gbtPowers = [
+    record?.gbt_power, record?.gbt_dc_power,
+    ...poles.filter((p: any) => {
+      const values = [p?.type, p?.connector, p?.connector_type, p?.gun_type, p?.standard, p?.gun1_type, p?.gun2_type, p?.gun3_type, p?.gun4_type];
+      return values.some(isGbt);
+    }).flatMap((p: any) => [p?.power_kw, p?.power, p?.kw, p?.dc_power, p?.gbt_power]),
+  ].map(parsePowerKw).filter((v): v is number => v !== undefined);
 
   // EVRACE's public registry is Belarus-only. If a record has coordinates but no explicit
   // connector information, keep it rather than losing a real station due to incomplete data.
-  const connectorTypeUnknown = !hasCcs2 && !hasType2 && incompatibleValues.length === 0;
+  const connectorTypeUnknown = !hasCcs2 && !hasType2 && !hasGbt && incompatibleValues.length === 0;
 
   const id = textValue(record?.external_id, record?.id, record?.station_id, record?.location_id) || `row-${index}`;
   const city = textValue(record?.city, record?.town, record?.settlement);
@@ -204,9 +231,11 @@ const stationFromEvraceRecord = (record: any, index: number): ChargingStation | 
     fee: textValue(record?.fee),
     hasType2,
     hasCcs2,
+    hasGbt,
     connectorTypeUnknown,
     type2PowerKw: type2Powers.length ? Math.max(...type2Powers) : parsePowerKw(record?.ac_power),
     ccs2PowerKw: ccsPowers.length ? Math.max(...ccsPowers) : parsePowerKw(record?.dc_power),
+    gbtPowerKw: gbtPowers.length ? Math.max(...gbtPowers) : undefined,
     distanceFromRouteKm: Infinity,
     distanceAlongRouteKm: 0,
     source: 'evrace',
@@ -326,7 +355,8 @@ const stationFromOsmElement = (el: any): ChargingStation | null => {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   const hasType2 = !!(tags['socket:type2'] || tags['socket:type2:output'] || tags['socket:type2_c'] || tags['socket:type2_c:output']);
   const hasCcs2 = !!(tags['socket:type2_combo'] || tags['socket:type2_combo:output'] || tags['socket:ccs2'] || tags['socket:ccs2:output'] || tags['socket:ccs'] || tags['socket:ccs:output'] || tags['socket:ccs_combo'] || tags['socket:ccs_combo:output'] || tags['socket:combo-2'] || tags['socket:combo-2:output'] || tags['socket:combo2'] || tags['socket:combo2:output']);
-  const hasAnyConnector = hasType2 || hasCcs2 || tags['socket:chademo'] || tags['socket:chademo:output'] || tags['socket:tesla_supercharger'] || tags['socket:tesla_destination'];
+  const hasGbt = !!(tags['socket:gb_t'] || tags['socket:gb_t:output'] || tags['socket:gbt'] || tags['socket:gbt:output'] || tags['socket:gb/t'] || tags['socket:type2_gbt'] || tags['socket:type2_gbt:output']);
+  const hasAnyConnector = hasType2 || hasCcs2 || hasGbt || tags['socket:chademo'] || tags['socket:chademo:output'] || tags['socket:tesla_supercharger'] || tags['socket:tesla_destination'];
   return {
     id: `osm:${el.type}/${el.id}`,
     lat, lon,
@@ -337,9 +367,11 @@ const stationFromOsmElement = (el: any): ChargingStation | null => {
     fee: tags.fee,
     hasType2,
     hasCcs2,
+    hasGbt,
     connectorTypeUnknown: !hasAnyConnector,
     type2PowerKw: parsePowerKw(tags['socket:type2:output'] || tags['socket:type2_c:output']),
     ccs2PowerKw: parsePowerKw(tags['socket:type2_combo:output'] || tags['socket:ccs2:output'] || tags['socket:ccs:output'] || tags['socket:ccs_combo:output'] || tags['socket:combo-2:output'] || tags['socket:combo2:output']),
+    gbtPowerKw: parsePowerKw(tags['socket:gb_t:output'] || tags['socket:gbt:output'] || tags['socket:type2_gbt:output']),
     distanceFromRouteKm: Infinity,
     distanceAlongRouteKm: 0,
     source: 'osm',
@@ -351,7 +383,25 @@ const cacheKeyForRoute = (points: RouteRefPoint[]): string => {
   return `${CACHE_PREFIX}${a.lat.toFixed(2)}_${a.lon.toFixed(2)}_${b.lat.toFixed(2)}_${b.lon.toFixed(2)}_${Math.round(b.distanceFromStartKm)}`;
 };
 
-export const stationSupportsVigo = (s: ChargingStation) => s.hasType2 || s.hasCcs2 || s.connectorTypeUnknown;
+/** Vehicle connector ids used in vehicleProfiles. */
+export type VehicleConnector = 'ccs2' | 'type2' | 'gbt';
+
+/** True if the station has at least one connector the vehicle can use (or unknown type). */
+export const stationSupportsConnectors = (
+  s: ChargingStation,
+  connectors: VehicleConnector[] = ['ccs2', 'type2'],
+): boolean => {
+  if (s.connectorTypeUnknown) return true;
+  const set = new Set(connectors);
+  if (set.has('ccs2') && s.hasCcs2) return true;
+  if (set.has('type2') && s.hasType2) return true;
+  if (set.has('gbt') && s.hasGbt) return true;
+  return false;
+};
+
+/** @deprecated Prefer stationSupportsConnectors with the active vehicle profile. */
+export const stationSupportsVigo = (s: ChargingStation) =>
+  stationSupportsConnectors(s, ['ccs2', 'type2']);
 
 const mergeStationSources = (evrace: ChargingStation[], osm: ChargingStation[]): ChargingStation[] => {
   const merged = [...evrace];
@@ -361,9 +411,11 @@ const mergeStationSources = (evrace: ChargingStation[], osm: ChargingStation[]):
     same.source = 'merged';
     same.hasCcs2 ||= candidate.hasCcs2;
     same.hasType2 ||= candidate.hasType2;
+    same.hasGbt ||= candidate.hasGbt;
     same.connectorTypeUnknown = same.connectorTypeUnknown && candidate.connectorTypeUnknown;
     same.ccs2PowerKw = Math.max(same.ccs2PowerKw ?? 0, candidate.ccs2PowerKw ?? 0) || undefined;
     same.type2PowerKw = Math.max(same.type2PowerKw ?? 0, candidate.type2PowerKw ?? 0) || undefined;
+    same.gbtPowerKw = Math.max(same.gbtPowerKw ?? 0, candidate.gbtPowerKw ?? 0) || undefined;
     if (!same.address && candidate.address) same.address = candidate.address;
     if ((!same.name || same.name === 'Зарядная станция') && candidate.name) same.name = candidate.name;
     if (!same.operator && candidate.operator) same.operator = candidate.operator;
@@ -453,8 +505,10 @@ export async function fetchChargingStationsAlongRoute(points: RouteRefPoint[], b
     throw new Error('Не удалось получить данные о зарядных станциях');
   }
 
+  // Keep all stations with any recognized connector (CCS / Type2 / GB/T / unknown).
+  // Vehicle-specific filtering is applied by the UI via stationSupportsConnectors().
   const stations = mergeStationSources(evraceStations, osmStations)
-    .filter(stationSupportsVigo)
+    .filter((s) => s.hasCcs2 || s.hasType2 || s.hasGbt || s.connectorTypeUnknown)
     .sort((a, b) => a.distanceAlongRouteKm - b.distanceAlongRouteKm);
 
   try { localStorage.setItem(cacheKey, JSON.stringify({ expiresAt: Date.now() + CACHE_TTL_MS, stations })); } catch { /* ignore cache */ }
