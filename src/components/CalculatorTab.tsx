@@ -531,6 +531,31 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         return;
       }
 
+      // Forced search is a display action: if the user explicitly asked to see
+      // stations, do not run the comfort multi-stop planner. That planner can
+      // legitimately return an empty plan when the route already has enough SOC,
+      // which used to make the button appear to do nothing.
+      if (force) {
+        const forcedStops = candidates.slice(0, 4).map(({ station, connector, socAtStation, targetSoc, session, finishSocAfterCharge }) => ({
+          station,
+          connector,
+          socAtStation,
+          targetSoc,
+          session,
+          finishSocAfterCharge,
+        }));
+        if (forcedStops.length) {
+          setChargingSuggestion(candidates[0]);
+          setChargingStops(forcedStops);
+          setChargingSuggestionStatus('ready');
+        } else {
+          setChargingSuggestion(null);
+          setChargingStops([]);
+          setChargingSuggestionStatus('unavailable');
+        }
+        return;
+      }
+
       // Multi-stop plan: chain stops until finish SOC is in the acceptable band
       // [FINISH_SOC_MIN … FINISH_SOC_TARGET+], without a micro-stop near B.
       const MAX_STOPS = 4;
