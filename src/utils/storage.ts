@@ -104,6 +104,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   hasHeatPump: false,
   acMaxKw: 6.6,
   dcMaxKw: 167,
+  connectorOverride: 'auto',
   currency: 'Br',
   regionPreset: 'belarus',
   homeTariff: 0.27,
