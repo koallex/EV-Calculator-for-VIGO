@@ -62,11 +62,23 @@ export default function App() {
   // Record an app-open event for the admin statistics. Fired once per mount
   // (i.e. once per real app open), independent of auth state, and never
   // allowed to break the app if it fails.
-  useEffect(() => {
+  const recordVisit = () => {
     fetch('/api/analytics/visit', { method: 'POST', credentials: 'same-origin' }).catch(() => {
       // Statistics are best-effort; ignore network errors.
     });
+  };
+
+  useEffect(() => {
+    recordVisit();
   }, []);
+
+  // A fresh login/registration doesn't remount the app, so the mount-time visit above
+  // was recorded as anonymous (no session cookie yet). Record it again now that the
+  // session exists, so this open is attributed to the user in the admin stats.
+  const handleLogin = (user: AuthUser) => {
+    setAuthUser(user);
+    recordVisit();
+  };
 
   const handleLogout = async () => {
     try {
@@ -189,7 +201,7 @@ export default function App() {
   }
 
   if (!authUser) {
-    return <LoginScreen onLogin={setAuthUser} />;
+    return <LoginScreen onLogin={handleLogin} />;
   }
 
   return (
