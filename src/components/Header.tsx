@@ -1,5 +1,5 @@
 import React from 'react';
-import { Car, Moon, Sun, Plus, ShieldCheck, LogOut } from 'lucide-react';
+import { Car, Moon, Sun, Plus, ShieldCheck, LogOut, Info } from 'lucide-react';
 import { UserSettings } from '../types';
 import { triggerHaptic } from '../utils/haptics';
 
@@ -12,6 +12,7 @@ interface HeaderProps {
   currentUser?: CurrentUser;
   onOpenAdmin?: () => void;
   onLogout?: () => void;
+  onOpenAbout?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,6 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   currentUser,
   onOpenAdmin,
   onLogout,
+  onOpenAbout,
 }) => {
   const toggleTheme = () => {
     triggerHaptic('light', settings.hapticFeedback);
@@ -82,6 +84,18 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <Moon className="w-4 h-4 text-slate-700" />
             )}
+          </button>
+
+          {/* About project */}
+          <button
+            id="about-project-button"
+            onClick={onOpenAbout}
+            title="О проекте"
+            className={`w-9 h-9 rounded-xl flex items-center justify-center border active:scale-95 ${
+              isDark ? 'bg-slate-900/90 border-slate-800 text-slate-400 hover:text-cyan-400' : 'bg-slate-100 border-slate-200 text-slate-500 hover:text-cyan-600'
+            }`}
+          >
+            <Info className="w-4 h-4" />
           </button>
 
           {/* Quick Add Trip (Primary CTA) */}
