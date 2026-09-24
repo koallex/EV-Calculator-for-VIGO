@@ -4,6 +4,7 @@ import {
   getCurrentUser,
   listUsers,
   getLoginStatistics,
+  getAppUsageStatistics,
 } from '../_lib/auth.js';
 
 export default async function handler(req: any, res: any) {
@@ -17,7 +18,8 @@ export default async function handler(req: any, res: any) {
       const users = await listUsers();
       const mappedUsers = users.map(({ login, createdAt, disabled }) => ({ login, role: 'user', createdAt, disabled }));
       const stats = await getLoginStatistics(mappedUsers);
-      return res.status(200).json({ users: mappedUsers, loginStats: stats });
+      const usageStats = await getAppUsageStatistics(mappedUsers);
+      return res.status(200).json({ users: mappedUsers, loginStats: stats, usageStats });
     }
 
     if (req.method === 'POST') {
