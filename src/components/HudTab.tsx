@@ -45,8 +45,9 @@ import {
 } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
 import { consumeMatchingRouteForecast } from '../utils/routeForecastBridge';
-import { geocodeAddress, buildRouteElevation } from '../services/routeElevation';
+import { geocodeAddress, buildRouteElevation, type RoutePoint } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute } from '../services/weatherForecast';
+import { RouteMap } from './RouteMap';
 
 
 interface CollapsibleDetailsProps {
@@ -110,6 +111,8 @@ export type HudRoutePlan = {
   totalDistanceKm?: number;
   /** Intermediate charge stops + final destination, ordered by distanceAlongRouteKm. */
   waypoints?: HudRouteWaypoint[];
+  /** Downsampled route geometry for map visualization in HUD. */
+  routePoints?: Array<{ lat: number; lon: number; elevationM?: number; distanceFromStartKm?: number }>;
 };
 
 interface HudTabProps {
@@ -235,6 +238,12 @@ export const HudTab: React.FC<HudTabProps> = ({
   const [routeTotalDistanceKm, setRouteTotalDistanceKm] = useState<number | null>(null);
   /** Index of the next waypoint the live SoC is aimed at. */
   const [activeWaypointIndex, setActiveWaypointIndex] = useState(0);
+  /** Route geometry from Calculator for map in HUD. */
+  const [hudRoutePoints, setHudRoutePoints] = useState<RoutePoint[]>([]);
+  const [hudMapOpen, setHudMapOpen] = useState(true);
+  /** Live GPS for map marker (updated while tracking). */
+  const [mapLivePosition, setMapLivePosition] = useState<{ lat: number; lon: number } | null>(null);
+  const lastMapPosUpdateRef = useRef(0);
 
   // Weather data fetched via GPS coordinates
   const [weather, setWeather] = useState<GpsWeather>({
@@ -396,6 +405,19 @@ export const HudTab: React.FC<HudTabProps> = ({
       setRouteTotalDistanceKm(hudPlan.totalDistanceKm);
     } else {
       setRouteTotalDistanceKm(null);
+    }
+    if (Array.isArray(hudPlan.routePoints) && hudPlan.routePoints.length >= 2) {
+      setHudRoutePoints(
+        hudPlan.routePoints.map((p, i) => ({
+          lat: p.lat,
+          lon: p.lon,
+          elevationM: p.elevationM ?? 0,
+          distanceFromStartKm: p.distanceFromStartKm ?? i,
+        })),
+      );
+      setHudMapOpen(true);
+    } else {
+      setHudRoutePoints([]);
     }
     onHudPlanConsumed?.();
   }, [hudPlan, onHudPlanConsumed]);
@@ -563,6 +585,11 @@ export const HudTab: React.FC<HudTabProps> = ({
       const { latitude, longitude, speed, accuracy, heading } = pos.coords;
       const now = Date.now();
       latestGpsPositionRef.current = { lat: latitude, lon: longitude };
+      // Throttle map marker updates (~1.5 s) to avoid re-rendering the map every GPS tick.
+      if (now - lastMapPosUpdateRef.current > 1500) {
+        lastMapPosUpdateRef.current = now;
+        setMapLivePosition({ lat: latitude, lon: longitude });
+      }
 
       const accMeters = accuracy ? Math.round(accuracy) : null;
       setGpsAccuracy(accMeters);
@@ -1985,6 +2012,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                 setRouteWaypoints([]);
                 setActiveWaypointIndex(0);
                 setRouteTotalDistanceKm(null);
+                setHudRoutePoints([]);
                 triggerHaptic('light', settings.hapticFeedback);
               }}
               className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold border ${
@@ -1996,6 +2024,51 @@ export const HudTab: React.FC<HudTabProps> = ({
               Сбросить план
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Route map from Calculator plan */}
+      {hudRoutePoints.length >= 2 && (
+        <div
+          className={`rounded-2xl border overflow-hidden shrink-0 ${
+            isDark ? 'bg-slate-900/95 border-slate-700/80' : 'bg-white border-slate-200 shadow-xs'
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => setHudMapOpen((v) => !v)}
+            className={`w-full flex items-center justify-between gap-2 px-3.5 py-2 text-left ${
+              isDark ? 'text-slate-200' : 'text-slate-800'
+            }`}
+          >
+            <span className="flex items-center gap-2 text-[12px] font-bold">
+              <Navigation className={`w-4 h-4 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
+              Маршрут на карте
+              {routeWaypoints.filter((w) => w.kind === 'charge').length > 0
+                ? ` · ${routeWaypoints.filter((w) => w.kind === 'charge').length} ⚡`
+                : ''}
+            </span>
+            <ChevronDown
+              className={`w-4 h-4 transition-transform ${hudMapOpen ? 'rotate-180' : ''} ${
+                isDark ? 'text-slate-500' : 'text-slate-400'
+              }`}
+            />
+          </button>
+          {hudMapOpen && (
+            <RouteMap
+              points={hudRoutePoints}
+              isDark={isDark}
+              compact
+              currentPosition={isTracking ? mapLivePosition : null}
+              chargingStops={routeWaypoints
+                .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
+                .map((w) => ({
+                  lat: w.lat!,
+                  lon: w.lon!,
+                  name: w.name,
+                }))}
+            />
+          )}
         </div>
       )}
 

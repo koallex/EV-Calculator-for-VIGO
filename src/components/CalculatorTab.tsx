@@ -1645,12 +1645,43 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       distanceAlongRouteKm: totalKm,
                     },
                   ];
+                  // Downsample route polyline for HUD map (first/last + step).
+                  let routePoints:
+                    | Array<{ lat: number; lon: number; elevationM?: number; distanceFromStartKm?: number }>
+                    | undefined;
+                  const pts = routeElevation?.points;
+                  if (pts && pts.length >= 2) {
+                    const maxPts = 80;
+                    if (pts.length <= maxPts) {
+                      routePoints = pts.map((p) => ({
+                        lat: p.lat,
+                        lon: p.lon,
+                        elevationM: p.elevationM,
+                        distanceFromStartKm: p.distanceFromStartKm,
+                      }));
+                    } else {
+                      const step = Math.ceil(pts.length / maxPts);
+                      const sampled = pts.filter(
+                        (_, i) => i === 0 || i === pts.length - 1 || i % step === 0,
+                      );
+                      if (sampled[sampled.length - 1] !== pts[pts.length - 1]) {
+                        sampled.push(pts[pts.length - 1]);
+                      }
+                      routePoints = sampled.map((p) => ({
+                        lat: p.lat,
+                        lon: p.lon,
+                        elevationM: p.elevationM,
+                        distanceFromStartKm: p.distanceFromStartKm,
+                      }));
+                    }
+                  }
                   onSendToHud({
                     destination: destinationAddress.trim(),
                     startSoc,
                     plannedSpeedKmH,
                     totalDistanceKm: totalKm,
                     waypoints,
+                    routePoints,
                   });
                 }}
                 className={`w-full rounded-xl py-3.5 text-sm font-bold flex items-center justify-center gap-2 border transition-all active:scale-[0.98] ${

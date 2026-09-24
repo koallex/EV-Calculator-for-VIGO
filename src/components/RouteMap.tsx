@@ -15,6 +15,10 @@ interface RouteMapProps {
   /** @deprecated use chargingStops */
   chargingStop?: RouteMapChargingStop | null;
   chargingStops?: RouteMapChargingStop[];
+  /** Live GPS position (HUD tracking). */
+  currentPosition?: { lat: number; lon: number } | null;
+  /** Compact height for HUD embed. */
+  compact?: boolean;
 }
 
 // Renders the route on Yandex Maps. The map's logo, copyright and "Открыть в Яндекс Картах"
@@ -27,11 +31,14 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   isDark,
   chargingStop,
   chargingStops,
+  currentPosition = null,
+  compact = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const ymapsRef = useRef<any>(null);
   const polylineRef = useRef<any>(null);
+  const currentPosMarkerRef = useRef<any>(null);
   const [loadError, setLoadError] = useState(false);
   const [mapReady, setMapReady] = useState(false);
 
@@ -197,7 +204,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     if (!polyline || positions.length < 2) return;
 
     let cancelled = false;
-    const frames = 70;
+    const frames = compact ? 20 : 70;
     const step = Math.max(1, Math.ceil((positions.length - 2) / frames));
     let count = 2;
 
@@ -215,13 +222,44 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       if (count >= positions.length) {
         window.clearInterval(timer);
       }
-    }, 28);
+    }, compact ? 16 : 28);
 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [positions, mapReady]);
+  }, [positions, mapReady, compact]);
+
+  // Live GPS marker for HUD tracking — independent of route/chargers.
+  useEffect(() => {
+    const map = mapRef.current;
+    const ymaps = ymapsRef.current;
+    if (!map || !ymaps) return;
+
+    if (!currentPosition || !Number.isFinite(currentPosition.lat) || !Number.isFinite(currentPosition.lon)) {
+      if (currentPosMarkerRef.current) {
+        map.geoObjects.remove(currentPosMarkerRef.current);
+        currentPosMarkerRef.current = null;
+      }
+      return;
+    }
+
+    const coords: [number, number] = [currentPosition.lat, currentPosition.lon];
+    if (currentPosMarkerRef.current) {
+      currentPosMarkerRef.current.geometry.setCoordinates(coords);
+    } else {
+      const marker = new ymaps.Placemark(
+        coords,
+        { hintContent: 'Вы здесь' },
+        {
+          preset: 'islands#blueCircleDotIcon',
+          iconColor: '#38bdf8',
+        },
+      );
+      map.geoObjects.add(marker);
+      currentPosMarkerRef.current = marker;
+    }
+  }, [mapReady, currentPosition?.lat, currentPosition?.lon]);
 
   // Create the map once per mount.
   useEffect(() => {
@@ -255,6 +293,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       polylineRef.current = null;
       startMarkerRef.current = null;
       endMarkerRef.current = null;
+      currentPosMarkerRef.current = null;
       chargerMarkersRef.current = [];
       mapRef.current?.destroy?.();
       mapRef.current = null;
@@ -265,7 +304,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
 
   return (
     <div className={`route-map-shell overflow-hidden ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
-      <div className="route-map">
+      <div className={`route-map ${compact ? 'route-map--compact' : ''}`}>
         <div ref={containerRef} className="route-map-yandex" />
         {loadError && (
           <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-rose-300 bg-slate-950/85">
