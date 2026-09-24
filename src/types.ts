@@ -16,6 +16,12 @@ export interface UserSettings {
   acMaxKw?: number;
   /** Vehicle DC peak charge power (kW). */
   dcMaxKw?: number;
+  /**
+   * Manual charge-port override. When set (not 'auto'), replaces the profile's
+   * default connectors for station filtering and charge planning.
+   * Values: 'auto' | 'ccs2' | 'gbt' | 'type2' | 'ccs2_type2' | 'ccs2_gbt'
+   */
+  connectorOverride?: 'auto' | 'ccs2' | 'gbt' | 'type2' | 'ccs2_type2' | 'ccs2_gbt';
   currency: string; // e.g. 'Br', '₽', '$', '€', '₸'
   regionPreset?: 'belarus' | 'russia' | 'custom';
   
