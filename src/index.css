@@ -226,36 +226,3 @@ input[type=range]::-moz-range-thumb {
 
 
 
-/* Leaflet ЭЗС map */
-.vigo-leaflet-map {
-  width: 100%;
-  height: 100%;
-  z-index: 0;
-  background: #0f172a;
-}
-.vigo-leaflet-map .leaflet-control-attribution {
-  font-size: 10px;
-  max-width: 55%;
-  background: rgba(15, 23, 42, 0.75);
-  color: #94a3b8;
-}
-.vigo-leaflet-map .leaflet-control-attribution a {
-  color: #67e8f9;
-}
-.vigo-leaflet-map .leaflet-control-zoom a {
-  background: rgba(15, 23, 42, 0.9);
-  color: #e2e8f0;
-  border-color: #334155;
-}
-.marker-cluster-small,
-.marker-cluster-medium,
-.marker-cluster-large {
-  background-color: rgba(6, 182, 212, 0.35);
-}
-.marker-cluster-small div,
-.marker-cluster-medium div,
-.marker-cluster-large div {
-  background-color: rgba(6, 182, 212, 0.85);
-  color: #0f172a;
-  font-weight: 800;
-}
