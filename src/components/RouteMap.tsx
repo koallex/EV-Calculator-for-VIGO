@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { RoutePoint } from '../services/routeElevation';
-import { applyMapTheme, loadYandexMaps } from '../utils/yandexMaps';
+import {
+  applyMapTheme,
+  bindDarkPanPerformance,
+  createOptimizedMap,
+  loadYandexMaps,
+} from '../utils/yandexMaps';
 
 export interface RouteMapChargingStop {
   lat: number;
@@ -273,20 +278,16 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         if (cancelled || !containerRef.current) return;
 
         ymapsRef.current = ymaps;
-        const map = new ymaps.Map(
-          containerRef.current,
-          {
-            center: start || [53.9, 27.5667],
-            zoom: 12,
-            controls: ['zoomControl'],
-          },
-          {
-            suppressMapOpenBlock: false,
-            yandexMapDisablePoiInteractivity: true,
-          },
-        );
+        const map = createOptimizedMap(ymaps, containerRef.current, {
+          center: start || [53.9, 27.5667],
+          zoom: 12,
+          minZoom: 6,
+          maxZoom: 17,
+        });
 
         applyMapTheme(ymaps, map, isDark);
+        const unbindDarkPan = isDark ? bindDarkPanPerformance(map) : () => {};
+        (map as any).__vigoUnbindDarkPan = unbindDarkPan;
         mapRef.current = map;
         setMapReady(true);
       })
@@ -299,6 +300,11 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       endMarkerRef.current = null;
       currentPosMarkerRef.current = null;
       chargerMarkersRef.current = [];
+      try {
+        (mapRef.current as any)?.__vigoUnbindDarkPan?.();
+      } catch {
+        /* ignore */
+      }
       mapRef.current?.destroy?.();
       mapRef.current = null;
       ymapsRef.current = null;

@@ -10,7 +10,13 @@ import {
   LocateFixed,
 } from 'lucide-react';
 import { UserSettings } from '../types';
-import { applyMapTheme, loadYandexMaps } from '../utils/yandexMaps';
+import {
+  applyMapTheme,
+  bindDarkPanPerformance,
+  createOptimizedMap,
+  createStationObjectManager,
+  loadYandexMaps,
+} from '../utils/yandexMaps';
 import {
   resolveEffectiveConnectors,
   type ConnectorOverride,
@@ -475,7 +481,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           if (s) list.push(s);
         });
         // Cap markers — fewer objects = smoother pan
-        if (list.length > 120) list = list.slice(0, 120);
+        if (list.length > 90) list = list.slice(0, 90);
 
         // Live occupancy is expensive: only when "only free" filter is on.
         // Single-station live runs on marker click.
@@ -545,37 +551,19 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       .then((ymaps) => {
         if (cancelled || !containerRef.current) return;
         ymapsRef.current = ymaps;
-        const map = new ymaps.Map(
-          containerRef.current,
-          {
-            center: [53.9, 27.5667],
-            zoom: 12,
-            controls: ['zoomControl'],
-            type: isDark ? undefined : 'yandex#map',
-          },
-          {
-            suppressMapOpenBlock: false,
-            yandexMapDisablePoiInteractivity: true,
-          },
-        );
+        const map = createOptimizedMap(ymaps, containerRef.current, {
+          center: [53.9, 27.5667],
+          zoom: 12,
+          minZoom: 7,
+          maxZoom: 16,
+        });
         applyMapTheme(ymaps, map, isDark);
+        const unbindDarkPan = isDark ? bindDarkPanPerformance(map) : () => {};
         mapRef.current = map;
-        const om = new ymaps.ObjectManager({
-          clusterize: true,
-          gridSize: 72,
-          clusterDisableClickZoom: false,
-          geoObjectOpenBalloonOnClick: false,
-        });
-        om.objects.options.set({
-          preset: 'islands#circleDotIcon',
-          iconColor: '#22d3ee',
-        });
-        om.clusters.options.set({
-          preset: 'islands#invertedCyanClusterIcons',
-          hasBalloon: false,
-        });
+        const om = createStationObjectManager(ymaps);
         map.geoObjects.add(om);
         objectManagerRef.current = om;
+        (map as any).__vigoUnbindDarkPan = unbindDarkPan;
 
         om.objects.events.add('click', (e: any) => {
           const id = e.get('objectId');
@@ -611,6 +599,11 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     return () => {
       cancelled = true;
       if (fetchTimerRef.current) window.clearTimeout(fetchTimerRef.current);
+      try {
+        (mapRef.current as any)?.__vigoUnbindDarkPan?.();
+      } catch {
+        /* ignore */
+      }
       mapRef.current?.destroy?.();
       mapRef.current = null;
       objectManagerRef.current = null;
@@ -645,6 +638,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         options: {
           preset: 'islands#circleDotIcon',
           iconColor: color,
+          hasBalloon: false,
         },
       };
     });
