@@ -224,15 +224,3 @@ input[type=range]::-moz-range-thumb {
 }
 
 
-/* During pan/zoom drop the invert filter — major FPS win on mobile GPUs */
-.vigo-ymaps-dark-panning .ymaps-2-1-79-ground-pane,
-.vigo-ymaps-dark-panning .ymaps-2-1-79-areas-pane,
-.vigo-ymaps-dark-panning [class*="ymaps-"][class*="-ground-pane"],
-.vigo-ymaps-dark-panning [class*="ymaps-"][class*="-areas-pane"],
-.vigo-ymaps-dark-panning .ymaps-2-1-79-controls-pane,
-.vigo-ymaps-dark-panning [class*="ymaps-"][class*="-controls-pane"],
-.vigo-ymaps-dark-panning .ymaps-2-1-79-copyrights-pane,
-.vigo-ymaps-dark-panning [class*="ymaps-"][class*="-copyrights-pane"] {
-  filter: none !important;
-  opacity: 1 !important;
-}

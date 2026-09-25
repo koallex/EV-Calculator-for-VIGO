@@ -174,36 +174,12 @@ export function applyMapTheme(_ymaps: any, map: any, isDark: boolean) {
     typeof map.container?.getElement === 'function' ? map.container.getElement() : null;
   if (!el) return;
   el.classList.toggle('vigo-ymaps-dark', !!isDark);
-  el.classList.remove('vigo-ymaps-dark-panning');
 }
 
 /**
- * While the user pans/zooms, disable the expensive CSS invert filter.
- * Re-enable when the gesture ends. Call once after map create if isDark.
+ * Previously toggled off CSS invert during pan (FPS). That flashed a light map —
+ * kept as no-op so call sites stay valid; dark filter stays on while scrolling.
  */
-export function bindDarkPanPerformance(map: any) {
-  if (!map) return () => {};
-  const el: HTMLElement | null =
-    typeof map.container?.getElement === 'function' ? map.container.getElement() : null;
-  if (!el) return () => {};
-
-  const onBegin = () => {
-    if (el.classList.contains('vigo-ymaps-dark')) {
-      el.classList.add('vigo-ymaps-dark-panning');
-    }
-  };
-  const onEnd = () => {
-    el.classList.remove('vigo-ymaps-dark-panning');
-  };
-
-  map.events.add('actionbegin', onBegin);
-  map.events.add('actionend', onEnd);
-  return () => {
-    try {
-      map.events.remove('actionbegin', onBegin);
-      map.events.remove('actionend', onEnd);
-    } catch {
-      /* ignore */
-    }
-  };
+export function bindDarkPanPerformance(_map: any) {
+  return () => {};
 }
