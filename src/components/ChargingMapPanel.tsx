@@ -764,7 +764,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const visibleCount = stations.filter(matchesFilters).length;
 
   return (
-    <div className="relative h-[calc(100dvh-8.5rem)] min-h-[420px] w-full overflow-hidden rounded-2xl border border-slate-800/60">
+    <div className="relative h-[calc(100dvh-13rem)] max-h-[560px] min-h-[280px] w-full overflow-hidden rounded-2xl border border-slate-800/60">
       <div ref={containerRef} className="absolute inset-0 bg-slate-900" />
 
       {/* Top controls */}

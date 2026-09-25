@@ -123,7 +123,10 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
         </button>
       </div>
 
-      {view === 'map' && <ChargingMapPanel settings={settings} />}
+      {/* Keep map mounted to avoid reloading Yandex API on every switch */}
+      <div className={view === 'map' ? 'block' : 'hidden'}>
+        <ChargingMapPanel settings={settings} />
+      </div>
 
       {view === 'calc' && (
         <>
