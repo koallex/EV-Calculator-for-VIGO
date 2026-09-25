@@ -11,10 +11,10 @@ import {
 } from 'lucide-react';
 import { UserSettings } from '../types';
 import {
-  createV3Map,
+  createBestMap,
   makeDotMarkerEl,
   toLonLat,
-  type V3MapBundle,
+  type AnyMapBundle,
 } from '../utils/yandexMaps';
 import {
   resolveEffectiveConnectors,
@@ -277,10 +277,11 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const [evraceTariffs, setEvraceTariffs] = useState<EvraceTariff[]>([]);
 
   const mapRef = useRef<any>(null);
-  const bundleRef = useRef<V3MapBundle | null>(null);
+  const bundleRef = useRef<AnyMapBundle | null>(null);
   const markersLayerRef = useRef<any[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const fetchTimerRef = useRef<number | null>(null);
+  const lastFetchAtRef = useRef(0);
   const stationsRef = useRef<MapStation[]>([]);
   stationsRef.current = stations;
   const onlyFreeRef = useRef(onlyFree);
@@ -513,9 +514,12 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         if (!map) return;
         // ymaps3: bounds as [[minLon,minLat],[maxLon,maxLat]] or via location
         let bounds: number[][] | null = null;
-        if (typeof map.bounds === 'object' && map.bounds) {
+        const bundle = bundleRef.current as any;
+        if (bundle?.apiVersion === 2 && typeof map.getBounds === 'function') {
+          const b = map.getBounds();
+          if (b) bounds = b; // already [[lat,lon],[lat,lon]]
+        } else if (typeof map.bounds === 'object' && map.bounds) {
           const b = map.bounds;
-          // [[minLon, minLat], [maxLon, maxLat]]
           bounds = [
             [b[0][1], b[0][0]],
             [b[1][1], b[1][0]],
@@ -580,7 +584,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     let cancelled = false;
     if (!containerRef.current) return;
 
-    createV3Map(containerRef.current, {
+    createBestMap(containerRef.current, {
       lat: 53.9,
       lon: 27.5667,
       zoom: 12,
@@ -619,7 +623,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           );
         }
       })
-      .catch(() => setError('Не удалось загрузить карту v3. Проверьте ключ и HTTP Referer.'));
+      .catch((e) => setError(e instanceof Error ? e.message : 'Не удалось загрузить карту'));
 
     return () => {
       cancelled = true;
@@ -637,23 +641,24 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update markers when stations / filters change (v3 DOM markers)
+  // Update markers when stations / filters change
   useEffect(() => {
-    const bundle = bundleRef.current;
+    const bundle = bundleRef.current as any;
     if (!bundle) return;
-    const { ymaps3, map } = bundle;
-    const { YMapMarker } = ymaps3;
+    const map = bundle.map;
+    const visible = stations.filter(matchesFilters);
 
+    // clear previous
     markersLayerRef.current.forEach((m) => {
       try {
-        map.removeChild(m);
+        if (bundle.apiVersion === 3) map.removeChild(m);
+        else map.geoObjects.remove(m);
       } catch {
         /* ignore */
       }
     });
     markersLayerRef.current = [];
 
-    const visible = stations.filter(matchesFilters);
     for (const s of visible) {
       let color = '#22d3ee';
       if (s.liveChecked) {
@@ -665,20 +670,35 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       } else if (!s.hasCcs2 && !s.hasGbt && s.hasType2) {
         color = '#a78bfa';
       }
-      const el = makeDotMarkerEl(color, 14);
-      el.title = s.name;
-      el.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        setSelected(s);
-        triggerHaptic('light', settings.hapticFeedback);
-        if (!s.liveChecked) refreshLiveRef.current(s);
-      });
-      const marker = new YMapMarker(
-        { coordinates: toLonLat(s.lat, s.lon) },
-        el,
-      );
-      map.addChild(marker);
-      markersLayerRef.current.push(marker);
+
+      if (bundle.apiVersion === 3) {
+        const { YMapMarker } = bundle.ymaps3;
+        const el = makeDotMarkerEl(color, 14);
+        el.title = s.name;
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          setSelected(s);
+          triggerHaptic('light', settings.hapticFeedback);
+          if (!s.liveChecked) refreshLiveRef.current(s);
+        });
+        const marker = new YMapMarker({ coordinates: toLonLat(s.lat, s.lon) }, el);
+        map.addChild(marker);
+        markersLayerRef.current.push(marker);
+      } else {
+        const ymaps = bundle.ymaps;
+        const marker = new ymaps.Placemark(
+          [s.lat, s.lon],
+          { hintContent: s.name },
+          { preset: 'islands#circleDotIcon', iconColor: color },
+        );
+        marker.events.add('click', () => {
+          setSelected(s);
+          triggerHaptic('light', settings.hapticFeedback);
+          if (!s.liveChecked) refreshLiveRef.current(s);
+        });
+        map.geoObjects.add(marker);
+        markersLayerRef.current.push(marker);
+      }
     }
   }, [stations, matchesFilters, connFilters, settings.hapticFeedback]);
 
