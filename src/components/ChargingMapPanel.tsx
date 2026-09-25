@@ -832,14 +832,19 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         </div>
       )}
 
-      {/* Selected station card */}
+      {/* Selected station card — fixed above bottom nav */}
       {selected && (
         <div
-          className={`absolute bottom-2 left-2 right-2 z-30 rounded-2xl border p-3 shadow-xl backdrop-blur-md ${
+          className={`fixed left-3 right-3 z-40 mx-auto max-w-lg rounded-2xl border p-3 shadow-2xl backdrop-blur-md ${
             isDark
               ? 'border-slate-700 bg-slate-950/95 text-slate-100'
               : 'border-slate-200 bg-white/95 text-slate-900'
           }`}
+          style={{
+            bottom: 'calc(4.75rem + env(safe-area-inset-bottom, 0px))',
+            maxHeight: 'min(52dvh, 420px)',
+            overflowY: 'auto',
+          }}
         >
           <div className="flex items-start gap-2">
             <div className={`mt-0.5 rounded-lg p-1.5 ${isDark ? 'bg-cyan-500/15 text-cyan-400' : 'bg-cyan-50 text-cyan-600'}`}>
@@ -930,6 +935,28 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
                   {tariff.asOf ? ` · ${tariff.asOf}` : ''}
                 </p>
               )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('medium', settings.hapticFeedback);
+                  const { lat, lon } = selected;
+                  const appUrl = `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lon}`;
+                  const webUrl = `https://yandex.ru/maps/?rtext=~${lat},${lon}&rtt=auto`;
+                  // Prefer Yandex Navigator app; if it does not open, fall back to Maps in browser.
+                  const start = Date.now();
+                  window.location.href = appUrl;
+                  window.setTimeout(() => {
+                    if (Date.now() - start < 1500 && !document.hidden) {
+                      window.open(webUrl, '_blank', 'noopener,noreferrer');
+                    }
+                  }, 700);
+                }}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-500 py-2.5 text-[13px] font-black text-slate-950 active:scale-[0.98]"
+              >
+                <Navigation className="h-4 w-4" />
+                Яндекс Навигатор
+              </button>
             </div>
           </div>
         </div>
