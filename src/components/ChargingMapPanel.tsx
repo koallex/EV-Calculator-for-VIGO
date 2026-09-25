@@ -408,7 +408,10 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const mapRef = useRef<any>(null);
   const bundleRef = useRef<AnyMapBundle | null>(null);
   const markersLayerRef = useRef<any[]>([]);
+  const userMarkerRef = useRef<any>(null);
+  const userWatchRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [userPos, setUserPos] = useState<{ lat: number; lon: number } | null>(null);
   const fetchTimerRef = useRef<number | null>(null);
   const lastFetchAtRef = useRef(0);
   const stationsRef = useRef<MapStation[]>([]);
@@ -769,12 +772,63 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           navigator.geolocation.getCurrentPosition(
             (pos) => {
               if (cancelled || !bundleRef.current) return;
-              bundleRef.current.setLocation(pos.coords.latitude, pos.coords.longitude, 13);
+              const lat = pos.coords.latitude;
+              const lon = pos.coords.longitude;
+              // placeUserMarker from closure after first paint
+              const b = bundleRef.current;
+              try {
+                const el = document.createElement('div');
+                el.style.cssText =
+                  'position:relative;width:22px;height:22px;transform:translate(-50%,-50%);pointer-events:none;';
+                el.innerHTML =
+                  '<span class="vigo-user-pulse-ring"></span><span class="vigo-user-dot"></span>';
+                if ((b as any).apiVersion === 3) {
+                  const { YMapMarker } = (b as any).ymaps3;
+                  const marker = new YMapMarker(
+                    { coordinates: [lon, lat] },
+                    el,
+                  );
+                  (b as any).map.addChild(marker);
+                  userMarkerRef.current = marker;
+                }
+                setUserPos({ lat, lon });
+              } catch {
+                /* ignore */
+              }
+              bundleRef.current.setLocation(lat, lon, 13);
               scheduleFetch();
             },
             () => {},
             { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 },
           );
+          try {
+            userWatchRef.current = navigator.geolocation.watchPosition(
+              (pos) => {
+                if (cancelled || !bundleRef.current) return;
+                const lat = pos.coords.latitude;
+                const lon = pos.coords.longitude;
+                const b = bundleRef.current as any;
+                if (userMarkerRef.current && b.apiVersion === 3) {
+                  try {
+                    userMarkerRef.current.update({ coordinates: [lon, lat] });
+                  } catch {
+                    /* ignore */
+                  }
+                } else if (userMarkerRef.current && b.apiVersion === 2) {
+                  try {
+                    userMarkerRef.current.geometry.setCoordinates([lat, lon]);
+                  } catch {
+                    /* ignore */
+                  }
+                }
+                setUserPos({ lat, lon });
+              },
+              () => {},
+              { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 },
+            );
+          } catch {
+            /* ignore */
+          }
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Не удалось загрузить карту'));
@@ -788,6 +842,15 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         /* ignore */
       }
       markersLayerRef.current = [];
+      if (userWatchRef.current != null && navigator.geolocation) {
+        try {
+          navigator.geolocation.clearWatch(userWatchRef.current);
+        } catch {
+          /* ignore */
+        }
+        userWatchRef.current = null;
+      }
+      userMarkerRef.current = null;
       bundleRef.current?.destroy();
       bundleRef.current = null;
       mapRef.current = null;
@@ -860,12 +923,78 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     bundleRef.current?.setTheme(isDark);
   }, [isDark]);
 
+
+  const placeUserMarker = useCallback((lat: number, lon: number) => {
+    const bundle = bundleRef.current as any;
+    if (!bundle) return;
+    const map = bundle.map;
+
+    const el = document.createElement('div');
+    el.style.cssText =
+      'position:relative;width:22px;height:22px;transform:translate(-50%,-50%);pointer-events:none;z-index:1000;';
+    el.innerHTML =
+      '<span class="vigo-user-pulse-ring"></span><span class="vigo-user-dot"></span>';
+
+    if (bundle.apiVersion === 3) {
+      const { YMapMarker } = bundle.ymaps3;
+      const coords = toLonLat(lat, lon);
+      if (userMarkerRef.current) {
+        try {
+          userMarkerRef.current.update({ coordinates: coords });
+        } catch {
+          try {
+            map.removeChild(userMarkerRef.current);
+          } catch {
+            /* ignore */
+          }
+          userMarkerRef.current = new YMapMarker({ coordinates: coords }, el);
+          map.addChild(userMarkerRef.current);
+        }
+      } else {
+        userMarkerRef.current = new YMapMarker({ coordinates: coords }, el);
+        map.addChild(userMarkerRef.current);
+      }
+    } else {
+      const ymaps = bundle.ymaps;
+      const coords: [number, number] = [lat, lon];
+      if (userMarkerRef.current) {
+        try {
+          userMarkerRef.current.geometry.setCoordinates(coords);
+        } catch {
+          /* ignore */
+        }
+      } else {
+        const layout = ymaps.templateLayoutFactory.createClass(
+          '<div style="transform:translate(-50%,-50%);width:22px;height:22px;position:relative;">' +
+            '<div style="position:absolute;inset:-10px;border-radius:50%;background:rgba(56,189,248,0.4);"></div>' +
+            '<div style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;border:3px solid #fff;box-shadow:0 0 0 2px #0284c7,0 2px 10px rgba(0,0,0,.5);"></div>' +
+            '</div>',
+        );
+        const m = new ymaps.Placemark(
+          coords,
+          { hintContent: 'Вы здесь' },
+          {
+            iconLayout: layout,
+            iconShape: { type: 'Circle', coordinates: [0, 0], radius: 18 },
+            zIndex: 2000,
+          },
+        );
+        map.geoObjects.add(m);
+        userMarkerRef.current = m;
+      }
+    }
+    setUserPos({ lat, lon });
+  }, []);
+
   const goToMe = () => {
     if (!navigator.geolocation || !mapRef.current) return;
     triggerHaptic('light', settings.hapticFeedback);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        bundleRef.current?.setLocation(pos.coords.latitude, pos.coords.longitude, 14);
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        placeUserMarker(lat, lon);
+        bundleRef.current?.setLocation(lat, lon, 14);
         scheduleFetch();
       },
       () => setError('Геолокация недоступна'),
