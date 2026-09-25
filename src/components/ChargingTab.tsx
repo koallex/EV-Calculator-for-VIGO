@@ -5,18 +5,22 @@ import {
   Coins,
   Sparkles,
   Percent,
+  Map as MapIcon,
+  Calculator,
 } from 'lucide-react';
 import { UserSettings } from '../types';
 import { getOperatorLabel } from '../utils/storage';
 import { BatteryVisual } from './BatteryVisual';
 import { DecimalInput } from './DecimalInput';
 import { triggerHaptic } from '../utils/haptics';
+import { ChargingMapPanel } from './ChargingMapPanel';
 
 interface ChargingTabProps {
   settings: UserSettings;
 }
 
 export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
+  const [view, setView] = useState<'map' | 'calc'>('map');
   const [calcMode, setCalcMode] = useState<'soc' | 'kwh'>('soc');
   const [currentSoc, setCurrentSoc] = useState<number>(20);
   const [targetSoc, setTargetSoc] = useState<number>(80);
@@ -72,7 +76,57 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
   const isDark = settings.theme !== 'light';
 
   return (
-    <div id="charging-tab-container" className="space-y-4 pb-12 max-w-2xl mx-auto">
+    <div id="charging-tab-container" className="space-y-3 pb-12 max-w-2xl mx-auto">
+      {/* View switcher: map search vs cost calculator */}
+      <div
+        className={`flex p-1 rounded-xl border ${
+          isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100 border-slate-200'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            setView('map');
+            triggerHaptic('light', settings.hapticFeedback);
+          }}
+          className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-[12px] font-bold transition-colors ${
+            view === 'map'
+              ? isDark
+                ? 'bg-slate-800 text-cyan-400'
+                : 'bg-white text-cyan-700 shadow-sm'
+              : isDark
+                ? 'text-slate-400'
+                : 'text-slate-500'
+          }`}
+        >
+          <MapIcon className="w-4 h-4" />
+          Карта ЭЗС
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setView('calc');
+            triggerHaptic('light', settings.hapticFeedback);
+          }}
+          className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-[12px] font-bold transition-colors ${
+            view === 'calc'
+              ? isDark
+                ? 'bg-slate-800 text-cyan-400'
+                : 'bg-white text-cyan-700 shadow-sm'
+              : isDark
+                ? 'text-slate-400'
+                : 'text-slate-500'
+          }`}
+        >
+          <Calculator className="w-4 h-4" />
+          Стоимость
+        </button>
+      </div>
+
+      {view === 'map' && <ChargingMapPanel settings={settings} />}
+
+      {view === 'calc' && (
+        <>
       {/* 1. Main Result Display (Energy & Total Cost with Station Losses) */}
       <div
         className={`border rounded-2xl p-4 space-y-4 transition-colors ${
@@ -95,7 +149,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
                 Калькулятор зарядки ЭЗС
               </h2>
               <p className={`text-[11px] truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Dongfeng Vigo ({batteryCap} кВт⋅ч)
+                {batteryCap} кВт⋅ч
               </p>
             </div>
           </div>
@@ -775,6 +829,8 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 };

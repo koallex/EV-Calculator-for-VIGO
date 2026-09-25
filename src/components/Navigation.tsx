@@ -27,7 +27,7 @@ export const Navigation: React.FC<NavigationProps> = ({
     { id: 'calculator', label: 'Калькулятор', icon: Calculator },
     { id: 'hud', label: 'Живой расход', icon: Gauge },
     { id: 'history', label: 'История', icon: History },
-    { id: 'charging', label: 'Зарядка', icon: BatteryCharging },
+    { id: 'charging', label: 'ЭЗС', icon: BatteryCharging },
     { id: 'settings', label: 'Настройки', icon: Settings },
   ];
 
