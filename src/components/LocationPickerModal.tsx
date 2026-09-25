@@ -4,11 +4,11 @@ import { X, MapPin, Check, Loader2, LocateFixed } from 'lucide-react';
 import { reverseGeocode } from '../services/routeElevation';
 import { triggerHaptic } from '../utils/haptics';
 import {
-  createV3Map,
+  createBestMap,
   makeDotMarkerEl,
   fromLonLat,
   toLonLat,
-  type V3MapBundle,
+  type AnyMapBundle,
 } from '../utils/yandexMaps';
 
 interface PickedPoint {
@@ -38,7 +38,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
   hapticFeedback,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const bundleRef = useRef<V3MapBundle | null>(null);
+  const bundleRef = useRef<AnyMapBundle | null>(null);
   const markerRef = useRef<any>(null);
   const onPickRef = useRef<(p: PickedPoint) => void>(() => {});
 
@@ -78,7 +78,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
 
     const t = window.setTimeout(() => {
       if (!containerRef.current || cancelled) return;
-      createV3Map(containerRef.current, {
+      createBestMap(containerRef.current, {
         lat: center.lat,
         lon: center.lon,
         zoom: 12,
@@ -90,20 +90,27 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
             return;
           }
           bundleRef.current = bundle;
-          const { ymaps3, map } = bundle;
-          const { YMapListener } = ymaps3;
-          map.addChild(
-            new YMapListener({
-              layer: 'any',
-              onClick: (_obj: unknown, event: any) => {
-                if (!event?.coordinates) return;
-                const { lat, lon } = fromLonLat(event.coordinates);
-                onPickRef.current({ lat, lon });
-              },
-            }),
-          );
+          const map = (bundle as any).map;
+          if ((bundle as any).apiVersion === 3) {
+            const { YMapListener } = (bundle as any).ymaps3;
+            map.addChild(
+              new YMapListener({
+                layer: 'any',
+                onClick: (_obj: unknown, event: any) => {
+                  if (!event?.coordinates) return;
+                  const { lat, lon } = fromLonLat(event.coordinates);
+                  onPickRef.current({ lat, lon });
+                },
+              }),
+            );
+          } else {
+            map.events.add('click', (e: any) => {
+              const coords = e.get('coords');
+              onPickRef.current({ lat: coords[0], lon: coords[1] });
+            });
+          }
         })
-        .catch(() => setMapError(true));
+        .catch((e) => { console.error(e); setMapError(true); });
     }, 50);
 
     return () => {
@@ -117,25 +124,40 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
   }, [isOpen]);
 
   useEffect(() => {
-    const bundle = bundleRef.current;
+    const bundle = bundleRef.current as any;
     if (!bundle || !point) return;
-    const { ymaps3, map } = bundle;
-    const { YMapMarker } = ymaps3;
-    const coords = toLonLat(point.lat, point.lon);
+    const map = bundle.map;
 
-    if (markerRef.current) {
-      try {
-        markerRef.current.update({ coordinates: coords });
-      } catch {
-        /* ignore */
+    if (bundle.apiVersion === 3) {
+      const { YMapMarker } = bundle.ymaps3;
+      const coords = toLonLat(point.lat, point.lon);
+      if (markerRef.current) {
+        try {
+          markerRef.current.update({ coordinates: coords });
+        } catch {
+          /* ignore */
+        }
+      } else {
+        const el = makeDotMarkerEl('#f43f5e', 18);
+        const marker = new YMapMarker({ coordinates: coords }, el);
+        map.addChild(marker);
+        markerRef.current = marker;
       }
     } else {
-      const el = makeDotMarkerEl('#f43f5e', 18);
-      const marker = new YMapMarker({ coordinates: coords }, el);
-      map.addChild(marker);
-      markerRef.current = marker;
+      const coords: [number, number] = [point.lat, point.lon];
+      if (markerRef.current) {
+        markerRef.current.geometry.setCoordinates(coords);
+      } else {
+        const marker = new bundle.ymaps.Placemark(
+          coords,
+          {},
+          { preset: 'islands#redCircleDotIcon' },
+        );
+        map.geoObjects.add(marker);
+        markerRef.current = marker;
+      }
     }
-    bundle.setLocation(point.lat, point.lon, Math.max(13, 13));
+    bundle.setLocation(point.lat, point.lon, 13);
   }, [point]);
 
   useEffect(() => {
