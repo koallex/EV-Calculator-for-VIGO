@@ -11,11 +11,10 @@ import {
 } from 'lucide-react';
 import { UserSettings } from '../types';
 import {
-  applyMapTheme,
-  bindDarkPanPerformance,
-  createOptimizedMap,
-  createStationObjectManager,
-  loadYandexMaps,
+  createV3Map,
+  makeDotMarkerEl,
+  toLonLat,
+  type V3MapBundle,
 } from '../utils/yandexMaps';
 import {
   resolveEffectiveConnectors,
@@ -278,8 +277,8 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const [evraceTariffs, setEvraceTariffs] = useState<EvraceTariff[]>([]);
 
   const mapRef = useRef<any>(null);
-  const ymapsRef = useRef<any>(null);
-  const objectManagerRef = useRef<any>(null);
+  const bundleRef = useRef<V3MapBundle | null>(null);
+  const markersLayerRef = useRef<any[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const fetchTimerRef = useRef<number | null>(null);
   const stationsRef = useRef<MapStation[]>([]);
@@ -510,8 +509,40 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     // Debounce after pan/zoom ends — avoids stacking requests mid-drag
     fetchTimerRef.current = window.setTimeout(() => {
       try {
-        const b = mapRef.current.getBounds();
-        if (b) void fetchStationsInBounds(b);
+        const map = mapRef.current;
+        if (!map) return;
+        // ymaps3: bounds as [[minLon,minLat],[maxLon,maxLat]] or via location
+        let bounds: number[][] | null = null;
+        if (typeof map.bounds === 'object' && map.bounds) {
+          const b = map.bounds;
+          // [[minLon, minLat], [maxLon, maxLat]]
+          bounds = [
+            [b[0][1], b[0][0]],
+            [b[1][1], b[1][0]],
+          ];
+        } else if (typeof map.getBounds === 'function') {
+          const b = map.getBounds();
+          if (b) {
+            bounds = [
+              [b[0][1], b[0][0]],
+              [b[1][1], b[1][0]],
+            ];
+          }
+        }
+        if (!bounds) {
+          // Estimate viewport from center + zoom (v3 center is [lon, lat])
+          const c = map.center || map.location?.center || [27.5667, 53.9];
+          const z = map.zoom ?? map.location?.zoom ?? 12;
+          const lon = Array.isArray(c) ? c[0] : 27.5667;
+          const lat = Array.isArray(c) ? c[1] : 53.9;
+          const dLat = 180 / Math.pow(2, z) * 1.4;
+          const dLon = dLat / Math.max(0.3, Math.cos((lat * Math.PI) / 180));
+          bounds = [
+            [lat - dLat, lon - dLon],
+            [lat + dLat, lon + dLon],
+          ];
+        }
+        void fetchStationsInBounds(bounds);
       } catch {
         /* ignore */
       }
@@ -544,49 +575,43 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   }, [onlyFree, scheduleFetch]);
 
 
-  // Init map
+  // Init Yandex Maps API v3
   useEffect(() => {
     let cancelled = false;
-    loadYandexMaps()
-      .then((ymaps) => {
-        if (cancelled || !containerRef.current) return;
-        ymapsRef.current = ymaps;
-        const map = createOptimizedMap(ymaps, containerRef.current, {
-          center: [53.9, 27.5667],
-          zoom: 12,
-          minZoom: 7,
-          maxZoom: 16,
-        });
-        applyMapTheme(ymaps, map, isDark);
-        const unbindDarkPan = isDark ? bindDarkPanPerformance(map) : () => {};
-        mapRef.current = map;
-        const om = createStationObjectManager(ymaps);
-        map.geoObjects.add(om);
-        objectManagerRef.current = om;
-        (map as any).__vigoUnbindDarkPan = unbindDarkPan;
+    if (!containerRef.current) return;
 
-        om.objects.events.add('click', (e: any) => {
-          const id = e.get('objectId');
-          const st = stationsRef.current.find((s) => s.id === id);
-          if (st) {
-            setSelected(st);
-            triggerHaptic('light', settings.hapticFeedback);
-            if (!st.liveChecked) refreshLiveRef.current(st);
-          }
-        });
+    createV3Map(containerRef.current, {
+      lat: 53.9,
+      lon: 27.5667,
+      zoom: 12,
+      isDark,
+    })
+      .then((bundle) => {
+        if (cancelled) {
+          bundle.destroy();
+          return;
+        }
+        bundleRef.current = bundle;
+        mapRef.current = bundle.map;
 
-        // Fetch only when user finishes pan/zoom — not on every frame of movement
-        map.events.add('actionend', () => scheduleFetch());
+        const onMoveEnd = () => scheduleFetch();
+        // v3: listen via YMapListener for location changes is complex; poll bounds on action end via DOM
+        const el = containerRef.current;
+        const onUp = () => scheduleFetch();
+        el?.addEventListener('pointerup', onUp);
+        el?.addEventListener('wheel', onUp, { passive: true });
+        (bundle.map as any).__vigoCleanupListeners = () => {
+          el?.removeEventListener('pointerup', onUp);
+          el?.removeEventListener('wheel', onUp);
+        };
+
         scheduleFetch();
 
-        // Try geolocation center
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
             (pos) => {
-              if (cancelled || !mapRef.current) return;
-              mapRef.current.setCenter([pos.coords.latitude, pos.coords.longitude], 13, {
-                duration: 300,
-              });
+              if (cancelled || !bundleRef.current) return;
+              bundleRef.current.setLocation(pos.coords.latitude, pos.coords.longitude, 13);
               scheduleFetch();
             },
             () => {},
@@ -594,30 +619,43 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           );
         }
       })
-      .catch(() => setError('Не удалось загрузить карту'));
+      .catch(() => setError('Не удалось загрузить карту v3. Проверьте ключ и HTTP Referer.'));
 
     return () => {
       cancelled = true;
       if (fetchTimerRef.current) window.clearTimeout(fetchTimerRef.current);
       try {
-        (mapRef.current as any)?.__vigoUnbindDarkPan?.();
+        (mapRef.current as any)?.__vigoCleanupListeners?.();
       } catch {
         /* ignore */
       }
-      mapRef.current?.destroy?.();
+      markersLayerRef.current = [];
+      bundleRef.current?.destroy();
+      bundleRef.current = null;
       mapRef.current = null;
-      objectManagerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update markers when stations / filters change
+  // Update markers when stations / filters change (v3 DOM markers)
   useEffect(() => {
-    const om = objectManagerRef.current;
-    if (!om) return;
+    const bundle = bundleRef.current;
+    if (!bundle) return;
+    const { ymaps3, map } = bundle;
+    const { YMapMarker } = ymaps3;
+
+    markersLayerRef.current.forEach((m) => {
+      try {
+        map.removeChild(m);
+      } catch {
+        /* ignore */
+      }
+    });
+    markersLayerRef.current = [];
+
     const visible = stations.filter(matchesFilters);
-    const features = visible.map((s) => {
-      let color = '#22d3ee'; // cyan — DC present, live unknown
+    for (const s of visible) {
+      let color = '#22d3ee';
       if (s.liveChecked) {
         const free =
           (connFilters.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
@@ -627,33 +665,33 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       } else if (!s.hasCcs2 && !s.hasGbt && s.hasType2) {
         color = '#a78bfa';
       }
-      return {
-        type: 'Feature',
-        id: s.id,
-        geometry: { type: 'Point', coordinates: [s.lat, s.lon] },
-        properties: {
-          hintContent: s.name,
-          // Larger hit target via circleDot (more visible than tiny dots)
-        },
-        options: {
-          preset: 'islands#circleDotIcon',
-          iconColor: color,
-          hasBalloon: false,
-        },
-      };
-    });
-    om.removeAll();
-    om.add({ type: 'FeatureCollection', features });
-  }, [stations, matchesFilters, connFilters]);
+      const el = makeDotMarkerEl(color, 14);
+      el.title = s.name;
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        setSelected(s);
+        triggerHaptic('light', settings.hapticFeedback);
+        if (!s.liveChecked) refreshLiveRef.current(s);
+      });
+      const marker = new YMapMarker(
+        { coordinates: toLonLat(s.lat, s.lon) },
+        el,
+      );
+      map.addChild(marker);
+      markersLayerRef.current.push(marker);
+    }
+  }, [stations, matchesFilters, connFilters, settings.hapticFeedback]);
+
+  useEffect(() => {
+    bundleRef.current?.setTheme(isDark);
+  }, [isDark]);
 
   const goToMe = () => {
     if (!navigator.geolocation || !mapRef.current) return;
     triggerHaptic('light', settings.hapticFeedback);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        mapRef.current?.setCenter([pos.coords.latitude, pos.coords.longitude], 14, {
-          duration: 400,
-        });
+        bundleRef.current?.setLocation(pos.coords.latitude, pos.coords.longitude, 14);
         scheduleFetch();
       },
       () => setError('Геолокация недоступна'),

@@ -3,23 +3,30 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X, MapPin, Check, Loader2, LocateFixed } from 'lucide-react';
 import { reverseGeocode } from '../services/routeElevation';
 import { triggerHaptic } from '../utils/haptics';
-import { loadYandexMaps } from '../utils/yandexMaps';
+import {
+  createV3Map,
+  makeDotMarkerEl,
+  fromLonLat,
+  toLonLat,
+  type V3MapBundle,
+} from '../utils/yandexMaps';
 
-interface PickedPoint { lat: number; lon: number; }
+interface PickedPoint {
+  lat: number;
+  lon: number;
+}
 
 interface LocationPickerModalProps {
   isOpen: boolean;
   isDark: boolean;
-  /** Label shown in the modal header, e.g. "Точка А" or "Точка Б" */
   title: string;
-  /** Where to center the map when it first opens */
   initialCenter?: { lat: number; lon: number };
   onClose: () => void;
   onConfirm: (point: { lat: number; lon: number; displayName: string }) => void;
   hapticFeedback?: boolean;
 }
 
-const FALLBACK_CENTER: [number, number] = [53.9, 27.5667]; // Minsk — sensible default for Belarus routes
+const FALLBACK = { lat: 53.9, lon: 27.5667 };
 
 export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
   isOpen,
@@ -31,9 +38,8 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
   hapticFeedback,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const ymapsRef = useRef<any>(null);
-  const placemarkRef = useRef<any>(null);
+  const bundleRef = useRef<V3MapBundle | null>(null);
+  const markerRef = useRef<any>(null);
   const onPickRef = useRef<(p: PickedPoint) => void>(() => {});
 
   const [point, setPoint] = useState<PickedPoint | null>(null);
@@ -41,11 +47,14 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
   const [resolving, setResolving] = useState(false);
   const [locating, setLocating] = useState(false);
   const [mapError, setMapError] = useState(false);
-  const center: [number, number] = initialCenter ? [initialCenter.lat, initialCenter.lon] : FALLBACK_CENTER;
 
-  // Reset picked point each time the modal is (re)opened for a fresh pick.
+  const center = initialCenter || FALLBACK;
+
   useEffect(() => {
-    if (isOpen) { setPoint(null); setLabel(''); }
+    if (isOpen) {
+      setPoint(null);
+      setLabel('');
+    }
   }, [isOpen]);
 
   const handlePick = async (p: PickedPoint) => {
@@ -62,61 +71,85 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
   };
   onPickRef.current = handlePick;
 
-  // Create the map once, when the modal opens. Destroyed on close so a stale instance never
-  // lingers under the next open.
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
     setMapError(false);
 
-    loadYandexMaps()
-      .then((ymaps) => {
-        if (cancelled || !containerRef.current) return;
-        ymapsRef.current = ymaps;
-        const map = new ymaps.Map(
-          containerRef.current,
-          { center, zoom: 12, controls: ['zoomControl'] },
-          { suppressMapOpenBlock: false },
-        );
-        map.events.add('click', (e: any) => {
-          const coords = e.get('coords');
-          onPickRef.current({ lat: coords[0], lon: coords[1] });
-        });
-        mapRef.current = map;
+    const t = window.setTimeout(() => {
+      if (!containerRef.current || cancelled) return;
+      createV3Map(containerRef.current, {
+        lat: center.lat,
+        lon: center.lon,
+        zoom: 12,
+        isDark,
       })
-      .catch(() => setMapError(true));
+        .then((bundle) => {
+          if (cancelled) {
+            bundle.destroy();
+            return;
+          }
+          bundleRef.current = bundle;
+          const { ymaps3, map } = bundle;
+          const { YMapListener } = ymaps3;
+          map.addChild(
+            new YMapListener({
+              layer: 'any',
+              onClick: (_obj: unknown, event: any) => {
+                if (!event?.coordinates) return;
+                const { lat, lon } = fromLonLat(event.coordinates);
+                onPickRef.current({ lat, lon });
+              },
+            }),
+          );
+        })
+        .catch(() => setMapError(true));
+    }, 50);
 
     return () => {
       cancelled = true;
-      mapRef.current?.destroy?.();
-      mapRef.current = null;
-      placemarkRef.current = null;
+      window.clearTimeout(t);
+      markerRef.current = null;
+      bundleRef.current?.destroy();
+      bundleRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  // Move/create the pin placemark whenever a point is picked, and recenter on it.
   useEffect(() => {
-    const map = mapRef.current;
-    const ymaps = ymapsRef.current;
-    if (!map || !ymaps || !point) return;
+    const bundle = bundleRef.current;
+    if (!bundle || !point) return;
+    const { ymaps3, map } = bundle;
+    const { YMapMarker } = ymaps3;
+    const coords = toLonLat(point.lat, point.lon);
 
-    const coords: [number, number] = [point.lat, point.lon];
-    if (placemarkRef.current) {
-      placemarkRef.current.geometry.setCoordinates(coords);
+    if (markerRef.current) {
+      try {
+        markerRef.current.update({ coordinates: coords });
+      } catch {
+        /* ignore */
+      }
     } else {
-      const placemark = new ymaps.Placemark(coords, {}, { preset: 'islands#redDotIconWithCaption' });
-      map.geoObjects.add(placemark);
-      placemarkRef.current = placemark;
+      const el = makeDotMarkerEl('#f43f5e', 18);
+      const marker = new YMapMarker({ coordinates: coords }, el);
+      map.addChild(marker);
+      markerRef.current = marker;
     }
-    map.setCenter(coords, Math.max(map.getZoom(), 13), { duration: 200 });
+    bundle.setLocation(point.lat, point.lon, Math.max(13, 13));
   }, [point]);
+
+  useEffect(() => {
+    bundleRef.current?.setTheme(isDark);
+  }, [isDark]);
 
   const handleLocateMe = () => {
     if (!navigator.geolocation) return;
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
-      (pos) => { handlePick({ lat: pos.coords.latitude, lon: pos.coords.longitude }); setLocating(false); },
+      (pos) => {
+        handlePick({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        setLocating(false);
+      },
       () => setLocating(false),
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 },
     );
@@ -125,7 +158,11 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
   const handleConfirm = () => {
     if (!point) return;
     triggerHaptic('medium', hapticFeedback);
-    onConfirm({ lat: point.lat, lon: point.lon, displayName: label || `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}` });
+    onConfirm({
+      lat: point.lat,
+      lon: point.lon,
+      displayName: label || `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}`,
+    });
   };
 
   return (
@@ -137,68 +174,91 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
-          onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) onClose();
+          }}
         >
           <motion.div
-            className={`w-full sm:max-w-lg h-[88vh] sm:h-[80vh] rounded-t-2xl sm:rounded-2xl overflow-hidden flex flex-col border shadow-2xl ${isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
+            className={`w-full sm:max-w-lg h-[88vh] sm:h-[80vh] rounded-t-2xl sm:rounded-2xl overflow-hidden flex flex-col border shadow-2xl ${
+              isDark
+                ? 'bg-slate-900 border-slate-800 text-white'
+                : 'bg-white border-slate-200 text-slate-900'
+            }`}
             initial={{ y: 40, opacity: 0, scale: 0.98 }}
             animate={{ y: 0, opacity: 1, scale: 1 }}
             exit={{ y: 24, opacity: 0, scale: 0.98 }}
             transition={{ type: 'spring', stiffness: 380, damping: 32 }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className={`flex items-center justify-between px-4 py-3 border-b shrink-0 ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
-              <div className="flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-amber-500" />
-                <span className="text-sm font-bold">{title}</span>
+            <div
+              className={`flex items-center justify-between px-4 py-3 border-b shrink-0 ${
+                isDark ? 'border-slate-800' : 'border-slate-100'
+              }`}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <MapPin className="h-4 w-4 text-cyan-500 shrink-0" />
+                <h3 className="text-sm font-bold truncate">{title}</h3>
               </div>
-              <button onClick={onClose} aria-label="Закрыть" className={`p-1.5 rounded-full ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}>
-                <X className="w-4 h-4" />
+              <button
+                type="button"
+                onClick={onClose}
+                className={`rounded-lg p-1.5 ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+              >
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="relative flex-1 min-h-0 location-picker-map">
-              <div ref={containerRef} className="absolute inset-0" />
-
+            <div className="relative flex-1 min-h-0">
+              <div ref={containerRef} className="absolute inset-0 bg-slate-900" />
               {mapError && (
-                <div className={`absolute inset-0 z-[400] flex items-center justify-center px-4 text-center text-xs ${isDark ? 'bg-slate-950/90 text-rose-300' : 'bg-white/95 text-rose-600'}`}>
-                  Не удалось загрузить Яндекс Карты. Проверьте подключение и ключ API.
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-sm text-rose-300 p-4 text-center">
+                  Не удалось загрузить карту. Проверьте API-ключ и HTTP Referer.
                 </div>
               )}
-
               <button
                 type="button"
                 onClick={handleLocateMe}
-                aria-label="Моя геопозиция"
-                className={`absolute top-3 right-3 z-[500] p-2.5 rounded-full border shadow-lg ${isDark ? 'bg-slate-900/90 border-slate-700 text-white' : 'bg-white/95 border-slate-200 text-slate-700'}`}
+                disabled={locating}
+                className={`absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-xl px-3 py-2 text-[12px] font-bold shadow-lg ${
+                  isDark ? 'bg-slate-900/90 text-cyan-300' : 'bg-white/95 text-cyan-700'
+                }`}
               >
-                {locating ? <Loader2 className="w-4 h-4 animate-spin" /> : <LocateFixed className="w-4 h-4" />}
+                {locating ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <LocateFixed className="h-3.5 w-3.5" />
+                )}
+                Где я
               </button>
-
-              {!point && (
-                <div className={`absolute left-3 right-3 top-3 z-[500] rounded-xl px-3 py-2 text-[11px] font-semibold text-center backdrop-blur-md ${isDark ? 'bg-slate-900/85 text-slate-300' : 'bg-white/90 text-slate-600'}`}>
-                  Нажмите на карту, чтобы выбрать точку
-                </div>
-              )}
             </div>
 
-            <div className={`shrink-0 p-3 space-y-2.5 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
-              <div className={`rounded-xl px-3 py-2.5 min-h-[2.75rem] flex items-center gap-2 text-sm ${isDark ? 'bg-slate-950 text-slate-200' : 'bg-slate-50 text-slate-700'}`}>
-                {resolving ? (
-                  <><Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /><span className="text-xs text-slate-500">Определяем адрес…</span></>
-                ) : point ? (
-                  <span className="truncate">{label || `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}`}</span>
-                ) : (
-                  <span className="text-xs text-slate-500">Точка ещё не выбрана</span>
-                )}
-              </div>
+            <div
+              className={`shrink-0 border-t px-4 py-3 space-y-2 ${
+                isDark ? 'border-slate-800' : 'border-slate-100'
+              }`}
+            >
+              <p className={`text-[12px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Нажмите на карту, чтобы выбрать точку
+              </p>
+              {(point || resolving) && (
+                <p className="text-[13px] font-semibold truncate">
+                  {resolving ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Адрес…
+                    </span>
+                  ) : (
+                    label || `${point!.lat.toFixed(5)}, ${point!.lon.toFixed(5)}`
+                  )}
+                </p>
+              )}
               <button
                 type="button"
-                onClick={handleConfirm}
                 disabled={!point || resolving}
-                className={`w-full rounded-xl py-3 text-sm font-bold flex items-center justify-center gap-2 transition-opacity ${(!point || resolving) ? 'opacity-40 cursor-not-allowed' : ''} ${isDark ? 'bg-amber-500 text-slate-950' : 'bg-slate-900 text-white'}`}
+                onClick={handleConfirm}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-cyan-600 py-3 text-[14px] font-black text-white disabled:opacity-40"
               >
-                <Check className="w-4 h-4" /> Подтвердить точку
+                <Check className="h-4 w-4" />
+                Выбрать
               </button>
             </div>
           </motion.div>
