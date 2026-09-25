@@ -48,6 +48,7 @@ import { consumeMatchingRouteForecast } from '../utils/routeForecastBridge';
 import { geocodeAddress, buildRouteElevation, type RoutePoint } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute } from '../services/weatherForecast';
 import { RouteMap } from './RouteMap';
+import { RangeGauge } from './ui/RangeGauge';
 
 
 interface CollapsibleDetailsProps {
@@ -2123,26 +2124,13 @@ export const HudTab: React.FC<HudTabProps> = ({
             </div>
           </div>
           {destinationResult && livePredictedSoc != null ? (
-            <div className="text-right shrink-0">
-              <span
-                className={`font-mono font-black text-4xl leading-none tabular-nums ${
-                  livePredictedSoc < 10
-                    ? 'text-rose-500'
-                    : livePredictedSoc < 20
-                    ? 'text-amber-500'
-                    : isDark
-                    ? 'text-cyan-400'
-                    : 'text-cyan-600'
-                }`}
-              >
-                {Math.round(livePredictedSoc)}%
-              </span>
-              {isTracking && (
-                <span className={`block text-[11px] font-mono mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                  сейчас {Math.round(liveDynamicSoc)}%
-                </span>
-              )}
-            </div>
+            <RangeGauge
+              percent={livePredictedSoc}
+              size={76}
+              strokeWidth={7}
+              isDark={isDark}
+              subValue={isTracking ? `сейчас ${Math.round(liveDynamicSoc)}%` : undefined}
+            />
           ) : (
             <span className={`text-2xl font-bold tabular-nums ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>—</span>
           )}

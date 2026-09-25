@@ -42,6 +42,7 @@ import { LocationPickerModal } from './LocationPickerModal';
 import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts';
 import { CollapsibleDetails, SecondaryStatRow, ChipRow } from './ui/CollapsibleDetails';
 import { AnimatedNumber } from './ui/AnimatedNumber';
+import { RangeGauge } from './ui/RangeGauge';
 
 // Manual "Планирование" precipitation presets: type × intensity → (mm/h, WMO weather code).
 // Values sit inside the intensity bands calculatePrecipitationImpact() already uses, so each
@@ -1501,12 +1502,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 {/* Compact SOC + charging strip under the map */}
                 <div className={`rounded-2xl border px-4 py-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
                   <div className="flex items-center gap-4">
+                    <RangeGauge percent={arrival} isDark={isDark} caption="на финише" />
                     <div className="min-w-0 flex-1">
-                      <div className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>На финише</div>
-                      <div className={`text-4xl font-black font-mono tracking-tight leading-none ${statusColor}`}>
-                        <AnimatedNumber value={arrival} decimals={0} suffix="%" className={statusColor} />
-                      </div>
-                      <div className={`mt-1 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{statusText}</div>
+                      <div className={`text-[11px] font-semibold ${statusColor}`}>{statusText}</div>
                     </div>
                     <div className={`text-right text-[11px] tabular-nums shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                       <div><span className={`font-mono ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{routeForecast.consumption.toFixed(1)}</span> кВт⋅ч/100</div>
