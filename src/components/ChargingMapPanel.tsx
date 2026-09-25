@@ -25,6 +25,13 @@ import { triggerHaptic } from '../utils/haptics';
 
 type ConnFilter = 'ccs2' | 'gbt' | 'type2';
 
+/** Port group: same connector + same power on a location */
+type PortGroup = {
+  connector: string;
+  powerKw?: number;
+  count: number;
+};
+
 interface MapStation {
   id: string;
   lat: number;
@@ -32,12 +39,15 @@ interface MapStation {
   name: string;
   address: string;
   operator: string;
+  operatorKey: string;
   hasCcs2: boolean;
   hasGbt: boolean;
   hasType2: boolean;
   ccs2PowerKw?: number;
   gbtPowerKw?: number;
   type2PowerKw?: number;
+  /** Detailed ports (may include several powers for one connector type) */
+  portGroups: PortGroup[];
   freeCcs?: number;
   freeGbt?: number;
   freeType2?: number;
@@ -46,6 +56,116 @@ interface MapStation {
   totalType2?: number;
   liveChecked?: boolean;
   _poles?: any[];
+}
+
+const OPERATOR_COLORS: Record<string, string> = {
+  malanka: '#22c55e',
+  zaryadka: '#3b82f6',
+  batteryfly: '#f59e0b',
+  forevo: '#a855f7',
+  evika: '#ef4444',
+  united: '#06b6d4',
+  csms: '#14b8a6',
+  цсмс: '#14b8a6',
+  evon: '#e11d48',
+  orange: '#f97316',
+  skat: '#8b5cf6',
+  prizma: '#0ea5e9',
+  gto: '#64748b',
+  belteh: '#64748b',
+};
+
+function normalizeOperatorKey(op: string): string {
+  const o = op.toLowerCase().replace(/\s+/g, '').replace(/[«»"']/g, '');
+  if (!o) return 'other';
+  if (o.includes('malanka') || o.includes('маланка')) return 'malanka';
+  if (o.includes('zaryad') || o.includes('заряд')) return 'zaryadka';
+  if (o.includes('battery') || o.includes('батар')) return 'batteryfly';
+  if (o.includes('forevo')) return 'forevo';
+  if (o.includes('evika') || o.includes('белтелеком')) return 'evika';
+  if (o.includes('united')) return 'united';
+  if (o.includes('csms') || o.includes('цсмс')) return 'csms';
+  if (o.includes('evon')) return 'evon';
+  if (o.includes('orange')) return 'orange';
+  if (o.includes('skat')) return 'skat';
+  if (o.includes('prizma')) return 'prizma';
+  if (o.includes('gto') || o.includes('белтех')) return 'gto';
+  return o.slice(0, 16);
+}
+
+function operatorColor(op: string): string {
+  const key = normalizeOperatorKey(op);
+  return OPERATOR_COLORS[key] || '#94a3b8';
+}
+
+function connectorLabelFromGun(g: string): string | null {
+  if (isCcsLabel(g)) return 'CCS';
+  if (isGbtLabel(g)) return 'GB/T';
+  if (isType2Label(g) || /type\s*2/i.test(g)) return 'Type2';
+  return null;
+}
+
+function buildPortGroups(poles: any[], group: any): PortGroup[] {
+  const map = new Map<string, PortGroup>();
+  const add = (connector: string, powerKw?: number) => {
+    const key = `${connector}|${powerKw ?? 'x'}`;
+    const cur = map.get(key);
+    if (cur) cur.count += 1;
+    else map.set(key, { connector, powerKw, count: 1 });
+  };
+
+  for (const p of poles) {
+    const pw =
+      parsePowerKw(p?.power_kw) ??
+      parsePowerKw(p?.power) ??
+      parsePowerKw(p?.kw) ??
+      parsePowerKw(p?.dc_power) ??
+      parsePowerKw(p?.ac_power);
+    let anyGun = false;
+    for (const k of ['gun1_type', 'gun2_type', 'gun3_type', 'gun4_type']) {
+      if (!p?.[k]) continue;
+      const label = connectorLabelFromGun(String(p[k]));
+      if (!label) continue;
+      anyGun = true;
+      const power =
+        label === 'Type2'
+          ? parsePowerKw(p?.ac_power) ?? pw ?? parsePowerKw(group?.ac_power)
+          : pw ??
+            parsePowerKw(group?.ccs2_power) ??
+            parsePowerKw(group?.ccs_power) ??
+            parsePowerKw(group?.dc_power);
+      add(label, power);
+    }
+    if (!anyGun && pw) {
+      // pole without gun types — still show power bucket as DC if present
+      add('DC', pw);
+    }
+  }
+
+  // fallback from group-level flags if nothing collected
+  if (!map.size) {
+    const maxDc = [
+      group?.ccs2_power,
+      group?.ccs_power,
+      group?.dc_power,
+      ...poles.flatMap((p: any) => [p?.power_kw, p?.power, p?.kw, p?.dc_power]),
+    ]
+      .map(parsePowerKw)
+      .filter((v): v is number => v !== undefined && v > 0);
+    const dc = maxDc.length ? Math.max(...maxDc) : undefined;
+    const ac = parsePowerKw(group?.ac_power ?? poles[0]?.ac_power);
+    const guns: string[] = [];
+    for (const p of poles) {
+      for (const k of ['gun1_type', 'gun2_type', 'gun3_type', 'gun4_type']) {
+        if (p?.[k]) guns.push(String(p[k]));
+      }
+    }
+    if (guns.some((g) => isCcsLabel(g))) add('CCS', dc);
+    if (guns.some((g) => isGbtLabel(g))) add('GB/T', dc);
+    if (guns.some((g) => isType2Label(g) || /type\s*2/i.test(g))) add('Type2', ac);
+  }
+
+  return Array.from(map.values()).sort((a, b) => (b.powerKw ?? 0) - (a.powerKw ?? 0));
 }
 
 interface ChargingMapPanelProps {
@@ -130,6 +250,9 @@ function groupToMapStation(group: any, index: number): MapStation | null {
 
   const id = String(group?.location_id ?? group?.slug ?? poles[0]?.external_id ?? index);
 
+  const operator = String(group?.operator || poles[0]?.operator || '');
+  const portGroups = buildPortGroups(poles, group);
+
   return {
     id: `evrace:${id}`,
     lat: lat!,
@@ -139,13 +262,15 @@ function groupToMapStation(group: any, index: number): MapStation | null {
       [group?.city, group?.address].filter(Boolean).join(', ') ||
       'Станция',
     address: [group?.city, group?.address].filter(Boolean).join(', ') || '',
-    operator: String(group?.operator || poles[0]?.operator || ''),
+    operator,
+    operatorKey: normalizeOperatorKey(operator),
     hasCcs2,
     hasGbt,
     hasType2,
     ccs2PowerKw: hasCcs2 ? maxDc : undefined,
     gbtPowerKw: hasGbt ? maxDc : undefined,
     type2PowerKw: parsePowerKw(group?.ac_power ?? poles[0]?.ac_power),
+    portGroups,
     _poles: poles,
   };
 }
@@ -268,6 +393,10 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     return init.length ? init : ['ccs2'];
   });
   const [onlyFree, setOnlyFree] = useState(false);
+  /** Empty = all operators */
+  const [operatorFilter, setOperatorFilter] = useState<string[]>([]);
+  /** Max DC day price BYN; null = any */
+  const [maxPrice, setMaxPrice] = useState<number | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [stations, setStations] = useState<MapStation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -344,6 +473,15 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     triggerHaptic('light', settings.hapticFeedback);
   };
 
+  const stationDcDayRate = useCallback(
+    (s: MapStation): number | null => {
+      const t = matchEvraceTariff(s.operator, evraceTariffs);
+      if (!t) return null;
+      return t.dcDay ?? t.acDay ?? null;
+    },
+    [evraceTariffs],
+  );
+
   const matchesFilters = useCallback(
     (s: MapStation) => {
       const typeOk =
@@ -351,6 +489,11 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         (connFilters.includes('gbt') && s.hasGbt) ||
         (connFilters.includes('type2') && s.hasType2);
       if (!typeOk) return false;
+      if (operatorFilter.length && !operatorFilter.includes(s.operatorKey)) return false;
+      if (maxPrice != null) {
+        const rate = stationDcDayRate(s);
+        if (rate == null || rate > maxPrice) return false;
+      }
       if (onlyFree) {
         if (!s.liveChecked) return false;
         const free =
@@ -361,8 +504,19 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       }
       return true;
     },
-    [connFilters, onlyFree],
+    [connFilters, onlyFree, operatorFilter, maxPrice, stationDcDayRate],
   );
+
+  const operatorsInView = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of stations) {
+      if (!s.operatorKey || s.operatorKey === 'other') continue;
+      if (!map.has(s.operatorKey)) map.set(s.operatorKey, s.operator || s.operatorKey);
+    }
+    return Array.from(map.entries())
+      .map(([key, label]) => ({ key, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+  }, [stations]);
 
   const enrichLive = useCallback(async (list: MapStation[]): Promise<MapStation[]> => {
     const byOp: Record<string, string[]> = {};
@@ -660,20 +814,20 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     markersLayerRef.current = [];
 
     for (const s of visible) {
-      let color = '#22d3ee';
+      // Base color = operator; live status adjusts brightness via border in makeDotMarkerEl
+      let color = operatorColor(s.operator);
+      let border = '#0f172a';
       if (s.liveChecked) {
         const free =
           (connFilters.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
           (connFilters.includes('gbt') && (s.freeGbt ?? 0) > 0) ||
           (connFilters.includes('type2') && (s.freeType2 ?? 0) > 0);
-        color = free ? '#34d399' : '#fb7185';
-      } else if (!s.hasCcs2 && !s.hasGbt && s.hasType2) {
-        color = '#a78bfa';
+        border = free ? '#ecfdf5' : '#450a0a';
       }
 
       if (bundle.apiVersion === 3) {
         const { YMapMarker } = bundle.ymaps3;
-        const el = makeDotMarkerEl(color, 14);
+        const el = makeDotMarkerEl(color, 14, border);
         el.title = s.name;
         el.addEventListener('click', (ev) => {
           ev.stopPropagation();
@@ -753,12 +907,25 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   };
 
   const powerLine = (s: MapStation) => {
+    if (s.portGroups?.length) {
+      return s.portGroups
+        .map((g) => {
+          const pw = g.powerKw != null ? `${Math.round(g.powerKw)} кВт` : '? кВт';
+          return g.count > 1 ? `${g.connector} ${pw} ×${g.count}` : `${g.connector} ${pw}`;
+        })
+        .join(' · ');
+    }
     const parts: string[] = [];
     if (s.hasCcs2 && s.ccs2PowerKw) parts.push(`CCS ${Math.round(s.ccs2PowerKw)} кВт`);
     if (s.hasGbt && s.gbtPowerKw) parts.push(`GB/T ${Math.round(s.gbtPowerKw)} кВт`);
     if (s.hasType2 && s.type2PowerKw) parts.push(`Type2 ${Math.round(s.type2PowerKw)} кВт`);
-    if (!parts.length && s.ccs2PowerKw) parts.push(`${Math.round(s.ccs2PowerKw)} кВт`);
     return parts.join(' · ') || 'мощность н/д';
+  };
+
+  const fullTariff = (s: MapStation) => {
+    const t = matchEvraceTariff(s.operator, evraceTariffs);
+    if (!t) return null;
+    return t;
   };
 
   const visibleCount = stations.filter(matchesFilters).length;
@@ -865,8 +1032,93 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           >
             Только свободные
           </button>
+
+          <p className={`mt-3 text-[10px] font-bold uppercase tracking-wide ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+            Оператор
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+            <button
+              type="button"
+              onClick={() => {
+                setOperatorFilter([]);
+                triggerHaptic('light', settings.hapticFeedback);
+              }}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                !operatorFilter.length
+                  ? 'bg-cyan-600 text-white'
+                  : isDark
+                    ? 'bg-slate-800 text-slate-300'
+                    : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              Все
+            </button>
+            {operatorsInView.map((op) => {
+              const active = operatorFilter.includes(op.key);
+              return (
+                <button
+                  key={op.key}
+                  type="button"
+                  onClick={() => {
+                    setOperatorFilter((prev) =>
+                      prev.includes(op.key)
+                        ? prev.filter((k) => k !== op.key)
+                        : [...prev, op.key],
+                    );
+                    triggerHaptic('light', settings.hapticFeedback);
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                    active
+                      ? 'text-white'
+                      : isDark
+                        ? 'bg-slate-800 text-slate-300'
+                        : 'bg-slate-100 text-slate-600'
+                  }`}
+                  style={active ? { backgroundColor: operatorColor(op.key) } : undefined}
+                >
+                  <span
+                    className="h-2 w-2 rounded-full shrink-0"
+                    style={{ backgroundColor: operatorColor(op.key) }}
+                  />
+                  {op.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <p className={`mt-3 text-[10px] font-bold uppercase tracking-wide ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+            Макс. тариф DC день (BYN/кВт⋅ч)
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {[
+              { v: null as number | null, label: 'Любая' },
+              { v: 0.45, label: '≤ 0,45' },
+              { v: 0.55, label: '≤ 0,55' },
+              { v: 0.65, label: '≤ 0,65' },
+              { v: 0.8, label: '≤ 0,80' },
+            ].map((opt) => (
+              <button
+                key={String(opt.v)}
+                type="button"
+                onClick={() => {
+                  setMaxPrice(opt.v);
+                  triggerHaptic('light', settings.hapticFeedback);
+                }}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                  maxPrice === opt.v
+                    ? 'bg-cyan-600 text-white'
+                    : isDark
+                      ? 'bg-slate-800 text-slate-300'
+                      : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
           <p className={`mt-2 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-            По умолчанию — порты профиля авто. Можно изменить вручную.
+            Порты — из профиля авто. Цвет маркера = оператор.
           </p>
         </div>
       )}
@@ -894,7 +1146,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           }`}
           style={{
             bottom: 'calc(4.75rem + env(safe-area-inset-bottom, 0px))',
-            maxHeight: 'min(52dvh, 420px)',
+            maxHeight: 'min(58dvh, 480px)',
             overflowY: 'auto',
           }}
         >
@@ -921,7 +1173,16 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
                 </button>
               </div>
 
-              {/* Free ports — primary info on tap */}
+              {/* Operator */}
+              <div className="mt-2 flex items-center gap-2">
+                <span
+                  className="h-3 w-3 rounded-full shrink-0 ring-2 ring-black/20"
+                  style={{ backgroundColor: operatorColor(selected.operator) }}
+                />
+                <span className="text-[12px] font-bold truncate">{selected.operator || 'Оператор н/д'}</span>
+              </div>
+
+              {/* Free ports */}
               <div className="mt-2">
                 <span className={`block text-[10px] font-bold uppercase tracking-wide mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                   Свободные порты
@@ -945,9 +1206,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
                         }`}
                       >
                         {chip.label}
-                        {chip.live
-                          ? ` ${chip.free ?? 0}/${chip.total ?? '—'}`
-                          : ''}
+                        {chip.live ? ` ${chip.free ?? 0}/${chip.total ?? '—'}` : ''}
                       </span>
                     );
                   })}
@@ -957,34 +1216,73 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
                 </div>
               </div>
 
-              <div className={`mt-2 grid grid-cols-3 gap-2 text-[11px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                <div className={`rounded-xl px-2.5 py-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-                  <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Оператор
-                  </span>
-                  <span className="font-semibold truncate block">{selected.operator || '—'}</span>
-                </div>
-                <div className={`rounded-xl px-2.5 py-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-                  <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Мощность
-                  </span>
-                  <span className="font-semibold">{powerLine(selected)}</span>
-                </div>
-                <div className={`rounded-xl px-2.5 py-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-                  <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Тариф
-                  </span>
-                  <span className="font-semibold">
-                    {tariff?.rate != null
-                      ? `${String(tariff.rate).replace('.', ',')} BYN`
-                      : 'н/д'}
-                  </span>
+              {/* Ports × power */}
+              <div className="mt-2">
+                <span className={`block text-[10px] font-bold uppercase tracking-wide mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Порты и мощность
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {(selected.portGroups?.length
+                    ? selected.portGroups
+                    : []
+                  ).map((g, i) => (
+                    <span
+                      key={`${g.connector}-${g.powerKw}-${i}`}
+                      className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${
+                        isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-50 text-slate-800'
+                      }`}
+                    >
+                      {g.connector}
+                      {g.powerKw != null ? ` ${Math.round(g.powerKw)} кВт` : ''}
+                      {g.count > 1 ? ` ×${g.count}` : ''}
+                    </span>
+                  ))}
+                  {!selected.portGroups?.length && (
+                    <span className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      {powerLine(selected)}
+                    </span>
+                  )}
                 </div>
               </div>
-              {tariff?.period && (
+
+              {/* Day / night tariffs */}
+              {(() => {
+                const ft = fullTariff(selected);
+                const fmt = (n: number | null | undefined) =>
+                  n != null ? `${String(n).replace('.', ',')} BYN` : '—';
+                return (
+                  <div className={`mt-2 grid grid-cols-2 gap-2 text-[11px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                    <div className={`rounded-xl px-2.5 py-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+                      <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        DC день
+                      </span>
+                      <span className="font-semibold">{fmt(ft?.dcDay)}</span>
+                    </div>
+                    <div className={`rounded-xl px-2.5 py-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+                      <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        DC ночь
+                      </span>
+                      <span className="font-semibold">{fmt(ft?.dcNight)}</span>
+                    </div>
+                    {ft?.acDay != null && (
+                      <div className={`rounded-xl px-2.5 py-2 col-span-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
+                        <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                          AC
+                        </span>
+                        <span className="font-semibold">{fmt(ft.acDay)}</span>
+                      </div>
+                    )}
+                    {!ft && (
+                      <p className={`col-span-2 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        Тариф оператора не найден
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+              {fullTariff(selected)?.asOf && (
                 <p className={`mt-1 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                  {tariff.label} · {tariff.period}
-                  {tariff.asOf ? ` · ${tariff.asOf}` : ''}
+                  Тарифы на {fullTariff(selected)!.asOf}
                 </p>
               )}
 
