@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { RoutePoint } from '../services/routeElevation';
-import { loadYandexMaps } from '../utils/yandexMaps';
+import { applyMapTheme, loadYandexMaps } from '../utils/yandexMaps';
 
 export interface RouteMapChargingStop {
   lat: number;
@@ -286,6 +286,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           },
         );
 
+        applyMapTheme(ymaps, map, isDark);
         mapRef.current = map;
         setMapReady(true);
       })

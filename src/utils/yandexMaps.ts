@@ -45,3 +45,32 @@ export function loadYandexMaps(): Promise<any> {
 
   return loadPromise;
 }
+
+/** Dark basemap for app dark/oled themes (Yandex Maps JS API 2.1). */
+export function ensureDarkMapType(ymaps: any) {
+  if (!ymaps?.mapType?.storage || ymaps.mapType.storage.get('vigo#dark')) return;
+  ymaps.layer.storage.add('vigo#darkLayer', () => {
+    return new ymaps.Layer(
+      'https://core-renderer-tiles.maps.yandex.net/tiles?l=map&theme=dark&x=%x&y=%y&z=%z&scale=%scale&lang=ru_RU',
+      { tileTransparent: false },
+    );
+  });
+  ymaps.mapType.storage.add(
+    'vigo#dark',
+    new ymaps.MapType('Тёмная', ['vigo#darkLayer']),
+  );
+}
+
+export function applyMapTheme(ymaps: any, map: any, isDark: boolean) {
+  if (!map || !ymaps) return;
+  try {
+    if (isDark) {
+      ensureDarkMapType(ymaps);
+      map.setType('vigo#dark');
+    } else {
+      map.setType('yandex#map');
+    }
+  } catch {
+    /* keep default tiles */
+  }
+}

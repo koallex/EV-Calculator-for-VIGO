@@ -10,7 +10,7 @@ import {
   LocateFixed,
 } from 'lucide-react';
 import { UserSettings } from '../types';
-import { loadYandexMaps } from '../utils/yandexMaps';
+import { applyMapTheme, loadYandexMaps } from '../utils/yandexMaps';
 import {
   resolveEffectiveConnectors,
   type ConnectorOverride,
@@ -145,44 +145,86 @@ function groupToMapStation(group: any, index: number): MapStation | null {
   };
 }
 
-function tariffForOperator(
+type EvraceTariff = {
+  id: string;
+  name: string;
+  dcDay: number | null;
+  dcNight: number | null;
+  acDay: number | null;
+  asOf?: string | null;
+  floor?: string | null;
+};
+
+function isNightTariffHour(d = new Date()) {
+  const h = d.getHours();
+  return h >= 23 || h < 7;
+}
+
+function matchEvraceTariff(operator: string, tariffs: EvraceTariff[]): EvraceTariff | null {
+  if (!tariffs.length) return null;
+  const o = operator.toLowerCase().replace(/\s+/g, '');
+  const aliases: Record<string, string[]> = {
+    zaryadka: ['zaryadka', 'зарядка', 'zaryad'],
+    malanka: ['malanka', 'маланка', 'csms', 'цсмс'],
+    batteryfly: ['batteryfly', 'battery'],
+    forevo: ['forevo'],
+    evika: ['evika', 'белтелеком'],
+    united: ['united', 'unitedcompany'],
+  };
+  for (const t of tariffs) {
+    const id = t.id.toLowerCase();
+    const name = t.name.toLowerCase().replace(/\s+/g, '');
+    if (o.includes(id) || o.includes(name) || (o && name.includes(o))) return t;
+    if ((aliases[id] || []).some((a) => o.includes(a))) return t;
+  }
+  return null;
+}
+
+function tariffFromEvrace(
   operator: string,
-  settings: UserSettings,
-): { label: string; rate: number; unit: string } {
-  const o = operator.toLowerCase();
-  const cur = settings.currency || 'Br';
-  if (o.includes('malanka')) {
-    return {
-      label: 'Маланка DC',
-      rate: settings.malankaDcTariff ?? settings.fastDayTariff ?? 0.56,
-      unit: cur,
-    };
+  tariffs: EvraceTariff[],
+  preferDc = true,
+): {
+  label: string;
+  rate: number | null;
+  period: string;
+  asOf?: string | null;
+  source: string;
+} {
+  const t = matchEvraceTariff(operator, tariffs);
+  if (!t) {
+    return { label: operator || 'ЭЗС', rate: null, period: '', source: 'нет в EVRace' };
   }
-  if (o.includes('zaryad')) {
-    return {
-      label: 'Зарядка DC',
-      rate: settings.zaryadkaDcTariff ?? settings.zaryadkaTariff ?? 0.56,
-      unit: cur,
-    };
-  }
-  if (o.includes('evika') || o.includes('белтелеком')) {
-    return {
-      label: 'Evika',
-      rate: settings.evikaTariff ?? settings.slowPublicTariff ?? 0.43,
-      unit: cur,
-    };
-  }
-  if (o.includes('battery') || o.includes('forpost') || o.includes('forevo')) {
-    return {
-      label: operator || 'BatteryFly',
-      rate: settings.batteryFlyTariff ?? 0.6,
-      unit: cur,
-    };
+  const night = isNightTariffHour();
+  let rate: number | null = null;
+  let period = '';
+  if (preferDc) {
+    if (night && t.dcNight != null) {
+      rate = t.dcNight;
+      period = 'DC ночь';
+    } else if (t.dcDay != null) {
+      rate = t.dcDay;
+      period = 'DC день';
+    } else if (t.dcNight != null) {
+      rate = t.dcNight;
+      period = 'DC ночь';
+    } else if (t.acDay != null) {
+      rate = t.acDay;
+      period = 'AC';
+    }
+  } else if (t.acDay != null) {
+    rate = t.acDay;
+    period = 'AC';
+  } else if (t.dcDay != null) {
+    rate = t.dcDay;
+    period = 'DC день';
   }
   return {
-    label: operator || 'ЭЗС',
-    rate: settings.fastDayTariff ?? 0.56,
-    unit: cur,
+    label: t.name,
+    rate,
+    period,
+    asOf: t.asOf,
+    source: 'EVRace',
   };
 }
 
@@ -227,6 +269,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<MapStation | null>(null);
   const [liveBusy, setLiveBusy] = useState(false);
+  const [evraceTariffs, setEvraceTariffs] = useState<EvraceTariff[]>([]);
 
   const mapRef = useRef<any>(null);
   const ymapsRef = useRef<any>(null);
@@ -235,6 +278,34 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const fetchTimerRef = useRef<number | null>(null);
   const stationsRef = useRef<MapStation[]>([]);
   stationsRef.current = stations;
+
+  // Typical tariffs from EVRace (not user settings)
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/evrace/tariffs', { headers: { Accept: 'application/json' } })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((data) => {
+        if (cancelled) return;
+        const list = Array.isArray(data?.operators) ? data.operators : [];
+        setEvraceTariffs(
+          list.map((o: any) => ({
+            id: String(o.id || ''),
+            name: String(o.name || o.id || ''),
+            dcDay: o.dcDay ?? null,
+            dcNight: o.dcNight ?? null,
+            acDay: o.acDay ?? null,
+            asOf: o.asOf ?? null,
+            floor: o.floor ?? null,
+          })),
+        );
+      })
+      .catch(() => {
+        /* keep empty — UI shows «нет в EVRace» */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Sync filters when profile changes
   useEffect(() => {
@@ -245,7 +316,13 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     if (next.length) setConnFilters(next);
   }, [profileConnectors.join(',')]);
 
-  const tariff = selected ? tariffForOperator(selected.operator, settings) : null;
+  const tariff = selected
+    ? tariffFromEvrace(
+        selected.operator,
+        evraceTariffs,
+        selected.hasCcs2 || selected.hasGbt,
+      )
+    : null;
 
   const toggleFilter = (f: ConnFilter) => {
     setConnFilters((prev) => {
@@ -440,12 +517,14 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
             center: [53.9, 27.5667],
             zoom: 12,
             controls: ['zoomControl'],
+            type: isDark ? undefined : 'yandex#map',
           },
           {
             suppressMapOpenBlock: false,
             yandexMapDisablePoiInteractivity: true,
           },
         );
+        applyMapTheme(ymaps, map, isDark);
         mapRef.current = map;
         const om = new ymaps.ObjectManager({
           clusterize: true,
@@ -751,15 +830,21 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
                 </div>
                 <div className={`rounded-xl px-2.5 py-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
                   <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Тариф*
+                    Тариф
                   </span>
                   <span className="font-semibold">
-                    {tariff ? `${tariff.rate} ${tariff.unit}/кВт⋅ч` : '—'}
+                    {tariff?.rate != null
+                      ? `${String(tariff.rate).replace('.', ',')} BYN/кВт⋅ч`
+                      : 'н/д'}
                   </span>
                 </div>
               </div>
               <p className={`mt-1.5 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                *из ваших настроек тарифов · {tariff?.label}
+                {tariff
+                  ? `${tariff.label}${tariff.period ? ` · ${tariff.period}` : ''} · ${tariff.source}${
+                      tariff.asOf ? ` · на ${tariff.asOf}` : ''
+                    }`
+                  : 'тариф EVRace'}
                 {!selected.liveChecked ? ' · live-статус недоступен' : ''}
               </p>
             </div>
