@@ -11,12 +11,11 @@ import {
 } from 'lucide-react';
 import { UserSettings } from '../types';
 import {
-  applyMapTheme,
-  bindDarkPanPerformance,
-  createOptimizedMap,
-  createStationObjectManager,
-  loadYandexMaps,
-} from '../utils/yandexMaps';
+  loadLeaflet,
+  cartoDarkTileUrl,
+  cartoLightTileUrl,
+  CARTO_ATTR,
+} from '../utils/leafletMaps';
 import {
   resolveEffectiveConnectors,
   type ConnectorOverride,
@@ -278,8 +277,10 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const [evraceTariffs, setEvraceTariffs] = useState<EvraceTariff[]>([]);
 
   const mapRef = useRef<any>(null);
-  const ymapsRef = useRef<any>(null);
-  const objectManagerRef = useRef<any>(null);
+  const clusterRef = useRef<any>(null);
+  const tileRef = useRef<any>(null);
+  const markersByIdRef = useRef<Map<string, any>>(new Map());
+  const LRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fetchTimerRef = useRef<number | null>(null);
   const stationsRef = useRef<MapStation[]>([]);
@@ -511,7 +512,13 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     fetchTimerRef.current = window.setTimeout(() => {
       try {
         const b = mapRef.current.getBounds();
-        if (b) void fetchStationsInBounds(b);
+        if (!b) return;
+        // Leaflet LatLngBounds → same shape as before [[swLat,swLng],[neLat,neLng]]
+        const bounds = [
+          [b.getSouth(), b.getWest()],
+          [b.getNorth(), b.getEast()],
+        ];
+        void fetchStationsInBounds(bounds);
       } catch {
         /* ignore */
       }
@@ -544,48 +551,69 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   }, [onlyFree, scheduleFetch]);
 
 
-  // Init map
+  // Init Leaflet map
   useEffect(() => {
     let cancelled = false;
-    loadYandexMaps()
-      .then((ymaps) => {
+    let map: any = null;
+    let onMoveEnd: (() => void) | null = null;
+
+    loadLeaflet()
+      .then((L) => {
         if (cancelled || !containerRef.current) return;
-        ymapsRef.current = ymaps;
-        const map = createOptimizedMap(ymaps, containerRef.current, {
+        LRef.current = L;
+
+        map = L.map(containerRef.current, {
           center: [53.9, 27.5667],
           zoom: 12,
           minZoom: 7,
-          maxZoom: 16,
+          maxZoom: 18,
+          zoomControl: true,
+          attributionControl: true,
+          preferCanvas: true,
         });
-        applyMapTheme(ymaps, map, isDark);
-        const unbindDarkPan = isDark ? bindDarkPanPerformance(map) : () => {};
         mapRef.current = map;
-        const om = createStationObjectManager(ymaps);
-        map.geoObjects.add(om);
-        objectManagerRef.current = om;
-        (map as any).__vigoUnbindDarkPan = unbindDarkPan;
 
-        om.objects.events.add('click', (e: any) => {
-          const id = e.get('objectId');
-          const st = stationsRef.current.find((s) => s.id === id);
-          if (st) {
-            setSelected(st);
-            triggerHaptic('light', settings.hapticFeedback);
-            if (!st.liveChecked) refreshLiveRef.current(st);
+        const tileUrl = isDark ? cartoDarkTileUrl() : cartoLightTileUrl();
+        const tile = L.tileLayer(tileUrl, {
+          attribution: CARTO_ATTR,
+          maxZoom: 19,
+          subdomains: 'abcd',
+          updateWhenIdle: true,
+          keepBuffer: 1,
+        });
+        tile.addTo(map);
+        tileRef.current = tile;
+
+        const cluster = L.markerClusterGroup({
+          maxClusterRadius: 56,
+          showCoverageOnHover: false,
+          spiderfyOnMaxZoom: true,
+          disableClusteringAtZoom: 16,
+          animate: false,
+          chunkedLoading: true,
+        });
+        map.addLayer(cluster);
+        clusterRef.current = cluster;
+
+        // Fix grey tiles if container size was 0 at init
+        requestAnimationFrame(() => {
+          try {
+            map.invalidateSize();
+          } catch {
+            /* ignore */
           }
         });
 
-        // Fetch only when user finishes pan/zoom — not on every frame of movement
-        map.events.add('actionend', () => scheduleFetch());
+        onMoveEnd = () => scheduleFetch();
+        map.on('moveend', onMoveEnd);
         scheduleFetch();
 
-        // Try geolocation center
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
             (pos) => {
               if (cancelled || !mapRef.current) return;
-              mapRef.current.setCenter([pos.coords.latitude, pos.coords.longitude], 13, {
-                duration: 300,
+              mapRef.current.setView([pos.coords.latitude, pos.coords.longitude], 13, {
+                animate: false,
               });
               scheduleFetch();
             },
@@ -600,24 +628,32 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       cancelled = true;
       if (fetchTimerRef.current) window.clearTimeout(fetchTimerRef.current);
       try {
-        (mapRef.current as any)?.__vigoUnbindDarkPan?.();
+        if (map && onMoveEnd) map.off('moveend', onMoveEnd);
+        map?.remove();
       } catch {
         /* ignore */
       }
-      mapRef.current?.destroy?.();
       mapRef.current = null;
-      objectManagerRef.current = null;
+      clusterRef.current = null;
+      tileRef.current = null;
+      markersByIdRef.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Update markers when stations / filters change
   useEffect(() => {
-    const om = objectManagerRef.current;
-    if (!om) return;
+    const L = LRef.current;
+    const cluster = clusterRef.current;
+    if (!L || !cluster) return;
+
     const visible = stations.filter(matchesFilters);
-    const features = visible.map((s) => {
-      let color = '#22d3ee'; // cyan — DC present, live unknown
+    cluster.clearLayers();
+    markersByIdRef.current.clear();
+
+    const markers: any[] = [];
+    for (const s of visible) {
+      let color = '#22d3ee';
       if (s.liveChecked) {
         const free =
           (connFilters.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
@@ -627,32 +663,56 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       } else if (!s.hasCcs2 && !s.hasGbt && s.hasType2) {
         color = '#a78bfa';
       }
-      return {
-        type: 'Feature',
-        id: s.id,
-        geometry: { type: 'Point', coordinates: [s.lat, s.lon] },
-        properties: {
-          hintContent: s.name,
-          // Larger hit target via circleDot (more visible than tiny dots)
-        },
-        options: {
-          preset: 'islands#circleDotIcon',
-          iconColor: color,
-          hasBalloon: false,
-        },
-      };
-    });
-    om.removeAll();
-    om.add({ type: 'FeatureCollection', features });
-  }, [stations, matchesFilters, connFilters]);
+
+      const m = L.circleMarker([s.lat, s.lon], {
+        radius: 9,
+        color: '#0f172a',
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 0.95,
+        opacity: 1,
+      });
+      m.bindTooltip(s.name, { direction: 'top', opacity: 0.9 });
+      m.on('click', () => {
+        setSelected(s);
+        triggerHaptic('light', settings.hapticFeedback);
+        if (!s.liveChecked) refreshLiveRef.current(s);
+      });
+      markersByIdRef.current.set(s.id, m);
+      markers.push(m);
+    }
+    if (markers.length) cluster.addLayers(markers);
+  }, [stations, matchesFilters, connFilters, settings.hapticFeedback]);
+
+  // Swap tile layer when theme changes
+  useEffect(() => {
+    const L = LRef.current;
+    const map = mapRef.current;
+    if (!L || !map) return;
+    const nextUrl = isDark ? cartoDarkTileUrl() : cartoLightTileUrl();
+    try {
+      if (tileRef.current) map.removeLayer(tileRef.current);
+      const tile = L.tileLayer(nextUrl, {
+        attribution: CARTO_ATTR,
+        maxZoom: 19,
+        subdomains: 'abcd',
+        updateWhenIdle: true,
+        keepBuffer: 1,
+      });
+      tile.addTo(map);
+      tileRef.current = tile;
+    } catch {
+      /* ignore */
+    }
+  }, [isDark]);
 
   const goToMe = () => {
     if (!navigator.geolocation || !mapRef.current) return;
     triggerHaptic('light', settings.hapticFeedback);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        mapRef.current?.setCenter([pos.coords.latitude, pos.coords.longitude], 14, {
-          duration: 400,
+        mapRef.current?.setView([pos.coords.latitude, pos.coords.longitude], 14, {
+          animate: true,
         });
         scheduleFetch();
       },
@@ -707,7 +767,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
 
   return (
     <div className="relative h-[calc(100dvh-8.5rem)] min-h-[420px] w-full overflow-hidden rounded-2xl border border-slate-800/60">
-      <div ref={containerRef} className="absolute inset-0 bg-slate-900" />
+      <div ref={containerRef} className="vigo-leaflet-map absolute inset-0 bg-slate-900" />
 
       {/* Top controls */}
       <div className="absolute left-2 right-2 top-2 z-20 flex items-start gap-2 pointer-events-none">
