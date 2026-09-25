@@ -941,16 +941,19 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
                 onClick={() => {
                   triggerHaptic('medium', settings.hapticFeedback);
                   const { lat, lon } = selected;
-                  const appUrl = `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lon}`;
-                  const webUrl = `https://yandex.ru/maps/?rtext=~${lat},${lon}&rtt=auto`;
-                  // Prefer Yandex Navigator app; if it does not open, fall back to Maps in browser.
-                  const start = Date.now();
-                  window.location.href = appUrl;
-                  window.setTimeout(() => {
-                    if (Date.now() - start < 1500 && !document.hidden) {
-                      window.open(webUrl, '_blank', 'noopener,noreferrer');
-                    }
-                  }, 700);
+                  // One target only — timed web fallback opened Maps + Navigator together.
+                  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(
+                    navigator.userAgent || '',
+                  );
+                  if (isMobile) {
+                    window.location.href = `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lon}`;
+                  } else {
+                    window.open(
+                      `https://yandex.ru/maps/?rtext=~${lat},${lon}&rtt=auto`,
+                      '_blank',
+                      'noopener,noreferrer',
+                    );
+                  }
                 }}
                 className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-500 py-2.5 text-[13px] font-black text-slate-950 active:scale-[0.98]"
               >
