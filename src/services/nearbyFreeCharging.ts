@@ -43,7 +43,16 @@ const isGbtLabel = (label: unknown) => {
   const s = String(label ?? '')
     .toLowerCase()
     .replace(/[\s_-]+/g, '');
+  // Do not treat "GBT AC" as DC GBT for free-DC search — still match label for type filter.
   return s.includes('gbt') || s.includes('gb/t') || s === 'guobiao';
+};
+
+/** Live connector is free for plugging in. */
+const isConnectorAvailable = (status: unknown) => {
+  const s = String(status ?? '')
+    .toLowerCase()
+    .trim();
+  return s === 'available' || s === 'free' || s === 'availableidle' || s === 'idle';
 };
 
 /** Live connector matches what the vehicle needs (DC preferred). */
@@ -51,6 +60,17 @@ const connectorMatchesVehicle = (label: unknown, vehicleConnectors: VehicleConne
   if (vehicleConnectors.includes('gbt') && isGbtLabel(label)) return true;
   if (vehicleConnectors.includes('ccs2') && isCcsLabel(label)) return true;
   return false;
+};
+
+/** Infer which DC types this pole has from registry gun fields (not whole station). */
+const poleRegistryConnectors = (pole: any): { hasCcs: boolean; hasGbt: boolean } => {
+  const guns = ['gun1_type', 'gun2_type', 'gun3_type', 'gun4_type']
+    .map((k) => pole?.[k])
+    .filter(Boolean);
+  return {
+    hasCcs: guns.some((g) => isCcsLabel(g)),
+    hasGbt: guns.some((g) => isGbtLabel(g)),
+  };
 };
 
 function operatorForLive(station: any): LiveOperator | null {
@@ -263,39 +283,86 @@ export async function findNearbyFreeCcsChargers(
     }),
   );
 
-  // Aggregate free matching DC connectors per station location
+  // Registry pole metadata by external_id (gun types for this pole only).
+  const registryPoleByExt = new Map<string, any>();
+  for (const s of stations) {
+    for (const pole of s._poles || []) {
+      const ext = String(pole.external_id || '').trim();
+      if (ext) registryPoleByExt.set(ext, pole);
+    }
+  }
+
+  // Aggregate free matching DC connectors per station location.
+  // Critical: free status must be attributed to the *connector type the car needs*,
+  // not to "any free gun on a multi-standard pole / multi-pole site".
+  // Bug that this fixes: pole with only GBT free was counted as "CCS свободно"
+  // because the station (another pole) has CCS and livePole.status was available.
   const byStation = new Map<string, FreeChargerResult>();
   for (const [ext, livePole] of liveByExt) {
     const station = stationByExt.get(ext);
     if (!station) continue;
     const connectors = Array.isArray(livePole.connectors) ? livePole.connectors : [];
-    const matched = connectors.filter((c: any) => connectorMatchesVehicle(c.label, vehicleConnectors));
-    const stationHasWantedDc =
-      (vehicleConnectors.includes('ccs2') && station.hasCcs2) ||
-      (vehicleConnectors.includes('gbt') && station.hasGbt);
-    // If no connector labels, fall back to pole-level status when station has the wanted DC type
-    const freeCount = matched.length
-      ? matched.filter((c: any) => c.status === 'available').length
-      : livePole.status === 'available' && stationHasWantedDc
-        ? 1
-        : 0;
-    const totalCount = matched.length || (stationHasWantedDc ? 1 : 0);
+    const matched = connectors.filter((c: any) =>
+      connectorMatchesVehicle(c.label, vehicleConnectors),
+    );
+    const freeMatched = matched.filter((c: any) => isConnectorAvailable(c.status));
+
+    let freeCount = 0;
+    let totalCount = 0;
+    let reportConnectors: { label: string; status: string }[] = [];
+
+    if (connectors.length > 0) {
+      // Authoritative: per-connector live status. No pole-level fallback.
+      freeCount = freeMatched.length;
+      totalCount = matched.length;
+      reportConnectors = matched.map((c: any) => ({
+        label: String(c.label ?? ''),
+        status: String(c.status ?? ''),
+      }));
+    } else {
+      // No connector breakdown — only trust pole status if *this pole* has the
+      // wanted DC type in the registry (not merely the station as a whole).
+      const reg = poleRegistryConnectors(registryPoleByExt.get(ext));
+      const poleHasWanted =
+        (vehicleConnectors.includes('ccs2') && reg.hasCcs) ||
+        (vehicleConnectors.includes('gbt') && reg.hasGbt);
+      if (poleHasWanted && isConnectorAvailable(livePole.status)) {
+        freeCount = 1;
+        totalCount = 1;
+        reportConnectors = [
+          {
+            label: reg.hasCcs && vehicleConnectors.includes('ccs2') ? 'CCS' : 'GB/T',
+            status: String(livePole.status ?? 'available'),
+          },
+        ];
+      }
+    }
+
     if (freeCount < 1) continue;
 
-    const matchedConnector: VehicleConnector | undefined = vehicleConnectors.includes('gbt') &&
-      (station.hasGbt || matched.some((c: any) => isGbtLabel(c.label)))
-      ? 'gbt'
-      : vehicleConnectors.includes('ccs2')
+    // Label UI by what is actually free among matched connectors.
+    const matchedConnector: VehicleConnector | undefined = freeMatched.some((c: any) =>
+      isGbtLabel(c.label),
+    ) && vehicleConnectors.includes('gbt')
+      ? freeMatched.some((c: any) => isCcsLabel(c.label)) && vehicleConnectors.includes('ccs2')
+        ? 'ccs2' // prefer CCS label if both free and car has CCS
+        : 'gbt'
+      : freeMatched.some((c: any) => isCcsLabel(c.label)) || vehicleConnectors.includes('ccs2')
         ? 'ccs2'
-        : vehicleConnectors[0];
+        : vehicleConnectors.includes('gbt')
+          ? 'gbt'
+          : vehicleConnectors[0];
+
+    // If only GBT is free and the car is CCS-only, freeMatched is empty and we
+    // already continued — so matchedConnector here always reflects a usable free port.
 
     const existing = byStation.get(station.id);
     if (existing) {
       existing.freeCcs += freeCount;
       existing.totalCcs += totalCount;
-      existing.connectors.push(
-        ...matched.map((c: any) => ({ label: String(c.label), status: String(c.status) })),
-      );
+      existing.connectors.push(...reportConnectors);
+      // Prefer showing CCS in UI if any free CCS was seen on this site.
+      if (matchedConnector === 'ccs2') existing.matchedConnector = 'ccs2';
     } else {
       byStation.set(station.id, {
         station,
@@ -305,10 +372,7 @@ export async function findNearbyFreeCcsChargers(
         matchedConnector,
         operator: station.operator || '',
         updatedAt,
-        connectors: matched.map((c: any) => ({
-          label: String(c.label),
-          status: String(c.status),
-        })),
+        connectors: reportConnectors,
       });
     }
   }
