@@ -278,6 +278,9 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const fetchTimerRef = useRef<number | null>(null);
   const stationsRef = useRef<MapStation[]>([]);
   stationsRef.current = stations;
+  const onlyFreeRef = useRef(onlyFree);
+  onlyFreeRef.current = onlyFree;
+  const refreshLiveRef = useRef<(s: MapStation) => void>(() => {});
 
   // Typical tariffs from EVRace (not user settings)
   useEffect(() => {
@@ -471,17 +474,21 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           const s = groupToMapStation(g, i);
           if (s) list.push(s);
         });
-        // Cap markers for performance
-        if (list.length > 200) {
-          list = list.slice(0, 200);
-        }
-        setLiveBusy(true);
-        try {
-          list = await enrichLive(list);
-        } finally {
-          setLiveBusy(false);
+        // Cap markers — fewer objects = smoother pan
+        if (list.length > 120) list = list.slice(0, 120);
+
+        // Live occupancy is expensive: only when "only free" filter is on.
+        // Single-station live runs on marker click.
+        if (onlyFreeRef.current) {
+          setLiveBusy(true);
+          try {
+            list = await enrichLive(list);
+          } finally {
+            setLiveBusy(false);
+          }
         }
         setStations(list);
+        lastFetchAtRef.current = Date.now();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -494,6 +501,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const scheduleFetch = useCallback(() => {
     if (!mapRef.current) return;
     if (fetchTimerRef.current) window.clearTimeout(fetchTimerRef.current);
+    // Debounce after pan/zoom ends — avoids stacking requests mid-drag
     fetchTimerRef.current = window.setTimeout(() => {
       try {
         const b = mapRef.current.getBounds();
@@ -501,8 +509,34 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       } catch {
         /* ignore */
       }
-    }, 450);
+    }, 700);
   }, [fetchStationsInBounds]);
+
+  /** Live status for one station (on card open). */
+  const refreshStationLive = useCallback(
+    async (station: MapStation) => {
+      setLiveBusy(true);
+      try {
+        const [enriched] = await enrichLive([station]);
+        if (!enriched) return;
+        setStations((prev) => prev.map((s) => (s.id === enriched.id ? { ...s, ...enriched } : s)));
+        setSelected((cur) => (cur && cur.id === enriched.id ? { ...cur, ...enriched } : cur));
+      } finally {
+        setLiveBusy(false);
+      }
+    },
+    [enrichLive],
+  );
+  refreshLiveRef.current = (s: MapStation) => {
+    void refreshStationLive(s);
+  };
+
+  // Re-load with live data when "only free" is enabled
+  useEffect(() => {
+    if (!onlyFree || !mapRef.current) return;
+    scheduleFetch();
+  }, [onlyFree, scheduleFetch]);
+
 
   // Init map
   useEffect(() => {
@@ -528,14 +562,17 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         mapRef.current = map;
         const om = new ymaps.ObjectManager({
           clusterize: true,
-          gridSize: 64,
+          gridSize: 72,
           clusterDisableClickZoom: false,
+          geoObjectOpenBalloonOnClick: false,
         });
         om.objects.options.set({
-          preset: 'islands#blueCircleDotIcon',
+          preset: 'islands#circleDotIcon',
+          iconColor: '#22d3ee',
         });
         om.clusters.options.set({
-          preset: 'islands#invertedBlueClusterIcons',
+          preset: 'islands#invertedCyanClusterIcons',
+          hasBalloon: false,
         });
         map.geoObjects.add(om);
         objectManagerRef.current = om;
@@ -546,10 +583,12 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           if (st) {
             setSelected(st);
             triggerHaptic('light', settings.hapticFeedback);
+            if (!st.liveChecked) refreshLiveRef.current(st);
           }
         });
 
-        map.events.add('boundschange', () => scheduleFetch());
+        // Fetch only when user finishes pan/zoom — not on every frame of movement
+        map.events.add('actionend', () => scheduleFetch());
         scheduleFetch();
 
         // Try geolocation center
@@ -585,15 +624,15 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     if (!om) return;
     const visible = stations.filter(matchesFilters);
     const features = visible.map((s) => {
-      let color = '#64748b'; // unknown
+      let color = '#22d3ee'; // cyan — DC present, live unknown
       if (s.liveChecked) {
         const free =
           (connFilters.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
           (connFilters.includes('gbt') && (s.freeGbt ?? 0) > 0) ||
           (connFilters.includes('type2') && (s.freeType2 ?? 0) > 0);
-        color = free ? '#10b981' : '#f43f5e';
-      } else if (s.hasCcs2 || s.hasGbt) {
-        color = '#06b6d4';
+        color = free ? '#34d399' : '#fb7185';
+      } else if (!s.hasCcs2 && !s.hasGbt && s.hasType2) {
+        color = '#a78bfa';
       }
       return {
         type: 'Feature',
@@ -601,10 +640,10 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         geometry: { type: 'Point', coordinates: [s.lat, s.lon] },
         properties: {
           hintContent: s.name,
-          balloonContent: s.name,
+          // Larger hit target via circleDot (more visible than tiny dots)
         },
         options: {
-          preset: 'islands#circleIcon',
+          preset: 'islands#circleDotIcon',
           iconColor: color,
         },
       };
@@ -628,21 +667,37 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     );
   };
 
-  const freeLine = (s: MapStation) => {
-    const parts: string[] = [];
+  type PortChip = { key: string; label: string; free?: number; total?: number; live: boolean };
+  const portChips = (s: MapStation): PortChip[] => {
+    const chips: PortChip[] = [];
     if (s.hasCcs2 || (s.totalCcs ?? 0) > 0) {
-      if (s.liveChecked) parts.push(`CCS ${s.freeCcs ?? 0}/${s.totalCcs ?? '—'}`);
-      else parts.push('CCS');
+      chips.push({
+        key: 'ccs',
+        label: 'CCS',
+        free: s.freeCcs,
+        total: s.totalCcs,
+        live: !!s.liveChecked,
+      });
     }
     if (s.hasGbt || (s.totalGbt ?? 0) > 0) {
-      if (s.liveChecked) parts.push(`GB/T ${s.freeGbt ?? 0}/${s.totalGbt ?? '—'}`);
-      else parts.push('GB/T');
+      chips.push({
+        key: 'gbt',
+        label: 'GB/T',
+        free: s.freeGbt,
+        total: s.totalGbt,
+        live: !!s.liveChecked,
+      });
     }
     if (s.hasType2 || (s.totalType2 ?? 0) > 0) {
-      if (s.liveChecked) parts.push(`Type2 ${s.freeType2 ?? 0}/${s.totalType2 ?? '—'}`);
-      else parts.push('Type2');
+      chips.push({
+        key: 't2',
+        label: 'Type2',
+        free: s.freeType2,
+        total: s.totalType2,
+        live: !!s.liveChecked,
+      });
     }
-    return parts.join(' · ') || '—';
+    return chips;
   };
 
   const powerLine = (s: MapStation) => {
@@ -809,18 +864,48 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
                 </button>
               </div>
 
-              <div className={`mt-2 grid grid-cols-2 gap-2 text-[11px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+              {/* Free ports — primary info on tap */}
+              <div className="mt-2">
+                <span className={`block text-[10px] font-bold uppercase tracking-wide mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  Свободные порты
+                  {liveBusy && !selected.liveChecked ? ' · обновление…' : ''}
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {portChips(selected).map((chip) => {
+                    const hasFree = chip.live && (chip.free ?? 0) > 0;
+                    const allBusy = chip.live && (chip.free ?? 0) === 0 && (chip.total ?? 0) > 0;
+                    return (
+                      <span
+                        key={chip.key}
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                          hasFree
+                            ? 'bg-emerald-600 text-white'
+                            : allBusy
+                              ? 'bg-rose-600/90 text-white'
+                              : isDark
+                                ? 'bg-slate-800 text-slate-200'
+                                : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {chip.label}
+                        {chip.live
+                          ? ` ${chip.free ?? 0}/${chip.total ?? '—'}`
+                          : ''}
+                      </span>
+                    );
+                  })}
+                  {!portChips(selected).length && (
+                    <span className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>—</span>
+                  )}
+                </div>
+              </div>
+
+              <div className={`mt-2 grid grid-cols-3 gap-2 text-[11px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                 <div className={`rounded-xl px-2.5 py-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
                   <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
                     Оператор
                   </span>
-                  <span className="font-semibold">{selected.operator || '—'}</span>
-                </div>
-                <div className={`rounded-xl px-2.5 py-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-                  <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Слоты
-                  </span>
-                  <span className="font-semibold">{freeLine(selected)}</span>
+                  <span className="font-semibold truncate block">{selected.operator || '—'}</span>
                 </div>
                 <div className={`rounded-xl px-2.5 py-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
                   <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -834,19 +919,17 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
                   </span>
                   <span className="font-semibold">
                     {tariff?.rate != null
-                      ? `${String(tariff.rate).replace('.', ',')} BYN/кВт⋅ч`
+                      ? `${String(tariff.rate).replace('.', ',')} BYN`
                       : 'н/д'}
                   </span>
                 </div>
               </div>
-              <p className={`mt-1.5 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                {tariff
-                  ? `${tariff.label}${tariff.period ? ` · ${tariff.period}` : ''} · ${tariff.source}${
-                      tariff.asOf ? ` · на ${tariff.asOf}` : ''
-                    }`
-                  : 'тариф EVRace'}
-                {!selected.liveChecked ? ' · live-статус недоступен' : ''}
-              </p>
+              {tariff?.period && (
+                <p className={`mt-1 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                  {tariff.label} · {tariff.period}
+                  {tariff.asOf ? ` · ${tariff.asOf}` : ''}
+                </p>
+              )}
             </div>
           </div>
         </div>

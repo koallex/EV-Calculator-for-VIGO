@@ -204,3 +204,21 @@ input[type=range]::-moz-range-thumb {
 .route-map-shell {
   border-radius: 0;
 }
+
+/* Dark theme for Yandex Maps 2.1 — invert basemap (custom dark tiles often blank).
+   Controls are inverted twice so they stay readable. */
+.vigo-ymaps-dark .ymaps-2-1-79-ground-pane,
+.vigo-ymaps-dark .ymaps-2-1-79-areas-pane,
+.vigo-ymaps-dark [class*="ymaps-"][class*="-ground-pane"],
+.vigo-ymaps-dark [class*="ymaps-"][class*="-areas-pane"] {
+  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.92);
+}
+.vigo-ymaps-dark .ymaps-2-1-79-controls-pane,
+.vigo-ymaps-dark [class*="ymaps-"][class*="-controls-pane"] {
+  filter: invert(1) hue-rotate(180deg);
+}
+.vigo-ymaps-dark .ymaps-2-1-79-copyrights-pane,
+.vigo-ymaps-dark [class*="ymaps-"][class*="-copyrights-pane"] {
+  filter: invert(1) hue-rotate(180deg);
+  opacity: 0.85;
+}
