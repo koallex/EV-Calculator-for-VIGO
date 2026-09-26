@@ -23,17 +23,40 @@ export interface VehicleVariant {
   default?: boolean;
 }
 
+export type BodyType = 'hatch' | 'crossover' | 'sedan' | 'suv';
+
+/**
+ * Relative aerodynamic scale by body shape (1.0 = Vigo crossover baseline).
+ * Used for the custom profile and as a planning hint for similar shapes.
+ * Hatch is more efficient, SUV more boxy → higher high-speed drag share.
+ */
+export const BODY_TYPE_AERO_SCALE: Record<BodyType, number> = {
+  hatch: 0.92,
+  sedan: 0.96,
+  crossover: 1.0,
+  suv: 1.08,
+};
+
+export const BODY_TYPE_LABELS: Record<BodyType, string> = {
+  hatch: 'Хэтчбек',
+  sedan: 'Седан',
+  crossover: 'Кроссовер',
+  suv: 'SUV / Внедорожник',
+};
+
 export interface VehicleProfile {
   id: string;
   brand: string;
   name: string;
   /** Short label for selects, e.g. "Dongfeng Vigo". */
   displayName: string;
-  body: 'hatch' | 'crossover' | 'sedan' | 'suv';
+  body: BodyType;
   /** Ports on the car — filter stations by CCS2 / Type2 / GB/T. */
   connectors: Array<'ccs2' | 'type2' | 'gbt'>;
   variants: VehicleVariant[];
   notes?: string;
+  /** User-defined profile — mass, body, battery, heat pump set manually in Settings. */
+  isCustom?: boolean;
 }
 
 export const VEHICLE_PROFILES: VehicleProfile[] = [
@@ -287,6 +310,31 @@ export const VEHICLE_PROFILES: VehicleProfile[] = [
       },
     ],
   },
+  {
+    id: 'custom',
+    brand: 'Свой',
+    name: 'профиль',
+    displayName: 'Свой автомобиль',
+    body: 'crossover',
+    connectors: ['ccs2', 'type2'],
+    isCustom: true,
+    notes:
+      'Задайте массу, тип кузова (аэродинамика), ёмкость батареи и наличие теплового насоса вручную. Масштаб расхода подстраивается под форму кузова.',
+    variants: [
+      {
+        id: 'custom',
+        label: 'Пользовательский',
+        batteryCapacityKwh: 50,
+        curbWeightKg: 1600,
+        consumptionScale: 1.0,
+        hasHeatPump: false,
+        acMaxKw: 7,
+        dcMaxKw: 100,
+        chemistry: 'lfp',
+        default: true,
+      },
+    ],
+  },
 ];
 
 export const DEFAULT_VEHICLE_PROFILE_ID = 'dongfeng-vigo';
@@ -356,17 +404,68 @@ export function applyVehicleVariantToSettings<T extends {
   hasHeatPump?: boolean;
   acMaxKw?: number;
   dcMaxKw?: number;
+  vehicleBodyType?: BodyType;
 }>(settings: T, profileId: string, variantId: string): T {
+  const profile = getVehicleProfile(profileId);
   const variant = getVehicleVariant(profileId, variantId);
+  // Keep user's manual custom numbers when switching to the custom slot;
+  // only seed defaults the first time (missing fields).
+  if (profile.isCustom) {
+    const body = (settings.vehicleBodyType as BodyType) || profile.body;
+    const scale = BODY_TYPE_AERO_SCALE[body] ?? 1;
+    return {
+      ...settings,
+      vehicleProfileId: profileId,
+      vehicleVariantId: variant.id,
+      vehicleBodyType: body,
+      batteryCapacityKwh: settings.batteryCapacityKwh || variant.batteryCapacityKwh,
+      curbWeightKg: settings.curbWeightKg || variant.curbWeightKg,
+      consumptionScale: scale,
+      hasHeatPump: settings.hasHeatPump ?? variant.hasHeatPump,
+      acMaxKw: settings.acMaxKw ?? variant.acMaxKw,
+      dcMaxKw: settings.dcMaxKw ?? variant.dcMaxKw,
+    };
+  }
   return {
     ...settings,
     vehicleProfileId: profileId,
     vehicleVariantId: variant.id,
+    vehicleBodyType: profile.body,
     batteryCapacityKwh: variant.batteryCapacityKwh,
     curbWeightKg: variant.curbWeightKg,
     consumptionScale: variant.consumptionScale,
     hasHeatPump: variant.hasHeatPump,
     acMaxKw: variant.acMaxKw,
     dcMaxKw: variant.dcMaxKw,
+  };
+}
+
+/** Update custom-profile fields and sync consumptionScale from body type. */
+export function applyCustomVehicleFields<T extends {
+  vehicleProfileId?: string;
+  curbWeightKg?: number;
+  batteryCapacityKwh: number;
+  hasHeatPump?: boolean;
+  consumptionScale?: number;
+  vehicleBodyType?: BodyType;
+}>(
+  settings: T,
+  fields: {
+    curbWeightKg?: number;
+    batteryCapacityKwh?: number;
+    hasHeatPump?: boolean;
+    vehicleBodyType?: BodyType;
+  },
+): T {
+  const body = fields.vehicleBodyType ?? settings.vehicleBodyType ?? 'crossover';
+  return {
+    ...settings,
+    vehicleProfileId: 'custom',
+    vehicleVariantId: 'custom',
+    vehicleBodyType: body,
+    curbWeightKg: fields.curbWeightKg ?? settings.curbWeightKg,
+    batteryCapacityKwh: fields.batteryCapacityKwh ?? settings.batteryCapacityKwh,
+    hasHeatPump: fields.hasHeatPump ?? settings.hasHeatPump,
+    consumptionScale: BODY_TYPE_AERO_SCALE[body] ?? 1,
   };
 }
