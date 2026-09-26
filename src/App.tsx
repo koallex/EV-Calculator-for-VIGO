@@ -26,6 +26,7 @@ import { AddTripModal } from './components/AddTripModal';
 import { LoginScreen, AuthUser } from './components/LoginScreen';
 import { AdminPanel } from './components/AdminPanel';
 import { AboutProject } from './components/AboutProject';
+import { useEvraceTariffs, deriveOperatorSettingsFromEvrace } from './hooks/useEvraceTariffs';
 
 export default function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
@@ -90,6 +91,30 @@ export default function App() {
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
+
+  // For Belarus, public ЭЗС tariffs (Malanka, Evika, BatteryFly, Zaryadka) are no longer
+  // manually edited in Settings — they're taken automatically from the EVRace tariffs feed
+  // and kept in sync here, in one place, so every screen that reads settings.*Tariff (Charging
+  // tab, Calculator, Add Trip) always uses the latest known price. Home charging tariffs are
+  // untouched — those stay user-editable in every region.
+  const { tariffs: evraceTariffs } = useEvraceTariffs();
+  useEffect(() => {
+    if (settings.regionPreset !== 'belarus') return;
+    if (!evraceTariffs.length) return;
+    const derived = deriveOperatorSettingsFromEvrace(evraceTariffs);
+    setSettings((prev) => {
+      if (prev.regionPreset !== 'belarus') return prev;
+      let changed = false;
+      const next: UserSettings = { ...prev };
+      (Object.keys(derived) as Array<keyof UserSettings>).forEach((key) => {
+        if (prev[key] !== derived[key]) {
+          (next as any)[key] = derived[key];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [evraceTariffs, settings.regionPreset]);
 
   useEffect(() => {
     saveSessions(sessions);
