@@ -334,6 +334,36 @@ export function saveSettings(settings: UserSettings): void {
   }
 }
 
+const EVRACE_TARIFFS_CACHE_KEY = 'vigo_evrace_tariffs_cache_v1';
+
+/**
+ * Last-known-good EVRace tariffs snapshot, cached client-side so the charging map and
+ * settings show prices instantly on load and survive a temporary evrace.by/API outage
+ * without blanking out. Overwritten only by a successful fetch (see useEvraceTariffs).
+ */
+export function loadCachedEvraceTariffs(): { operators: any[]; updatedAt: number } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(EVRACE_TARIFFS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.operators)) return null;
+    return parsed;
+  } catch (err) {
+    console.error('Failed to load cached EVRace tariffs:', err);
+    return null;
+  }
+}
+
+export function saveCachedEvraceTariffs(data: { operators: any[]; updatedAt: number }): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(EVRACE_TARIFFS_CACHE_KEY, JSON.stringify(data));
+  } catch (err) {
+    console.error('Failed to cache EVRace tariffs:', err);
+  }
+}
+
 export function loadSessions(): TripSession[] {
   if (typeof window === 'undefined') return INITIAL_SESSIONS;
   try {
