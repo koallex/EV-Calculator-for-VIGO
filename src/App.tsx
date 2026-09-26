@@ -270,34 +270,28 @@ export default function App() {
           />
         </div>
 
+        {/* Calculator kept mounted (hidden) — remount + blur caused black screen in Android WebView APK */}
+        <div className={activeTab === 'calculator' ? 'block' : 'hidden'}>
+          <CalculatorTab
+            settings={settings}
+            sessions={sessions}
+            onSaveToHistory={handleSaveTrip}
+            onOpenAddModalWithData={openAddModalWithData}
+            onSendToHud={(plan) => {
+              setHudPlan(plan);
+              setActiveTab('hud');
+            }}
+          />
+        </div>
+
         <AnimatePresence mode="wait">
-          {activeTab === 'calculator' && (
-            <motion.div
-              key="calculator"
-              initial={{ opacity: 0, y: 10, filter: 'blur(2px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: -8, filter: 'blur(2px)' }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            >
-              <CalculatorTab
-                settings={settings}
-                sessions={sessions}
-                onSaveToHistory={handleSaveTrip}
-                onOpenAddModalWithData={openAddModalWithData}
-                onSendToHud={(plan) => {
-                  setHudPlan(plan);
-                  setActiveTab('hud');
-                }}
-              />
-            </motion.div>
-          )}
 
           {activeTab === 'history' && (
             <motion.div
               key="history"
-              initial={{ opacity: 0, y: 10, filter: 'blur(2px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: -8, filter: 'blur(2px)' }}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             >
               <HistoryTab
@@ -322,9 +316,9 @@ export default function App() {
           {activeTab === 'settings' && (
             <motion.div
               key="settings"
-              initial={{ opacity: 0, y: 10, filter: 'blur(2px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: -8, filter: 'blur(2px)' }}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             >
               <SettingsTab
