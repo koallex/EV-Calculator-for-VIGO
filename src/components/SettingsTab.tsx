@@ -53,6 +53,12 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
   const isDark = form.theme !== 'light';
 
+  // Public ЭЗС tariffs for Belarus are no longer manually edited here — they're kept in sync
+  // automatically in the background (see App.tsx) from live pricing data, so this list is
+  // hidden entirely for Belarus. Russia has no such automatic feed, so those fields stay
+  // manually editable there. Home charging is always editable — it's the user's own meter.
+  const isAutoTariff = (form.regionPreset ?? 'belarus') !== 'russia';
+
   const handleSave = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     onUpdateSettings(form);
@@ -193,161 +199,173 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               }`}
             >
               <Zap className="w-4 h-4 text-amber-500" />
-              Тарифы операторов ({form.currency}/кВт⋅ч)
+              {isAutoTariff ? 'Тариф зарядки' : `Тарифы операторов (${form.currency}/кВт⋅ч)`}
             </h3>
-            <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              Нажмите для изменения цены
-            </span>
+            {!isAutoTariff && (
+              <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Нажмите для изменения цены
+              </span>
+            )}
           </div>
+          {isAutoTariff && (
+            <p className={`text-[11px] -mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              Стоимость зарядки на публичных ЭЗС определяется автоматически и не редактируется
+              вручную. Здесь можно настроить только тариф домашней зарядки.
+            </p>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {/* Malanka DC / Punkt E */}
-            <div
-              className={`space-y-1 p-2.5 rounded-xl border ${
-                isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <label className={`text-xs font-semibold ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
-                  ⚡ {getOperatorLabel('malanka_dc', form.regionPreset)}
-                </label>
-                <span className="text-[10px] text-slate-400">DC 50-160 кВт</span>
-              </div>
-              <DecimalInput
-                value={form.malankaDcTariff ?? form.fastDayTariff ?? 0.56}
-                onChange={(val) =>
-                  setForm({ ...form, malankaDcTariff: val, fastDayTariff: val })
-                }
-                suffix={form.currency}
-                className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
-                  isDark
-                    ? 'bg-slate-900 border-slate-700 text-amber-400 focus:border-amber-400'
-                    : 'bg-white border-slate-200 text-amber-700 focus:border-amber-500'
-                }`}
-              />
-            </div>
+            {!isAutoTariff && (
+              <>
+                {/* Malanka DC / Punkt E */}
+                <div
+                  className={`space-y-1 p-2.5 rounded-xl border ${
+                    isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs font-semibold ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
+                      ⚡ {getOperatorLabel('malanka_dc', form.regionPreset)}
+                    </label>
+                    <span className="text-[10px] text-slate-400">DC 50-160 кВт</span>
+                  </div>
+                  <DecimalInput
+                    value={form.malankaDcTariff ?? form.fastDayTariff ?? 0.56}
+                    onChange={(val) =>
+                      setForm({ ...form, malankaDcTariff: val, fastDayTariff: val })
+                    }
+                    suffix={form.currency}
+                    className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
+                      isDark
+                        ? 'bg-slate-900 border-slate-700 text-amber-400 focus:border-amber-400'
+                        : 'bg-white border-slate-200 text-amber-700 focus:border-amber-500'
+                    }`}
+                  />
+                </div>
 
-            {/* Malanka AC */}
-            <div
-              className={`space-y-1 p-2.5 rounded-xl border ${
-                isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <label className={`text-xs font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
-                  🔌 {getOperatorLabel('malanka_ac', form.regionPreset)}
-                </label>
-                <span className="text-[10px] text-slate-400">AC до 22 кВт</span>
-              </div>
-              <DecimalInput
-                value={form.malankaAcTariff ?? form.slowPublicTariff ?? 0.43}
-                onChange={(val) =>
-                  setForm({ ...form, malankaAcTariff: val, slowPublicTariff: val })
-                }
-                suffix={form.currency}
-                className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
-                  isDark
-                    ? 'bg-slate-900 border-slate-700 text-cyan-400 focus:border-cyan-400'
-                    : 'bg-white border-slate-200 text-cyan-700 focus:border-cyan-500'
-                }`}
-              />
-            </div>
+                {/* Malanka AC */}
+                <div
+                  className={`space-y-1 p-2.5 rounded-xl border ${
+                    isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
+                      🔌 {getOperatorLabel('malanka_ac', form.regionPreset)}
+                    </label>
+                    <span className="text-[10px] text-slate-400">AC до 22 кВт</span>
+                  </div>
+                  <DecimalInput
+                    value={form.malankaAcTariff ?? form.slowPublicTariff ?? 0.43}
+                    onChange={(val) =>
+                      setForm({ ...form, malankaAcTariff: val, slowPublicTariff: val })
+                    }
+                    suffix={form.currency}
+                    className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
+                      isDark
+                        ? 'bg-slate-900 border-slate-700 text-cyan-400 focus:border-cyan-400'
+                        : 'bg-white border-slate-200 text-cyan-700 focus:border-cyan-500'
+                    }`}
+                  />
+                </div>
 
-            {/* Evika (Белтелеком) */}
-            <div
-              className={`space-y-1 p-2.5 rounded-xl border ${
-                isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <label className={`text-xs font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
-                  🔌 {getOperatorLabel('evika', form.regionPreset)}
-                </label>
-                <span className="text-[10px] text-slate-400">AC станция</span>
-              </div>
-              <DecimalInput
-                value={form.evikaTariff ?? 0.43}
-                onChange={(val) => setForm({ ...form, evikaTariff: val })}
-                suffix={form.currency}
-                className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
-                  isDark
-                    ? 'bg-slate-900 border-slate-700 text-cyan-400 focus:border-cyan-400'
-                    : 'bg-white border-slate-200 text-cyan-700 focus:border-cyan-500'
-                }`}
-              />
-            </div>
+                {/* Evika (Белтелеком) */}
+                <div
+                  className={`space-y-1 p-2.5 rounded-xl border ${
+                    isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
+                      🔌 {getOperatorLabel('evika', form.regionPreset)}
+                    </label>
+                    <span className="text-[10px] text-slate-400">AC станция</span>
+                  </div>
+                  <DecimalInput
+                    value={form.evikaTariff ?? 0.43}
+                    onChange={(val) => setForm({ ...form, evikaTariff: val })}
+                    suffix={form.currency}
+                    className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
+                      isDark
+                        ? 'bg-slate-900 border-slate-700 text-cyan-400 focus:border-cyan-400'
+                        : 'bg-white border-slate-200 text-cyan-700 focus:border-cyan-500'
+                    }`}
+                  />
+                </div>
 
-            {/* BatteryFly / Forpost */}
-            <div
-              className={`space-y-1 p-2.5 rounded-xl border ${
-                isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <label className={`text-xs font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
-                  🔋 {getOperatorLabel('batteryfly', form.regionPreset)}
-                </label>
-                <span className="text-[10px] text-slate-400">Коммерческая</span>
-              </div>
-              <DecimalInput
-                value={form.batteryFlyTariff ?? 0.60}
-                onChange={(val) => setForm({ ...form, batteryFlyTariff: val })}
-                suffix={form.currency}
-                className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
-                  isDark
-                    ? 'bg-slate-900 border-slate-700 text-cyan-400 focus:border-cyan-400'
-                    : 'bg-white border-slate-200 text-cyan-700 focus:border-cyan-500'
-                }`}
-              />
-            </div>
+                {/* BatteryFly / Forpost */}
+                <div
+                  className={`space-y-1 p-2.5 rounded-xl border ${
+                    isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
+                      🔋 {getOperatorLabel('batteryfly', form.regionPreset)}
+                    </label>
+                    <span className="text-[10px] text-slate-400">Коммерческая</span>
+                  </div>
+                  <DecimalInput
+                    value={form.batteryFlyTariff ?? 0.60}
+                    onChange={(val) => setForm({ ...form, batteryFlyTariff: val })}
+                    suffix={form.currency}
+                    className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
+                      isDark
+                        ? 'bg-slate-900 border-slate-700 text-cyan-400 focus:border-cyan-400'
+                        : 'bg-white border-slate-200 text-cyan-700 focus:border-cyan-500'
+                    }`}
+                  />
+                </div>
 
-            {/* Zaryadka (Зарядка) Day Tariff */}
-            <div
-              className={`space-y-1 p-2.5 rounded-xl border ${
-                isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <label className={`text-xs font-semibold ${isDark ? 'text-orange-300' : 'text-orange-700'}`}>
-                  ☀️ {getOperatorLabel('zaryadka_day', form.regionPreset)}
-                </label>
-                <span className="text-[10px] text-slate-400">Дневной тариф</span>
-              </div>
-              <DecimalInput
-                value={form.zaryadkaDayTariff ?? form.zaryadkaTariff ?? 0.56}
-                onChange={(val) => setForm({ ...form, zaryadkaDayTariff: val, zaryadkaTariff: val, zaryadkaDcTariff: val })}
-                suffix={form.currency}
-                className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
-                  isDark
-                    ? 'bg-slate-900 border-slate-700 text-orange-400 focus:border-orange-400'
-                    : 'bg-white border-slate-200 text-orange-700 focus:border-orange-500'
-                }`}
-              />
-            </div>
+                {/* Zaryadka (Зарядка) Day Tariff */}
+                <div
+                  className={`space-y-1 p-2.5 rounded-xl border ${
+                    isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs font-semibold ${isDark ? 'text-orange-300' : 'text-orange-700'}`}>
+                      ☀️ {getOperatorLabel('zaryadka_day', form.regionPreset)}
+                    </label>
+                    <span className="text-[10px] text-slate-400">Дневной тариф</span>
+                  </div>
+                  <DecimalInput
+                    value={form.zaryadkaDayTariff ?? form.zaryadkaTariff ?? 0.56}
+                    onChange={(val) => setForm({ ...form, zaryadkaDayTariff: val, zaryadkaTariff: val, zaryadkaDcTariff: val })}
+                    suffix={form.currency}
+                    className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
+                      isDark
+                        ? 'bg-slate-900 border-slate-700 text-orange-400 focus:border-orange-400'
+                        : 'bg-white border-slate-200 text-orange-700 focus:border-orange-500'
+                    }`}
+                  />
+                </div>
 
-            {/* Zaryadka (Зарядка) Night Tariff */}
-            <div
-              className={`space-y-1 p-2.5 rounded-xl border ${
-                isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <label className={`text-xs font-semibold ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
-                  🌙 {getOperatorLabel('zaryadka_night', form.regionPreset)}
-                </label>
-                <span className="text-[10px] text-slate-400">Ночной льготный</span>
-              </div>
-              <DecimalInput
-                value={form.zaryadkaNightTariff ?? 0.43}
-                onChange={(val) => setForm({ ...form, zaryadkaNightTariff: val })}
-                suffix={form.currency}
-                className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
-                  isDark
-                    ? 'bg-slate-900 border-slate-700 text-amber-400 focus:border-amber-400'
-                    : 'bg-white border-slate-200 text-amber-700 focus:border-amber-500'
-                }`}
-              />
-            </div>
+                {/* Zaryadka (Зарядка) Night Tariff */}
+                <div
+                  className={`space-y-1 p-2.5 rounded-xl border ${
+                    isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <label className={`text-xs font-semibold ${isDark ? 'text-amber-300' : 'text-amber-700'}`}>
+                      🌙 {getOperatorLabel('zaryadka_night', form.regionPreset)}
+                    </label>
+                    <span className="text-[10px] text-slate-400">Ночной льготный</span>
+                  </div>
+                  <DecimalInput
+                    value={form.zaryadkaNightTariff ?? 0.43}
+                    onChange={(val) => setForm({ ...form, zaryadkaNightTariff: val })}
+                    suffix={form.currency}
+                    className={`w-full border px-3 py-1.5 rounded-lg text-sm font-mono font-bold focus:outline-none transition-colors ${
+                      isDark
+                        ? 'bg-slate-900 border-slate-700 text-amber-400 focus:border-amber-400'
+                        : 'bg-white border-slate-200 text-amber-700 focus:border-amber-500'
+                    }`}
+                  />
+                </div>
+              </>
+            )}
 
             {/* Home Night Tariff */}
             <div

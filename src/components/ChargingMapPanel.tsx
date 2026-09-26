@@ -22,6 +22,7 @@ import {
 } from '../data/vehicleProfiles';
 import type { VehicleConnector } from '../services/chargingStations';
 import { triggerHaptic } from '../utils/haptics';
+import { useEvraceTariffs, matchEvraceTariff, type EvraceTariff } from '../hooks/useEvraceTariffs';
 
 type ConnFilter = 'ccs2' | 'gbt' | 'type2';
 
@@ -275,39 +276,9 @@ function groupToMapStation(group: any, index: number): MapStation | null {
   };
 }
 
-type EvraceTariff = {
-  id: string;
-  name: string;
-  dcDay: number | null;
-  dcNight: number | null;
-  acDay: number | null;
-  asOf?: string | null;
-  floor?: string | null;
-};
-
 function isNightTariffHour(d = new Date()) {
   const h = d.getHours();
   return h >= 23 || h < 7;
-}
-
-function matchEvraceTariff(operator: string, tariffs: EvraceTariff[]): EvraceTariff | null {
-  if (!tariffs.length) return null;
-  const o = operator.toLowerCase().replace(/\s+/g, '');
-  const aliases: Record<string, string[]> = {
-    zaryadka: ['zaryadka', 'зарядка', 'zaryad'],
-    malanka: ['malanka', 'маланка', 'csms', 'цсмс'],
-    batteryfly: ['batteryfly', 'battery'],
-    forevo: ['forevo'],
-    evika: ['evika', 'белтелеком'],
-    united: ['united', 'unitedcompany'],
-  };
-  for (const t of tariffs) {
-    const id = t.id.toLowerCase();
-    const name = t.name.toLowerCase().replace(/\s+/g, '');
-    if (o.includes(id) || o.includes(name) || (o && name.includes(o))) return t;
-    if ((aliases[id] || []).some((a) => o.includes(a))) return t;
-  }
-  return null;
 }
 
 function tariffFromEvrace(
@@ -323,7 +294,7 @@ function tariffFromEvrace(
 } {
   const t = matchEvraceTariff(operator, tariffs);
   if (!t) {
-    return { label: operator || 'ЭЗС', rate: null, period: '', source: 'нет в EVRace' };
+    return { label: operator || 'ЭЗС', rate: null, period: '', source: 'нет данных' };
   }
   const night = isNightTariffHour();
   let rate: number | null = null;
@@ -354,7 +325,7 @@ function tariffFromEvrace(
     rate,
     period,
     asOf: t.asOf,
-    source: 'EVRace',
+    source: 'база тарифов',
   };
 }
 
@@ -403,7 +374,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<MapStation | null>(null);
   const [liveBusy, setLiveBusy] = useState(false);
-  const [evraceTariffs, setEvraceTariffs] = useState<EvraceTariff[]>([]);
+  const { tariffs: evraceTariffs } = useEvraceTariffs();
 
   const mapRef = useRef<any>(null);
   const bundleRef = useRef<AnyMapBundle | null>(null);
@@ -419,34 +390,6 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const onlyFreeRef = useRef(onlyFree);
   onlyFreeRef.current = onlyFree;
   const refreshLiveRef = useRef<(s: MapStation) => void>(() => {});
-
-  // Typical tariffs from EVRace (not user settings)
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/evrace/tariffs', { headers: { Accept: 'application/json' } })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((data) => {
-        if (cancelled) return;
-        const list = Array.isArray(data?.operators) ? data.operators : [];
-        setEvraceTariffs(
-          list.map((o: any) => ({
-            id: String(o.id || ''),
-            name: String(o.name || o.id || ''),
-            dcDay: o.dcDay ?? null,
-            dcNight: o.dcNight ?? null,
-            acDay: o.acDay ?? null,
-            asOf: o.asOf ?? null,
-            floor: o.floor ?? null,
-          })),
-        );
-      })
-      .catch(() => {
-        /* keep empty — UI shows «нет в EVRace» */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Sync filters when profile changes
   useEffect(() => {
