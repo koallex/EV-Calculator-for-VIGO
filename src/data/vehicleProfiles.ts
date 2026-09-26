@@ -67,7 +67,8 @@ export const VEHICLE_PROFILES: VehicleProfile[] = [
     displayName: 'Dongfeng Vigo',
     body: 'crossover',
     connectors: ['ccs2', 'type2'],
-    notes: 'Профиль по умолчанию. Кривая расхода откалибрована под Vigo.',
+    notes:
+      'Профиль по умолчанию. Кривая расхода откалибрована под Vigo. Комплектации РБ — с тепловым насосом (зимний пакет); HVAC считается как ТН + подмешивающий ТЭН.',
     variants: [
       {
         id: '51.87',
@@ -75,7 +76,7 @@ export const VEHICLE_PROFILES: VehicleProfile[] = [
         batteryCapacityKwh: 51.87,
         curbWeightKg: 1526,
         consumptionScale: 1.0,
-        hasHeatPump: false,
+        hasHeatPump: true,
         acMaxKw: 6.6,
         dcMaxKw: 167,
         chemistry: 'lfp',
