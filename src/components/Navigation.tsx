@@ -34,6 +34,8 @@ export const Navigation: React.FC<NavigationProps> = ({
   return (
     <nav
       id="bottom-navigation-bar"
+      id="main-bottom-nav"
+      data-native-bottom-nav
       className={`fixed bottom-0 left-0 right-0 z-40 backdrop-blur-xl border-t px-2 pt-1.5 pb-[max(env(safe-area-inset-bottom,0px),8px)] transition-colors ${
         isDark
           ? 'bg-slate-950/95 border-slate-800/80'
