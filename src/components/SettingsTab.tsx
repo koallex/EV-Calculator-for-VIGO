@@ -378,9 +378,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             >
               <div className="flex items-center justify-between">
                 <label className={`text-xs font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
-                  🌙 Домашняя ночная (льготная)
+                  🌙 Домашняя ночная
                 </label>
-                <span className="text-[10px] text-slate-400">22:00 - 17:00</span>
+                <span className="text-[10px] text-slate-400">Ночной тариф</span>
               </div>
               <DecimalInput
                 value={form.homeNightTariff ?? 0.16}

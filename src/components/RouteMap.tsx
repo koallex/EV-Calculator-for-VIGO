@@ -13,6 +13,8 @@ export interface RouteMapChargingStop {
   lon: number;
   name: string;
   address?: string;
+  /** Optional id to match station in parent state when marker is tapped. */
+  id?: string;
 }
 
 interface RouteMapProps {
@@ -23,6 +25,8 @@ interface RouteMapProps {
   currentPosition?: { lat: number; lon: number } | null;
   compact?: boolean;
   fill?: boolean;
+  /** Fired when user taps a charging-stop marker on the map. */
+  onChargingStopClick?: (stop: RouteMapChargingStop) => void;
 }
 
 export const RouteMap: React.FC<RouteMapProps> = ({
@@ -33,6 +37,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   currentPosition = null,
   compact = false,
   fill = false,
+  onChargingStopClick,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const bundleRef = useRef<AnyMapBundle | null>(null);
@@ -281,6 +286,13 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         const { YMapMarker } = (bundle as any).ymaps3;
         const el = makeLabelMarkerEl('⚡', '#fbbf24');
         el.title = stop.name;
+        el.style.cursor = 'pointer';
+        if (onChargingStopClick) {
+          el.addEventListener('click', (ev: Event) => {
+            ev.stopPropagation();
+            onChargingStopClick(stop);
+          });
+        }
         const m = new YMapMarker({ coordinates: toLonLat(stop.lat, stop.lon) }, el);
         map.addChild(m);
         chargerMarkersRef.current.push(m);
@@ -288,9 +300,12 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         const ymaps = (bundle as any).ymaps;
         const m = new ymaps.Placemark(
           [stop.lat, stop.lon],
-          { hintContent: stop.name },
+          { hintContent: stop.name, balloonContent: stop.name },
           { preset: 'islands#darkOrangeStretchyIcon', iconContent: '⚡' },
         );
+        if (onChargingStopClick) {
+          m.events.add('click', () => onChargingStopClick(stop));
+        }
         map.geoObjects.add(m);
         chargerMarkersRef.current.push(m);
       }
