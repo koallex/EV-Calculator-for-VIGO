@@ -6,6 +6,11 @@ export interface UserSettings {
   vehicleProfileId?: string;
   /** Battery / trim variant id within the profile (e.g. 51.87, 42.3). */
   vehicleVariantId?: string;
+  /**
+   * Body shape for aerodynamic model (custom profile).
+   * hatch | sedan | crossover | suv — drives consumptionScale via BODY_TYPE_AERO_SCALE.
+   */
+  vehicleBodyType?: 'hatch' | 'sedan' | 'crossover' | 'suv';
   /** Curb weight used for elevation / mass model (kg). */
   curbWeightKg?: number;
   /** Multiplier on the shared speed-consumption curve (Vigo baseline = 1). */
