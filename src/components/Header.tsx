@@ -2,6 +2,7 @@ import React from 'react';
 import { Car, Moon, Sun, Plus, ShieldCheck, LogOut, Info } from 'lucide-react';
 import { UserSettings } from '../types';
 import { triggerHaptic } from '../utils/haptics';
+import { getVehicleProfile } from '../data/vehicleProfiles';
 
 interface CurrentUser { login: string; role: 'admin' | 'user'; }
 
@@ -31,6 +32,8 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const isDark = settings.theme !== 'light';
+  const profile = getVehicleProfile(settings.vehicleProfileId);
+  const carTitle = profile.isCustom ? 'Свой автомобиль' : profile.displayName;
 
   return (
     <header
@@ -50,7 +53,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className={`text-sm font-bold tracking-tight truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                Dongfeng Vigo
+                {carTitle}
               </h1>
               <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md border shrink-0 ${
                 isDark 

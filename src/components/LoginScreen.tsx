@@ -79,8 +79,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
             <Zap className="w-5 h-5 fill-current" />
           </div>
           <div>
-            <h1 className="text-base font-bold text-white">Dongfeng Vigo</h1>
-            <p className="text-xs text-slate-400">{mode === 'login' ? 'Авторизация' : 'Регистрация'}</p>
+            <h1 className="text-base font-bold text-white">EV Calculator</h1>
+            <p className="text-xs text-slate-400">
+              {mode === 'login' ? 'Физическая модель расхода · автопоиск ЭЗС' : 'Регистрация'}
+            </p>
           </div>
         </div>
 

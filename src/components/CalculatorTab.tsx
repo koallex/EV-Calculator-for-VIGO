@@ -172,6 +172,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [speedProfileOpen, setSpeedProfileOpen] = useState(false);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
   const [routeParamsOpen, setRouteParamsOpen] = useState(false);
+  const [showGuideTip, setShowGuideTip] = useState(() => {
+    try { return localStorage.getItem('ev_guide_tip_dismissed') !== '1'; } catch { return true; }
+  });
   /** Detailed route info (map, elevation, breakdown) — collapsed after calc */
   const [routeDetailsOpen, setRouteDetailsOpen] = useState(false);
   const [manualDetailsOpen, setManualDetailsOpen] = useState(false);
@@ -1169,6 +1172,53 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           </p>
         )}
       </section>
+
+      {/* First-run guidance: algorithm + nearest chargers + how to start */}
+      {showGuideTip && (
+        <section
+          className={`rounded-2xl border px-3.5 py-3 space-y-2 ${
+            isDark
+              ? 'bg-gradient-to-br from-cyan-950/40 to-slate-900/80 border-cyan-800/50'
+              : 'bg-gradient-to-br from-cyan-50 to-white border-cyan-200 shadow-xs'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 space-y-1.5">
+              <p className={`text-xs font-bold ${isDark ? 'text-cyan-300' : 'text-cyan-800'}`}>
+                Как пользоваться
+              </p>
+              <ul className={`text-[11px] leading-relaxed space-y-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                <li>
+                  <span className="font-semibold">1.</span> Укажите точку Б (адрес или карта) — расчёт пойдёт по реальному маршруту, рельефу и прогнозу погоды.
+                </li>
+                <li>
+                  <span className="font-semibold">2.</span> Физическая модель: аэродинамика, масса, ветер, осадки, климат и тепловой насос — не «средний расход из брошюры».
+                </li>
+                <li>
+                  <span className="font-semibold">3.</span> Автопоиск ближайших ЭЗС по маршруту и свободных CCS рядом с вами (вкладка «ЭЗС» и блок на маршруте).
+                </li>
+                <li>
+                  <span className="font-semibold">4.</span> Профиль авто — в «Настройках»: готовые модели РБ или «Свой автомобиль» (масса, кузов, батарея, ТН).
+                </li>
+              </ul>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setShowGuideTip(false);
+                try { localStorage.setItem('ev_guide_tip_dismissed', '1'); } catch {}
+              }}
+              className={`shrink-0 text-[11px] font-bold px-2 py-1 rounded-lg border ${
+                isDark
+                  ? 'border-slate-700 text-slate-400 hover:text-white'
+                  : 'border-slate-200 text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Понятно
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* Compact trip conditions: SoC + people + climate in one row-card */}
       <section className={`rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>

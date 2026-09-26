@@ -25,8 +25,11 @@ import {
   getVehicleProfile,
   getVehicleVariant,
   applyVehicleVariantToSettings,
+  applyCustomVehicleFields,
   resolveEffectiveConnectors,
   formatConnectorsLabel,
+  BODY_TYPE_LABELS,
+  type BodyType,
   type ConnectorOverride,
 } from '../data/vehicleProfiles';
 import { DecimalInput } from './DecimalInput';
@@ -127,7 +130,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           </h2>
         </div>
         <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-          Регион, валюта, тарифы операторов ЭЗС и параметры автомобиля.
+          Регион, тарифы ЭЗС и параметры автомобиля. Валюта подставляется из региона.
         </p>
       </div>
 
@@ -435,36 +438,66 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           </h3>
 
           <div className="space-y-3">
-            <div className="space-y-1.5">
-              <label className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                Модель
-              </label>
-              <select
-                value={form.vehicleProfileId || 'dongfeng-vigo'}
-                onChange={(e) => {
-                  const profileId = e.target.value;
-                  const profile = getVehicleProfile(profileId);
-                  const variant = profile.variants.find((v) => v.default) || profile.variants[0];
-                  setForm(applyVehicleVariantToSettings(form, profileId, variant.id));
-                  triggerHaptic('light', form.hapticFeedback);
-                }}
-                className={`w-full border px-3 py-2 rounded-xl text-sm font-semibold focus:outline-none transition-colors ${
-                  isDark
-                    ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
-                }`}
-              >
-                {VEHICLE_PROFILES.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.displayName}
-                  </option>
-                ))}
-              </select>
+            <p className={`text-[11px] leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              Выберите профиль — параметры массы, аэродинамики и батареи подставятся автоматически.
+              Или откройте «Свой автомобиль» и задайте всё вручную.
+            </p>
+
+            {/* Visual profile grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {VEHICLE_PROFILES.map((p) => {
+                const active = (form.vehicleProfileId || 'dongfeng-vigo') === p.id;
+                const def = p.variants.find((v) => v.default) || p.variants[0];
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      const variant = p.variants.find((v) => v.default) || p.variants[0];
+                      setForm(applyVehicleVariantToSettings(form, p.id, variant.id));
+                      triggerHaptic('light', form.hapticFeedback);
+                    }}
+                    className={`text-left rounded-xl border px-2.5 py-2.5 transition-all active:scale-[0.98] ${
+                      active
+                        ? isDark
+                          ? 'bg-cyan-950/50 border-cyan-500/70 ring-1 ring-cyan-500/40'
+                          : 'bg-cyan-50 border-cyan-400 ring-1 ring-cyan-300'
+                        : isDark
+                        ? 'bg-slate-950 border-slate-800 hover:border-slate-600'
+                        : 'bg-slate-50 border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div
+                      className={`text-[11px] font-bold leading-tight truncate ${
+                        active
+                          ? isDark
+                            ? 'text-cyan-300'
+                            : 'text-cyan-800'
+                          : isDark
+                          ? 'text-white'
+                          : 'text-slate-900'
+                      }`}
+                    >
+                      {p.displayName}
+                    </div>
+                    <div className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                      {p.isCustom
+                        ? 'ручные параметры'
+                        : `${def.batteryCapacityKwh} кВт⋅ч · ${BODY_TYPE_LABELS[p.body]}`}
+                    </div>
+                    {!p.isCustom && (
+                      <div className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>
+                        {def.hasHeatPump ? 'ТН' : 'ТЭН'} · ~{def.curbWeightKg} кг
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
 
             {(() => {
               const profile = getVehicleProfile(form.vehicleProfileId);
-              if (profile.variants.length <= 1) return null;
+              if (profile.isCustom || profile.variants.length <= 1) return null;
               return (
                 <div className="space-y-1.5">
                   <label className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
@@ -473,7 +506,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   <select
                     value={form.vehicleVariantId || getVehicleVariant(form.vehicleProfileId).id}
                     onChange={(e) => {
-                      setForm(applyVehicleVariantToSettings(form, form.vehicleProfileId || profile.id, e.target.value));
+                      setForm(
+                        applyVehicleVariantToSettings(
+                          form,
+                          form.vehicleProfileId || profile.id,
+                          e.target.value,
+                        ),
+                      );
                       triggerHaptic('light', form.hapticFeedback);
                     }}
                     className={`w-full border px-3 py-2 rounded-xl text-sm font-semibold focus:outline-none transition-colors ${
@@ -485,6 +524,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                     {profile.variants.map((v) => (
                       <option key={v.id} value={v.id}>
                         {v.label}
+                        {v.hasHeatPump ? ' · ТН' : ''} · ~{v.curbWeightKg} кг
                       </option>
                     ))}
                   </select>
@@ -492,26 +532,152 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               );
             })()}
 
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center text-xs">
-                <label className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-                  Ёмкость батареи (можно уточнить):
-                </label>
-                <span className={`font-mono font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
-                  {form.batteryCapacityKwh} кВт⋅ч
-                </span>
-              </div>
-              <DecimalInput
-                value={form.batteryCapacityKwh}
-                onChange={(val) => setForm({ ...form, batteryCapacityKwh: val || 51.87 })}
-                suffix="кВт⋅ч"
-                className={`w-full border px-3 py-2 rounded-xl text-sm font-mono font-bold focus:outline-none transition-colors ${
-                  isDark
-                    ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
-                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
+            {/* Custom vehicle fields */}
+            {getVehicleProfile(form.vehicleProfileId).isCustom && (
+              <div
+                className={`rounded-xl border p-3 space-y-3 ${
+                  isDark ? 'bg-slate-950/80 border-cyan-800/40' : 'bg-cyan-50/50 border-cyan-200'
                 }`}
-              />
-            </div>
+              >
+                <p className={`text-[11px] font-semibold ${isDark ? 'text-cyan-300' : 'text-cyan-800'}`}>
+                  Параметры своего авто (влияют на физмодель расхода)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                      Масса снаряжённая (кг)
+                    </label>
+                    <DecimalInput
+                      value={form.curbWeightKg ?? 1600}
+                      onChange={(val) =>
+                        setForm(
+                          applyCustomVehicleFields(form, {
+                            curbWeightKg: val || 1600,
+                          }),
+                        )
+                      }
+                      suffix="кг"
+                      className={`w-full border px-3 py-2 rounded-xl text-sm font-mono font-bold focus:outline-none transition-colors ${
+                        isDark
+                          ? 'bg-slate-900 border-slate-700 text-white focus:border-cyan-500'
+                          : 'bg-white border-slate-200 text-slate-900 focus:border-cyan-500'
+                      }`}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                      Ёмкость батареи (кВт⋅ч)
+                    </label>
+                    <DecimalInput
+                      value={form.batteryCapacityKwh}
+                      onChange={(val) =>
+                        setForm(
+                          applyCustomVehicleFields(form, {
+                            batteryCapacityKwh: val || 50,
+                          }),
+                        )
+                      }
+                      suffix="кВт⋅ч"
+                      className={`w-full border px-3 py-2 rounded-xl text-sm font-mono font-bold focus:outline-none transition-colors ${
+                        isDark
+                          ? 'bg-slate-900 border-slate-700 text-white focus:border-cyan-500'
+                          : 'bg-white border-slate-200 text-slate-900 focus:border-cyan-500'
+                      }`}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                    Тип кузова (аэродинамическая модель)
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(Object.keys(BODY_TYPE_LABELS) as BodyType[]).map((bt) => {
+                      const active = (form.vehicleBodyType || 'crossover') === bt;
+                      return (
+                        <button
+                          key={bt}
+                          type="button"
+                          onClick={() => {
+                            setForm(applyCustomVehicleFields(form, { vehicleBodyType: bt }));
+                            triggerHaptic('light', form.hapticFeedback);
+                          }}
+                          className={`py-2 rounded-lg text-xs font-bold border transition-all ${
+                            active
+                              ? 'bg-cyan-600 text-white border-cyan-500'
+                              : isDark
+                              ? 'bg-slate-900 text-slate-300 border-slate-700'
+                              : 'bg-white text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          {BODY_TYPE_LABELS[bt]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                    Хэтчбек/седан — ниже сопротивление на трассе; SUV — выше доля аэродинамики.
+                  </p>
+                </div>
+                <div
+                  className={`flex items-center justify-between p-2.5 rounded-xl border ${
+                    isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
+                  }`}
+                >
+                  <div>
+                    <div className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                      Тепловой насос
+                    </div>
+                    <div className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                      Снижает расход климат-контроля зимой
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForm(
+                        applyCustomVehicleFields(form, {
+                          hasHeatPump: !(form.hasHeatPump ?? false),
+                        }),
+                      );
+                      triggerHaptic('light', form.hapticFeedback);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                      form.hasHeatPump
+                        ? 'bg-emerald-600 text-white border-emerald-500'
+                        : isDark
+                        ? 'bg-slate-800 text-slate-400 border-slate-600'
+                        : 'bg-slate-100 text-slate-600 border-slate-300'
+                    }`}
+                  >
+                    {form.hasHeatPump ? 'Есть' : 'Нет (ТЭН)'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Capacity tweak for non-custom profiles */}
+            {!getVehicleProfile(form.vehicleProfileId).isCustom && (
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center text-xs">
+                  <label className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                    Ёмкость батареи (можно уточнить):
+                  </label>
+                  <span className={`font-mono font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
+                    {form.batteryCapacityKwh} кВт⋅ч
+                  </span>
+                </div>
+                <DecimalInput
+                  value={form.batteryCapacityKwh}
+                  onChange={(val) => setForm({ ...form, batteryCapacityKwh: val || 51.87 })}
+                  suffix="кВт⋅ч"
+                  className={`w-full border px-3 py-2 rounded-xl text-sm font-mono font-bold focus:outline-none transition-colors ${
+                    isDark
+                      ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                      : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
+                  }`}
+                />
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <label className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
@@ -533,7 +699,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 }`}
               >
                 <option value="auto">
-                  Авто (профиль: {formatConnectorsLabel(getVehicleProfile(form.vehicleProfileId).connectors)})
+                  Авто (профиль:{' '}
+                  {formatConnectorsLabel(getVehicleProfile(form.vehicleProfileId).connectors)})
                 </option>
                 <option value="ccs2">CCS2</option>
                 <option value="gbt">GB/T</option>
@@ -542,17 +709,22 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 <option value="ccs2_gbt">CCS2 + GB/T</option>
               </select>
               <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                Влияет на фильтр станций по маршруту и «ближайшую свободную зарядку».
-                Нужно, если у машины европорт, адаптер или профиль указан неверно.
+                Влияет на фильтр станций по маршруту и автопоиск ближайшей свободной зарядки.
               </p>
             </div>
 
             {(() => {
               const variant = getVehicleVariant(form.vehicleProfileId, form.vehicleVariantId);
-              const effective = resolveEffectiveConnectors(form.vehicleProfileId, form.connectorOverride);
+              const effective = resolveEffectiveConnectors(
+                form.vehicleProfileId,
+                form.connectorOverride,
+              );
+              const body = form.vehicleBodyType || getVehicleProfile(form.vehicleProfileId).body;
               return (
                 <p className={`text-[11px] leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                   {getVehicleProfile(form.vehicleProfileId).notes || ''}
+                  {' · '}
+                  {BODY_TYPE_LABELS[body]}
                   {' · '}Масса ~{Math.round(form.curbWeightKg || variant.curbWeightKg)} кг
                   {' · '}
                   {form.hasHeatPump ?? variant.hasHeatPump ? 'тепловой насос' : 'без ТН (ТЭН)'}
@@ -631,38 +803,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             }`}
           >
             <Sparkles className="w-4 h-4 text-cyan-500" />
-            Интерфейс и валюта
+            Интерфейс
           </h3>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Currency selector */}
-            <div className="space-y-1.5">
-              <label className={`text-xs font-semibold ${form.theme === 'light' ? 'text-slate-700' : 'text-slate-300'}`}>
-                Символ валюты:
-              </label>
-              <div className="flex gap-1.5">
-                {['Br', '₽', '$', '€', '₸'].map((cur) => (
-                  <button
-                    key={cur}
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic('light', form.hapticFeedback);
-                      setForm({ ...form, currency: cur });
-                    }}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-                      form.currency === cur
-                        ? 'bg-cyan-600 text-white border-cyan-500 shadow-xs'
-                        : form.theme === 'light'
-                        ? 'bg-slate-100 text-slate-700 border-slate-200 hover:border-slate-300'
-                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    {cur}
-                  </button>
-                ))}
-              </div>
-            </div>
-
+          <div className="grid grid-cols-1 gap-3">
             {/* Haptics */}
             <div
               className={`flex items-center justify-between p-2.5 rounded-xl border ${
