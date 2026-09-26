@@ -250,41 +250,43 @@ input[type=range]::-moz-range-thumb {
   100% { transform: scale(1.4); opacity: 0; }
 }
 
-/* ========== Capacitor / APK only (html gets class "native-app") ========== */
-/* Web browser is unaffected — selectors require .native-app */
 
-html.native-app {
-  /* Fallbacks when env(safe-area-*) is 0 inside Android WebView */
-  --native-sat: max(env(safe-area-inset-top, 0px), 24px);
-  --native-sab: max(env(safe-area-inset-bottom, 0px), 20px);
-  --native-sal: max(env(safe-area-inset-left, 0px), 0px);
-  --native-sar: max(env(safe-area-inset-right, 0px), 0px);
-}
-
+/* ========== Capacitor / APK only (old Android WebView safe) ========== */
+html.native-app,
 html.native-app body {
-  /* Extra breathing room if StatusBar overlay could not be disabled */
-  padding-left: var(--native-sal);
-  padding-right: var(--native-sar);
+  background-color: #0b1220 !important;
+  color: #e8eef7 !important;
 }
 
-/* Header under status bar */
 html.native-app #main-header {
-  padding-top: max(env(safe-area-inset-top, 0px), 28px) !important;
+  padding-top: 28px !important;
+  background-color: #0b1220 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  opacity: 1 !important;
 }
 
-/* Bottom tab bar above gesture / 3-button nav */
-html.native-app nav.fixed.bottom-0,
 html.native-app #main-bottom-nav,
-html.native-app [data-native-bottom-nav] {
-  padding-bottom: max(env(safe-area-inset-bottom, 0px), 20px) !important;
+html.native-app nav#main-bottom-nav {
+  padding-bottom: 20px !important;
+  background-color: #0b1220 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  opacity: 1 !important;
 }
 
-/* Main content: keep last blocks above tab bar + system nav */
 html.native-app main {
-  padding-bottom: calc(5.5rem + max(env(safe-area-inset-bottom, 0px), 16px)) !important;
+  padding-bottom: 6rem !important;
+  min-height: 50vh;
+  opacity: 1 !important;
+  visibility: visible !important;
 }
 
-/* Full-screen map / modals: respect top inset */
-html.native-app .fixed.inset-0 {
-  /* leave as full-bleed; inner headers still use #main-header rules */
+/* Kill blur/filter effects that paint black on old Mali/Adreno GPUs */
+html.native-app-lite *,
+html.native-app-lite *::before,
+html.native-app-lite *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
 }
