@@ -101,7 +101,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   vehicleVariantId: '51.87',
   curbWeightKg: 1526,
   consumptionScale: 1.0,
-  hasHeatPump: false,
+  hasHeatPump: true,
   acMaxKw: 6.6,
   dcMaxKw: 167,
   connectorOverride: 'auto',
