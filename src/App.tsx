@@ -5,7 +5,6 @@
 
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { motion, AnimatePresence } from 'motion/react';
 import { UserSettings, TripSession } from './types';
 import {
   DEFAULT_SETTINGS,
@@ -258,7 +257,7 @@ export default function App() {
         {!showAdmin && (
         <>
         {/* HUD Tab: Kept mounted permanently so GPS tracking, distance, timer and SoC never reset on tab switch */}
-        <div className={activeTab === 'hud' ? 'block animate-in fade-in duration-200' : 'hidden'}>
+        <div style={{ display: activeTab === 'hud' ? 'block' : 'none' }}>
           <HudTab
             settings={settings}
             sessions={sessions}
@@ -270,8 +269,8 @@ export default function App() {
           />
         </div>
 
-        {/* Calculator kept mounted (hidden) — remount + blur caused black screen in Android WebView APK */}
-        <div className={activeTab === 'calculator' ? 'block' : 'hidden'}>
+        {/* All main tabs stay mounted and toggle via CSS — avoids Android WebView black screen after login / tab switch */}
+        <div style={{ display: activeTab === 'calculator' ? 'block' : 'none' }}>
           <CalculatorTab
             settings={settings}
             sessions={sessions}
@@ -284,53 +283,33 @@ export default function App() {
           />
         </div>
 
-        <AnimatePresence mode="wait">
+        <div style={{ display: activeTab === 'history' ? 'block' : 'none' }}>
+          <HistoryTab
+            sessions={sessions}
+            settings={settings}
+            onDeleteSession={handleDeleteSession}
+            onUpdateSessionEndSoc={handleUpdateSessionEndSoc}
+            onOpenAddModal={() => {
+              setAddTripInitialData(undefined);
+              setIsAddTripOpen(true);
+            }}
+            onImportBackup={handleImportBackup}
+          />
+        </div>
 
-          {activeTab === 'history' && (
-            <motion.div
-              key="history"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            >
-              <HistoryTab
-                sessions={sessions}
-                settings={settings}
-                onDeleteSession={handleDeleteSession}
-                onUpdateSessionEndSoc={handleUpdateSessionEndSoc}
-                onOpenAddModal={() => {
-                  setAddTripInitialData(undefined);
-                  setIsAddTripOpen(true);
-                }}
-                onImportBackup={handleImportBackup}
-              />
-            </motion.div>
-          )}
+        <div style={{ display: activeTab === 'charging' ? 'block' : 'none' }}>
+          <ChargingTab settings={settings} />
+        </div>
 
-          {/* Charging kept mounted (hidden) so map instance is not recreated on every tab visit */}
-          <div className={activeTab === 'charging' ? 'block animate-in fade-in duration-200' : 'hidden'}>
-            <ChargingTab settings={settings} />
-          </div>
-
-          {activeTab === 'settings' && (
-            <motion.div
-              key="settings"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            >
-              <SettingsTab
-                settings={settings}
-                sessions={sessions}
-                onUpdateSettings={setSettings}
-                onResetData={handleResetData}
-                onImportBackup={handleImportBackup}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div style={{ display: activeTab === 'settings' ? 'block' : 'none' }}>
+          <SettingsTab
+            settings={settings}
+            sessions={sessions}
+            onUpdateSettings={setSettings}
+            onResetData={handleResetData}
+            onImportBackup={handleImportBackup}
+          />
+        </div>
         </>
         )}
       </main>
