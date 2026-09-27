@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
+import { Menu, X } from 'lucide-react';
 import { UserSettings, TripSession } from './types';
 import {
   DEFAULT_SETTINGS,
@@ -42,8 +43,9 @@ export default function App() {
   // Modals
   const [isAddTripOpen, setIsAddTripOpen] = useState(false);
   const [addTripInitialData, setAddTripInitialData] = useState<Partial<TripSession> | undefined>(undefined);
-  /** Full-bleed layout in landscape: hide chrome (header + bottom nav). */
+  /** Full-bleed layout in landscape: hide header; nav becomes optional floating pill. */
   const [isLandscape, setIsLandscape] = useState(false);
+  const [navOpen, setNavOpen] = useState(true);
 
   useEffect(() => {
     const update = () => {
@@ -52,6 +54,8 @@ export default function App() {
           window.matchMedia('(orientation: landscape)').matches) ||
         window.innerWidth > window.innerHeight * 1.05;
       setIsLandscape(landscape);
+      // In landscape start with nav collapsed — open via compact menu button.
+      setNavOpen(!landscape);
     };
     update();
     window.addEventListener('resize', update);
@@ -243,7 +247,8 @@ export default function App() {
     return <LoginScreen onLogin={handleLogin} />;
   }
 
-  const chromeHidden = isLandscape;
+  const headerHidden = isLandscape;
+  const isDarkTheme = settings.theme !== 'light';
 
   return (
     <div className={`min-h-screen transition-colors duration-200 flex flex-col font-sans ${
@@ -252,7 +257,7 @@ export default function App() {
         : 'bg-[#0b1220] text-slate-100 selection:bg-cyan-500 selection:text-slate-950'
     }`}>
       {/* Top Header — hidden in landscape for full-screen content */}
-      {!chromeHidden && (
+      {!headerHidden && (
         <Header
           settings={settings}
           onUpdateSettings={setSettings}
@@ -267,12 +272,29 @@ export default function App() {
         />
       )}
 
+      {/* Landscape: compact menu FAB to show/hide floating nav pill */}
+      {isLandscape && !showAdmin && (
+        <button
+          type="button"
+          onClick={() => setNavOpen((v) => !v)}
+          className={`fixed z-[60] top-3 left-3 rounded-full p-2.5 border shadow-lg backdrop-blur-xl active:scale-95 ${
+            isDarkTheme
+              ? 'bg-slate-950/70 border-white/15 text-cyan-300'
+              : 'bg-white/80 border-slate-200 text-cyan-700'
+          }`}
+          title={navOpen ? 'Скрыть меню' : 'Меню разделов'}
+          aria-label={navOpen ? 'Скрыть меню' : 'Меню разделов'}
+        >
+          {navOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
+      )}
+
       {/* Main Content Area — full viewport in landscape */}
       <main
         className={
-          chromeHidden
-            ? 'flex-1 w-full h-[100dvh] max-h-[100dvh] overflow-hidden p-0 m-0'
-            : 'flex-1 max-w-4xl w-full mx-auto p-3 sm:p-4 mb-16'
+          isLandscape
+            ? 'flex-1 w-full h-[100dvh] max-h-[100dvh] overflow-auto p-0 m-0'
+            : 'flex-1 max-w-4xl w-full mx-auto p-3 sm:p-4 pb-28'
         }
       >
         {showAdmin ? (
@@ -343,8 +365,8 @@ export default function App() {
         )}
       </main>
 
-      {/* Bottom nav — hidden in landscape for full-screen content */}
-      {!showAdmin && !chromeHidden && (
+      {/* Floating pill nav — always above content; toggled in landscape via menu FAB */}
+      {!showAdmin && (
         <Navigation
           activeTab={activeTab}
           onSelectTab={setActiveTab}
@@ -352,6 +374,11 @@ export default function App() {
           historyCount={sessions.length}
           theme={settings.theme}
           isHudTracking={isHudTracking}
+          floating
+          visible={navOpen}
+          onRequestClose={() => {
+            if (isLandscape) setNavOpen(false);
+          }}
         />
       )}
 
