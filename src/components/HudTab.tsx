@@ -327,6 +327,30 @@ export const HudTab: React.FC<HudTabProps> = ({
   const distanceRef = useRef<number>(0);
   const smoothSpeedBufferRef = useRef<number[]>([]);
   const lastHeadingRef = useRef<number>(0);
+  // Last values pushed to React state from the GPS callback. Algorithms still write full-precision
+  // data into the refs above on every tick; these mirrors only avoid redundant setState when the
+  // UI-visible number did not change (or heading jitter is below a small threshold).
+  const uiGpsPublishedRef = useRef<{
+    speed: number;
+    accuracy: number | null;
+    heading: number | null;
+    distanceKm: number;
+    segmentEnergyKwh: number;
+    altitudeAvailable: boolean;
+    elevationGainM: number;
+    elevationLossM: number;
+    maxSpeed: number;
+  }>({
+    speed: 0,
+    accuracy: null,
+    heading: null,
+    distanceKm: 0,
+    segmentEnergyKwh: 0,
+    altitudeAvailable: false,
+    elevationGainM: 0,
+    elevationLossM: 0,
+    maxSpeed: 0,
+  });
   const smoothedAltitudeRef = useRef<number | null>(null);
   const lastCountedAltitudeRef = useRef<number | null>(null);
   const lastCountedAltitudeDistanceKmRef = useRef(0);
@@ -681,7 +705,11 @@ export const HudTab: React.FC<HudTabProps> = ({
       }
 
       const accMeters = accuracy ? Math.round(accuracy) : null;
-      setGpsAccuracy(accMeters);
+      // UI only: skip setState when accuracy meter reading is unchanged.
+      if (accMeters !== uiGpsPublishedRef.current.accuracy) {
+        uiGpsPublishedRef.current.accuracy = accMeters;
+        setGpsAccuracy(accMeters);
+      }
 
       // Fetch weather on the first reliable GPS lock.
       if (!weatherRef.current.isLoaded) {
@@ -725,21 +753,41 @@ export const HudTab: React.FC<HudTabProps> = ({
         smoothSpeedBufferRef.current.reduce((a, b) => a + b, 0) / smoothSpeedBufferRef.current.length
       );
 
-      setCurrentSpeed(smoothedSpeed);
+      // Ref always tracks live speed for weather/recalc paths; state only when the shown integer changes.
       latestGpsSpeedRef.current = smoothedSpeed;
+      if (smoothedSpeed !== uiGpsPublishedRef.current.speed) {
+        uiGpsPublishedRef.current.speed = smoothedSpeed;
+        setCurrentSpeed(smoothedSpeed);
+      }
 
       let vehicleHeading = heading;
       // Prefer device compass when moving; otherwise derive course from GPS track.
       // Keep last stable heading when stationary so map rotation does not snap to 0.
+      // lastHeadingRef always stores the latest computed course for algorithms / map follow.
+      // React state updates only when heading moves by >= 2° (circular) to cut UI jitter.
+      const publishHeadingUi = (nextHeading: number) => {
+        const rounded = Math.round(nextHeading);
+        lastHeadingRef.current = rounded;
+        const prevUi = uiGpsPublishedRef.current.heading;
+        if (prevUi == null) {
+          uiGpsPublishedRef.current.heading = rounded;
+          setGpsHeading(rounded);
+          return;
+        }
+        const delta = Math.abs(((rounded - prevUi + 540) % 360) - 180);
+        if (delta >= 2) {
+          uiGpsPublishedRef.current.heading = rounded;
+          setGpsHeading(rounded);
+        }
+      };
+
       if (
         vehicleHeading !== null &&
         !isNaN(vehicleHeading) &&
         vehicleHeading >= 0 &&
         smoothedSpeed >= 3
       ) {
-        const roundedHeading = Math.round(vehicleHeading);
-        setGpsHeading(roundedHeading);
-        lastHeadingRef.current = roundedHeading;
+        publishHeadingUi(vehicleHeading);
       } else if (prevPositionRef.current && smoothedSpeed >= 4) {
         const bearing = calculateBearing(
           prevPositionRef.current.lat,
@@ -747,11 +795,10 @@ export const HudTab: React.FC<HudTabProps> = ({
           latitude,
           longitude
         );
-        setGpsHeading(bearing);
-        lastHeadingRef.current = bearing;
+        publishHeadingUi(bearing);
       } else if (lastHeadingRef.current != null) {
-        // Hold last heading while stopped / weak GPS
-        setGpsHeading(Math.round(lastHeadingRef.current));
+        // Hold last heading while stopped / weak GPS — still only publish if UI diverged.
+        publishHeadingUi(lastHeadingRef.current);
       }
 
       // === ACCUMULATE TRIP DISTANCE (with strict glitch checks) ===
@@ -772,7 +819,12 @@ export const HudTab: React.FC<HudTabProps> = ({
           deltaKm <= maxPlausibleDeltaKm
         ) {
           distanceRef.current += deltaKm;
-          setTripDistanceKm(Number(distanceRef.current.toFixed(2)));
+          // Full precision stays in distanceRef; UI shows the same 0.01 km resolution as before.
+          const distanceUi = Number(distanceRef.current.toFixed(2));
+          if (distanceUi !== uiGpsPublishedRef.current.distanceKm) {
+            uiGpsPublishedRef.current.distanceKm = distanceUi;
+            setTripDistanceKm(distanceUi);
+          }
 
           // Per-segment energy: rate at THIS segment's own speed (not the trip average), so a
           // short fast burst costs proportionally more than the same distance at a cruising
@@ -803,7 +855,11 @@ export const HudTab: React.FC<HudTabProps> = ({
             segRate.windMultiplier *
             segRate.precipMultiplier;
           segmentEnergyKwhRef.current += (deltaKm / 100) * segConsumptionPer100;
-          setLiveSegmentEnergyKwh(Number(segmentEnergyKwhRef.current.toFixed(3)));
+          const segmentEnergyUi = Number(segmentEnergyKwhRef.current.toFixed(3));
+          if (segmentEnergyUi !== uiGpsPublishedRef.current.segmentEnergyKwh) {
+            uiGpsPublishedRef.current.segmentEnergyKwh = segmentEnergyUi;
+            setLiveSegmentEnergyKwh(segmentEnergyUi);
+          }
 
           // Sample a compact checkpoint roughly every 1 km so wind/energy/elevation behaviour
           // along the route can be audited after the fact, instead of relying on what was
@@ -836,7 +892,10 @@ export const HudTab: React.FC<HudTabProps> = ({
           if (smoothedSpeed > 0) {
             speedHistoryRef.current.push(smoothedSpeed);
           }
-          setMaxSpeed((prev) => Math.max(prev, smoothedSpeed));
+          if (smoothedSpeed > uiGpsPublishedRef.current.maxSpeed) {
+            uiGpsPublishedRef.current.maxSpeed = smoothedSpeed;
+            setMaxSpeed(smoothedSpeed);
+          }
         }
       }
 
@@ -857,7 +916,10 @@ export const HudTab: React.FC<HudTabProps> = ({
       const altitudeAccuracyOk = rawAltitudeAccuracy == null || rawAltitudeAccuracy <= ALT_ACCURACY_THRESHOLD_M;
 
       if (isTracking && rawAltitude !== null && !isNaN(rawAltitude)) {
-        setAltitudeAvailable(true);
+        if (!uiGpsPublishedRef.current.altitudeAvailable) {
+          uiGpsPublishedRef.current.altitudeAvailable = true;
+          setAltitudeAvailable(true);
+        }
 
         if (altitudeAccuracyOk) {
           if (smoothedAltitudeRef.current === null) {
@@ -921,8 +983,16 @@ export const HudTab: React.FC<HudTabProps> = ({
                   elevationLossRef.current += Math.abs(committedDelta);
                   elevationEnergyKwhRef.current -= (VEHICLE_MASS_KG * G * Math.abs(committedDelta)) / 3.6e6 * REGEN_EFFICIENCY;
                 }
-                setElevationGainM(Math.round(elevationGainRef.current));
-                setElevationLossM(Math.round(elevationLossRef.current));
+                const gainUi = Math.round(elevationGainRef.current);
+                const lossUi = Math.round(elevationLossRef.current);
+                if (gainUi !== uiGpsPublishedRef.current.elevationGainM) {
+                  uiGpsPublishedRef.current.elevationGainM = gainUi;
+                  setElevationGainM(gainUi);
+                }
+                if (lossUi !== uiGpsPublishedRef.current.elevationLossM) {
+                  uiGpsPublishedRef.current.elevationLossM = lossUi;
+                  setElevationLossM(lossUi);
+                }
                 lastCountedAltitudeRef.current = (lastCountedAltitudeRef.current ?? smoothedAltitudeRef.current) + committedDelta;
                 lastCountedAltitudeDistanceKmRef.current = distanceRef.current;
                 elevationTrendDirectionRef.current = 0;
@@ -1463,6 +1533,17 @@ export const HudTab: React.FC<HudTabProps> = ({
     setTrackingStopMessage('');
     segmentEnergyKwhRef.current = 0;
     setLiveSegmentEnergyKwh(0);
+    uiGpsPublishedRef.current = {
+      speed: 0,
+      accuracy: uiGpsPublishedRef.current.accuracy,
+      heading: uiGpsPublishedRef.current.heading,
+      distanceKm: 0,
+      segmentEnergyKwh: 0,
+      altitudeAvailable: false,
+      elevationGainM: 0,
+      elevationLossM: 0,
+      maxSpeed: 0,
+    };
   };
 
   // STOP tracking
@@ -1546,6 +1627,17 @@ export const HudTab: React.FC<HudTabProps> = ({
     setCompletedTripSummary(null);
     segmentEnergyKwhRef.current = 0;
     setLiveSegmentEnergyKwh(0);
+    uiGpsPublishedRef.current = {
+      speed: 0,
+      accuracy: uiGpsPublishedRef.current.accuracy,
+      heading: uiGpsPublishedRef.current.heading,
+      distanceKm: 0,
+      segmentEnergyKwh: 0,
+      altitudeAvailable: false,
+      elevationGainM: 0,
+      elevationLossM: 0,
+      maxSpeed: 0,
+    };
   };
 
   // Save tracked trip directly to history
