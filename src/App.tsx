@@ -289,11 +289,15 @@ export default function App() {
         </button>
       )}
 
-      {/* Main Content Area — full viewport in landscape */}
+      {/* Main Content Area — landscape: full-bleed only for map-like tabs; forms stay centered */}
       <main
         className={
           isLandscape
-            ? 'flex-1 w-full h-[100dvh] max-h-[100dvh] overflow-auto p-0 m-0'
+            ? `flex-1 w-full h-[100dvh] max-h-[100dvh] overflow-auto m-0 ${
+                activeTab === 'hud' || activeTab === 'charging'
+                  ? 'p-0'
+                  : 'px-4 py-3 pb-24'
+              }`
             : 'flex-1 max-w-4xl w-full mx-auto p-3 sm:p-4 pb-28'
         }
       >
@@ -308,7 +312,11 @@ export default function App() {
         {!showAdmin && (
         <>
         {/* HUD Tab: Kept mounted permanently so GPS tracking, distance, timer and SoC never reset on tab switch */}
-        <div style={{ display: activeTab === 'hud' ? 'block' : 'none' }}>
+        <div
+          data-tab-panel="hud"
+          className={isLandscape ? 'h-full' : undefined}
+          style={{ display: activeTab === 'hud' ? 'block' : 'none' }}
+        >
           <HudTab
             settings={settings}
             sessions={sessions}
@@ -321,7 +329,11 @@ export default function App() {
         </div>
 
         {/* All main tabs stay mounted and toggle via CSS — avoids Android WebView black screen after login / tab switch */}
-        <div style={{ display: activeTab === 'calculator' ? 'block' : 'none' }}>
+        <div
+          data-tab-panel="calculator"
+          className={isLandscape ? 'max-w-3xl mx-auto w-full' : undefined}
+          style={{ display: activeTab === 'calculator' ? 'block' : 'none' }}
+        >
           <CalculatorTab
             settings={settings}
             sessions={sessions}
@@ -334,7 +346,11 @@ export default function App() {
           />
         </div>
 
-        <div style={{ display: activeTab === 'history' ? 'block' : 'none' }}>
+        <div
+          data-tab-panel="history"
+          className={isLandscape ? 'max-w-3xl mx-auto w-full' : undefined}
+          style={{ display: activeTab === 'history' ? 'block' : 'none' }}
+        >
           <HistoryTab
             sessions={sessions}
             settings={settings}
@@ -348,11 +364,19 @@ export default function App() {
           />
         </div>
 
-        <div style={{ display: activeTab === 'charging' ? 'block' : 'none' }}>
+        <div
+          data-tab-panel="charging"
+          className={isLandscape ? 'h-full' : undefined}
+          style={{ display: activeTab === 'charging' ? 'block' : 'none' }}
+        >
           <ChargingTab settings={settings} />
         </div>
 
-        <div style={{ display: activeTab === 'settings' ? 'block' : 'none' }}>
+        <div
+          data-tab-panel="settings"
+          className={isLandscape ? 'max-w-3xl mx-auto w-full' : undefined}
+          style={{ display: activeTab === 'settings' ? 'block' : 'none' }}
+        >
           <SettingsTab
             settings={settings}
             sessions={sessions}
