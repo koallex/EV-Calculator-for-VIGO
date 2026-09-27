@@ -49,6 +49,8 @@ import { consumeMatchingRouteForecast } from '../utils/routeForecastBridge';
 import { geocodeAddress, buildRouteElevation, type RoutePoint } from '../services/routeElevation';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute } from '../services/weatherForecast';
 import { RouteMap } from './RouteMap';
+import { findNearbyFreeCcsChargers } from '../services/nearbyFreeCharging';
+import { resolveEffectiveConnectors } from '../data/vehicleProfiles';
 import { RangeGauge } from './ui/RangeGauge';
 
 
@@ -246,6 +248,15 @@ export const HudTab: React.FC<HudTabProps> = ({
   const [routeWaypoints, setRouteWaypoints] = useState<HudRouteWaypoint[]>([]);
   /** EVSE card opened by tapping a charge marker on the HUD map */
   const [selectedMapStop, setSelectedMapStop] = useState<HudRouteWaypoint | null>(null);
+  const [mapStopLive, setMapStopLive] = useState<{
+    loading: boolean;
+    freeCcs: number;
+    totalCcs: number;
+    freeGbt?: number;
+    totalGbt?: number;
+    matchedConnector?: string;
+    error?: string;
+  } | null>(null);
   const [routeTotalDistanceKm, setRouteTotalDistanceKm] = useState<number | null>(null);
   /** Index of the next waypoint the live SoC is aimed at. */
   const [activeWaypointIndex, setActiveWaypointIndex] = useState(0);
@@ -1878,6 +1889,68 @@ export const HudTab: React.FC<HudTabProps> = ({
           ]
         : [];
 
+
+  // Live free slots for the EVSE card opened from the map
+  useEffect(() => {
+    if (!selectedMapStop || selectedMapStop.kind !== 'charge') {
+      setMapStopLive(null);
+      return;
+    }
+    if (!Number.isFinite(selectedMapStop.lat) || !Number.isFinite(selectedMapStop.lon)) {
+      setMapStopLive({ loading: false, freeCcs: 0, totalCcs: 0, error: 'Нет координат' });
+      return;
+    }
+    let cancelled = false;
+    setMapStopLive({ loading: true, freeCcs: 0, totalCcs: 0 });
+    (async () => {
+      try {
+        const vehicleConnectors = resolveEffectiveConnectors(
+          settings.vehicleProfileId,
+          settings.connectorOverride as any,
+        );
+        const { results } = await findNearbyFreeCcsChargers(
+          { lat: selectedMapStop.lat!, lon: selectedMapStop.lon! },
+          { radiusKm: 4, limit: 12, vehicleConnectors },
+        );
+        if (cancelled) return;
+        const match =
+          results.find(
+            (r) =>
+              (selectedMapStop.stationId && r.station.id === selectedMapStop.stationId) ||
+              (Math.abs(r.station.lat - selectedMapStop.lat!) < 1e-4 &&
+                Math.abs(r.station.lon - selectedMapStop.lon!) < 1e-4),
+          ) || results[0];
+        if (!match) {
+          setMapStopLive({
+            loading: false,
+            freeCcs: 0,
+            totalCcs: 0,
+            error: 'Live-статус недоступен',
+          });
+          return;
+        }
+        setMapStopLive({
+          loading: false,
+          freeCcs: match.freeCcs,
+          totalCcs: match.totalCcs,
+          matchedConnector: match.matchedConnector,
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setMapStopLive({
+            loading: false,
+            freeCcs: 0,
+            totalCcs: 0,
+            error: e instanceof Error ? e.message : 'Ошибка live-статуса',
+          });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMapStop, settings.vehicleProfileId, settings.connectorOverride]);
+
   const mapLayer = (
     <div className="absolute inset-0 h-full w-full">
       {mapPointsForHud.length >= 2 ? (
@@ -1997,6 +2070,48 @@ export const HudTab: React.FC<HudTabProps> = ({
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isDark ? 'bg-slate-800 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>
                 Заряд до {Math.round(selectedMapStop.chargeTargetSoc)}%
               </span>
+            )}
+          </div>
+
+          {/* Live free ports */}
+          <div className={`mt-2.5 rounded-xl border px-2.5 py-2 ${isDark ? 'border-slate-800 bg-slate-900/80' : 'border-slate-200 bg-slate-50'}`}>
+            <div className={`text-[10px] font-bold uppercase tracking-wide mb-1 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+              Свободные слоты
+            </div>
+            {mapStopLive?.loading ? (
+              <div className={`flex items-center gap-1.5 text-[12px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Проверяем доступность…
+              </div>
+            ) : mapStopLive?.error && !mapStopLive.totalCcs ? (
+              <div className={`text-[12px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                {mapStopLive.error}
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[12px] font-bold ${
+                    (mapStopLive?.freeCcs ?? 0) > 0
+                      ? 'bg-emerald-600 text-white'
+                      : isDark
+                        ? 'bg-slate-800 text-slate-300'
+                        : 'bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  {(mapStopLive?.matchedConnector === 'gbt' ? 'GB/T' : 'CCS')}{' '}
+                  {mapStopLive?.freeCcs ?? 0}
+                  {mapStopLive?.totalCcs != null && mapStopLive.totalCcs > 0
+                    ? ` / ${mapStopLive.totalCcs}`
+                    : ''}
+                  {(mapStopLive?.freeCcs ?? 0) > 0 ? ' свободно' : ' занято'}
+                </span>
+                {mapStopLive && (mapStopLive.freeCcs ?? 0) > 0 && (
+                  <span className="text-[11px] font-semibold text-emerald-500">● Live</span>
+                )}
+                {mapStopLive && (mapStopLive.freeCcs ?? 0) === 0 && mapStopLive.totalCcs > 0 && (
+                  <span className="text-[11px] font-semibold text-rose-400">Нет свободных</span>
+                )}
+              </div>
             )}
           </div>
         </div>
