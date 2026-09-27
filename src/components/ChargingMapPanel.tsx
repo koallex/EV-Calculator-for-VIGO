@@ -22,6 +22,7 @@ import {
 } from '../data/vehicleProfiles';
 import type { VehicleConnector } from '../services/chargingStations';
 import { triggerHaptic } from '../utils/haptics';
+import { findNearbyFreeCcsChargers, type FreeChargerResult } from '../services/nearbyFreeCharging';
 import { useEvraceTariffs, matchEvraceTariff, type EvraceTariff } from '../hooks/useEvraceTariffs';
 
 type ConnFilter = 'ccs2' | 'gbt' | 'type2';
@@ -370,6 +371,8 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const [maxPrice, setMaxPrice] = useState<number | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [findingNearest, setFindingNearest] = useState(false);
+  const [nearestFreeList, setNearestFreeList] = useState<FreeChargerResult[]>([]);
+  const [nearestFreeOpen, setNearestFreeOpen] = useState(false);
   const [stations, setStations] = useState<MapStation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -946,79 +949,87 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     );
   };
 
-  /** Enable free-only filter, fly to user, then select nearest free station once live data is in. */
-  const findNearestFree = () => {
+  /** Search nearby free chargers (same service as Calculator) and show a short list. */
+  const findNearestFree = async () => {
     if (!navigator.geolocation) {
       setError('Геолокация недоступна');
       return;
     }
     triggerHaptic('medium', settings.hapticFeedback);
     setFindingNearest(true);
+    setNearestFreeList([]);
+    setNearestFreeOpen(true);
     setOnlyFree(true);
-    setError(null as any);
     setError('');
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = pos.coords.latitude;
-        const lon = pos.coords.longitude;
-        placeUserMarker(lat, lon);
-        bundleRef.current?.setLocation(lat, lon, 13);
-        scheduleFetch();
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 12000,
+          maximumAge: 15000,
+        }),
+      );
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      placeUserMarker(lat, lon);
+      bundleRef.current?.setLocation(lat, lon, 13);
+      scheduleFetch();
 
-        let tries = 0;
-        const pick = () => {
-          const list = stationsRef.current || [];
-          const free = list.filter((s) => {
-            const typeOk =
-              (connFilters.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
-              (connFilters.includes('gbt') && (s.freeGbt ?? 0) > 0) ||
-              (connFilters.includes('type2') && (s.freeType2 ?? 0) > 0);
-            return !!s.liveChecked && typeOk;
-          });
-          if (!free.length) return false;
-          const withDist = free
-            .map((s) => {
-              const R = 6371;
-              const r = Math.PI / 180;
-              const dLat = (s.lat - lat) * r;
-              const dLon = (s.lon - lon) * r;
-              const a =
-                Math.sin(dLat / 2) ** 2 +
-                Math.cos(lat * r) * Math.cos(s.lat * r) * Math.sin(dLon / 2) ** 2;
-              const km = 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
-              return { s, km };
-            })
-            .sort((a, b) => a.km - b.km);
-          const best = withDist[0];
-          if (best) {
-            setSelected(best.s);
-            bundleRef.current?.setLocation(best.s.lat, best.s.lon, 15);
-            triggerHaptic('success', settings.hapticFeedback);
-            return true;
-          }
-          return false;
-        };
+      const vehicleConnectors = resolveEffectiveConnectors(
+        settings.vehicleProfileId,
+        settings.connectorOverride as any,
+      );
+      const { results } = await findNearbyFreeCcsChargers(
+        { lat, lon },
+        { radiusKm: 40, limit: 10, vehicleConnectors },
+      );
+      setNearestFreeList(results);
+      if (!results.length) {
+        setError('Свободных ЭЗС рядом не найдено. Расширьте радиус или снимите фильтры.');
+      } else {
+        // Focus map on the closest result without auto-selecting only one card permanently
+        const best = results[0];
+        if (best?.station) {
+          bundleRef.current?.setLocation(best.station.lat, best.station.lon, 14);
+        }
+        triggerHaptic('success', settings.hapticFeedback);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Не удалось найти свободные ЭЗС');
+    } finally {
+      setFindingNearest(false);
+    }
+  };
 
-        const tick = () => {
-          tries += 1;
-          if (pick() || tries >= 6) {
-            setFindingNearest(false);
-            if (tries >= 6 && !pick()) {
-              setError('Свободных ЭЗС рядом не найдено. Расширьте карту или снимите фильтры.');
-            }
-            return;
-          }
-          window.setTimeout(tick, 700);
-        };
-        window.setTimeout(tick, 600);
-      },
-      () => {
-        setFindingNearest(false);
-        setError('Геолокация недоступна');
-      },
-      { enableHighAccuracy: true, timeout: 12000 },
+  const selectNearestResult = (item: FreeChargerResult) => {
+    triggerHaptic('light', settings.hapticFeedback);
+    // Map onto MapStation shape if present in current stations; else synthesize minimal card
+    const match = stationsRef.current.find(
+      (s) =>
+        s.id === item.station.id ||
+        (Math.abs(s.lat - item.station.lat) < 1e-4 && Math.abs(s.lon - item.station.lon) < 1e-4),
     );
+    if (match) {
+      setSelected(match);
+    } else {
+      setSelected({
+        id: item.station.id,
+        lat: item.station.lat,
+        lon: item.station.lon,
+        name: item.station.name,
+        address: item.station.address || '',
+        operator: item.operator || item.station.operator || '',
+        operatorKey: String(item.station.operator || item.operator || 'other').toLowerCase(),
+        hasCcs2: true,
+        hasGbt: item.matchedConnector === 'gbt',
+        hasType2: item.matchedConnector === 'type2',
+        freeCcs: item.freeCcs,
+        totalCcs: item.totalCcs,
+        liveChecked: true,
+      } as any);
+    }
+    bundleRef.current?.setLocation(item.station.lat, item.station.lon, 15);
   };
 
   type PortChip = { key: string; label: string; free?: number; total?: number; live: boolean };
@@ -1155,6 +1166,79 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           )}
         </button>
       </div>
+
+
+      {/* Nearest free list — like Calculator */}
+      {nearestFreeOpen && (
+        <div
+          className={`absolute left-2 right-2 top-[6.5rem] z-20 max-h-[42%] overflow-hidden rounded-2xl border backdrop-blur-md ${
+            isDark ? 'bg-slate-950/95 border-slate-700 text-slate-100' : 'bg-white/95 border-slate-200 text-slate-900 shadow-lg'
+          }`}
+        >
+          <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
+            <span className="text-[11px] font-bold uppercase tracking-wide opacity-70">
+              {findingNearest ? 'Поиск…' : `Свободные рядом · ${nearestFreeList.length}`}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setNearestFreeOpen(false);
+                setNearestFreeList([]);
+              }}
+              className="rounded-lg p-1 opacity-70 hover:opacity-100"
+              aria-label="Закрыть"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          {findingNearest ? (
+            <div className="flex items-center gap-2 px-3 py-4 text-[12px] opacity-80">
+              <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+              Сканируем станции вокруг…
+            </div>
+          ) : nearestFreeList.length === 0 ? (
+            <div className="px-3 py-4 text-[12px] opacity-70">Ничего не найдено</div>
+          ) : (
+            <ul className="max-h-52 overflow-y-auto p-1.5 space-y-1">
+              {nearestFreeList.map((item) => {
+                const isActive =
+                  selected &&
+                  (selected.id === item.station.id ||
+                    (Math.abs(selected.lat - item.station.lat) < 1e-4 &&
+                      Math.abs(selected.lon - item.station.lon) < 1e-4));
+                return (
+                  <li key={item.station.id}>
+                    <button
+                      type="button"
+                      onClick={() => selectNearestResult(item)}
+                      className={`w-full text-left rounded-xl px-3 py-2 border transition-colors ${
+                        isActive
+                          ? isDark
+                            ? 'bg-emerald-950/50 border-emerald-600/50'
+                            : 'bg-emerald-50 border-emerald-300'
+                          : isDark
+                            ? 'bg-slate-900/80 border-transparent hover:bg-slate-800'
+                            : 'bg-white border-slate-100 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="text-[12px] font-semibold truncate">{item.station.name}</div>
+                      <div className="mt-0.5 text-[11px] opacity-60">
+                        {item.distanceKm < 1
+                          ? `${Math.round(item.distanceKm * 1000)} м`
+                          : `${item.distanceKm.toFixed(1)} км`}
+                        {' · '}
+                        {item.matchedConnector === 'gbt' ? 'GB/T' : item.matchedConnector === 'type2' ? 'Type2' : 'CCS'}{' '}
+                        свободно {item.freeCcs}
+                        {item.operator ? ` · ${item.operator}` : ''}
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Filter sheet */}
       {filtersOpen && (

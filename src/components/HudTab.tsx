@@ -409,6 +409,20 @@ export const HudTab: React.FC<HudTabProps> = ({
     }
     if (typeof hudPlan.totalDistanceKm === 'number' && hudPlan.totalDistanceKm > 0) {
       setRouteTotalDistanceKm(hudPlan.totalDistanceKm);
+      // Seed compact pre-start card so it is not empty while live forecast catches up.
+      setDestinationResult((prev) =>
+        prev ?? {
+          name: (hudPlan.destination || 'Назначение').trim(),
+          distanceKm: Number(hudPlan.totalDistanceKm!.toFixed(1)),
+          gainM: 0,
+          lossM: 0,
+          predictedConsumption: 0,
+          energyNeededKwh: 0,
+          predictedSoc: Math.max(0, Math.round(hudPlan.startSoc || startTripSoc)),
+          approximate: true,
+          forecastUsed: false,
+        },
+      );
     } else {
       setRouteTotalDistanceKm(null);
     }
@@ -421,8 +435,8 @@ export const HudTab: React.FC<HudTabProps> = ({
           distanceFromStartKm: p.distanceFromStartKm ?? i,
         })),
       );
-      // Keep map collapsed on transfer so mobile layout stays usable; user opens it.
-      setHudMapOpen(false);
+      // Show map in pre-start (map-first HUD).
+      setHudMapOpen(true);
     } else {
       setHudRoutePoints([]);
     }
@@ -1983,7 +1997,9 @@ export const HudTab: React.FC<HudTabProps> = ({
   ) : null;
 
   // ── Pre-start: route from Calculator, map + compact controls ────────────
-  if (!isTracking && hudRoutePoints.length >= 2) {
+  // Prefer map-first pre-start whenever a plan destination or geometry exists
+  // (avoids falling through to the legacy form UI).
+  if (!isTracking && (hudRoutePoints.length >= 2 || !!destinationQuery.trim())) {
     return (
       <div
         id="hud-tab-container"
