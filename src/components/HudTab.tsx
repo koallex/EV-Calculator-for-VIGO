@@ -2014,8 +2014,8 @@ export const HudTab: React.FC<HudTabProps> = ({
         {completedTripModal}
 
         {/* Center-bottom panel — above Yandex attribution */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-14 pt-2">
-          <div className={`pointer-events-auto rounded-2xl border p-3 space-y-2.5 shadow-xl ${glass}`}>
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-14 pt-2 flex justify-center">
+          <div className={`pointer-events-auto w-full max-w-md sm:max-w-sm landscape:max-w-[22rem] rounded-2xl border p-3 space-y-2.5 shadow-xl ${glass}`}>
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-[10px] font-bold uppercase opacity-60">Маршрут готов</div>
