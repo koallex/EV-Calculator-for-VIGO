@@ -42,6 +42,25 @@ export default function App() {
   // Modals
   const [isAddTripOpen, setIsAddTripOpen] = useState(false);
   const [addTripInitialData, setAddTripInitialData] = useState<Partial<TripSession> | undefined>(undefined);
+  /** Full-bleed layout in landscape: hide chrome (header + bottom nav). */
+  const [isLandscape, setIsLandscape] = useState(false);
+
+  useEffect(() => {
+    const update = () => {
+      const landscape =
+        (typeof window.matchMedia === 'function' &&
+          window.matchMedia('(orientation: landscape)').matches) ||
+        window.innerWidth > window.innerHeight * 1.05;
+      setIsLandscape(landscape);
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
+  }, []);
 
   // Server-side authentication. No credentials are stored in localStorage.
   useEffect(() => {
@@ -224,28 +243,38 @@ export default function App() {
     return <LoginScreen onLogin={handleLogin} />;
   }
 
+  const chromeHidden = isLandscape;
+
   return (
     <div className={`min-h-screen transition-colors duration-200 flex flex-col font-sans ${
       settings.theme === 'light' 
         ? 'bg-[#f0f6fb] text-slate-900 selection:bg-cyan-400 selection:text-slate-950' 
         : 'bg-[#0b1220] text-slate-100 selection:bg-cyan-500 selection:text-slate-950'
     }`}>
-      {/* Top Header */}
-      <Header
-        settings={settings}
-        onUpdateSettings={setSettings}
-        onOpenAddTrip={() => {
-          setAddTripInitialData(undefined);
-          setIsAddTripOpen(true);
-        }}
-        currentUser={authUser}
-        onOpenAdmin={() => setShowAdmin(true)}
-        onLogout={handleLogout}
-        onOpenAbout={() => setShowAbout(true)}
-      />
+      {/* Top Header — hidden in landscape for full-screen content */}
+      {!chromeHidden && (
+        <Header
+          settings={settings}
+          onUpdateSettings={setSettings}
+          onOpenAddTrip={() => {
+            setAddTripInitialData(undefined);
+            setIsAddTripOpen(true);
+          }}
+          currentUser={authUser}
+          onOpenAdmin={() => setShowAdmin(true)}
+          onLogout={handleLogout}
+          onOpenAbout={() => setShowAbout(true)}
+        />
+      )}
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-4xl w-full mx-auto p-3 sm:p-4 mb-16">
+      {/* Main Content Area — full viewport in landscape */}
+      <main
+        className={
+          chromeHidden
+            ? 'flex-1 w-full h-[100dvh] max-h-[100dvh] overflow-hidden p-0 m-0'
+            : 'flex-1 max-w-4xl w-full mx-auto p-3 sm:p-4 mb-16'
+        }
+      >
         {showAdmin ? (
           <AdminPanel
             currentLogin={authUser.login}
@@ -314,15 +343,17 @@ export default function App() {
         )}
       </main>
 
-      {/* Bottom Sticky Mobile Navigation */}
-      {!showAdmin && <Navigation
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        hapticFeedback={settings.hapticFeedback}
-        historyCount={sessions.length}
-        theme={settings.theme}
-        isHudTracking={isHudTracking}
-      />}
+      {/* Bottom nav — hidden in landscape for full-screen content */}
+      {!showAdmin && !chromeHidden && (
+        <Navigation
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+          hapticFeedback={settings.hapticFeedback}
+          historyCount={sessions.length}
+          theme={settings.theme}
+          isHudTracking={isHudTracking}
+        />
+      )}
 
       <AboutProject
         isOpen={showAbout}

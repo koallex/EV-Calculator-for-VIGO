@@ -205,8 +205,8 @@ input[type=range]::-moz-range-thumb {
   border-radius: 0;
 }
 
-/* Dark theme for Yandex Maps 2.1 — invert basemap (custom dark tiles often blank).
-   Controls are inverted twice so they stay readable. */
+/* Dark theme for Yandex Maps 2.1 — invert ONLY basemap tiles.
+   Do NOT invert controls/copyrights: that made "Открыть в Яндекс.Картах" stay pure white. */
 .vigo-ymaps-dark .ymaps-2-1-79-ground-pane,
 .vigo-ymaps-dark .ymaps-2-1-79-areas-pane,
 .vigo-ymaps-dark [class*="ymaps-"][class*="-ground-pane"],
@@ -214,52 +214,18 @@ input[type=range]::-moz-range-thumb {
   filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.92);
 }
 .vigo-ymaps-dark .ymaps-2-1-79-controls-pane,
-.vigo-ymaps-dark [class*="ymaps-"][class*="-controls-pane"] {
-  filter: invert(1) hue-rotate(180deg);
-}
+.vigo-ymaps-dark [class*="ymaps-"][class*="-controls-pane"],
 .vigo-ymaps-dark .ymaps-2-1-79-copyrights-pane,
 .vigo-ymaps-dark [class*="ymaps-"][class*="-copyrights-pane"] {
-  filter: invert(1) hue-rotate(180deg);
-  opacity: 0.75;
+  filter: none !important;
 }
 
-/* Yandex attribution — readable in light and dark (API 2.1 + 3).
-   Default pure-white label looks wrong on light tiles and too harsh on dark. */
+/* Attribution + "Открыть в Яндекс.Картах" — explicit colors (light / dark) */
 .route-map-shell [class*="copyrights"],
 .route-map-shell [class*="copyright"],
 .route-map-shell [class*="gototech"],
 .route-map-yandex [class*="copyrights"],
-.route-map-yandex [class*="copyright"] {
-  color: #64748b !important;
-  opacity: 0.9 !important;
-  text-shadow: none !important;
-}
-.route-map-shell [class*="copyrights"] a,
-.route-map-shell [class*="copyright"] a,
-.route-map-yandex [class*="copyrights"] a,
-.route-map-yandex [class*="copyright"] a {
-  color: #475569 !important;
-}
-.route-map-shell.vigo-ymaps-dark [class*="copyrights"],
-.route-map-shell.vigo-ymaps-dark [class*="copyright"],
-.route-map-shell.vigo-ymaps-dark [class*="gototech"],
-.vigo-ymaps-dark [class*="copyrights"],
-.vigo-ymaps-dark [class*="copyright"] {
-  color: #94a3b8 !important;
-  opacity: 0.85 !important;
-}
-.route-map-shell.vigo-ymaps-dark [class*="copyrights"] a,
-.route-map-shell.vigo-ymaps-dark [class*="copyright"] a,
-.vigo-ymaps-dark [class*="copyrights"] a,
-.vigo-ymaps-dark [class*="copyright"] a {
-  color: #cbd5e1 !important;
-}
-.route-map-shell img[class*="logo"],
-.route-map-yandex img[class*="logo"] {
-  opacity: 0.72;
-}
-
-/* "Открыть в Яндекс.Картах" control — often pure white; force muted chip style */
+.route-map-yandex [class*="copyright"],
 .route-map-shell [class*="goto"],
 .route-map-shell [class*="Goto"],
 .route-map-shell [class*="open-maps"],
@@ -268,29 +234,54 @@ input[type=range]::-moz-range-thumb {
 .route-map-shell a[href*="yandex.ru/maps"],
 .route-map-yandex a[href*="maps.yandex"],
 .route-map-yandex a[href*="yandex.ru/maps"] {
-  color: #e2e8f0 !important;
-  background: rgba(15, 23, 42, 0.82) !important;
+  color: #334155 !important;
+  background: rgba(255, 255, 255, 0.92) !important;
   border-radius: 8px !important;
   text-shadow: none !important;
-  opacity: 0.92 !important;
+  opacity: 0.95 !important;
   filter: none !important;
+  -webkit-text-fill-color: #334155 !important;
 }
-.route-map-shell:not(.vigo-ymaps-dark) [class*="goto"],
-.route-map-shell:not(.vigo-ymaps-dark) [class*="Goto"],
-.route-map-shell:not(.vigo-ymaps-dark) a[href*="maps.yandex"],
-.route-map-shell:not(.vigo-ymaps-dark) a[href*="yandex.ru/maps"] {
+.route-map-shell [class*="copyrights"] a,
+.route-map-shell [class*="copyright"] a,
+.route-map-yandex [class*="copyrights"] a,
+.route-map-yandex [class*="copyright"] a {
   color: #334155 !important;
-  background: rgba(255, 255, 255, 0.9) !important;
-  border: 1px solid rgba(148, 163, 184, 0.45) !important;
+  -webkit-text-fill-color: #334155 !important;
 }
-/* Do not double-invert the goto control inside dark map (keeps it readable) */
+.route-map-shell.vigo-ymaps-dark [class*="copyrights"],
+.route-map-shell.vigo-ymaps-dark [class*="copyright"],
+.route-map-shell.vigo-ymaps-dark [class*="gototech"],
+.route-map-shell.vigo-ymaps-dark [class*="goto"],
+.route-map-shell.vigo-ymaps-dark [class*="Goto"],
+.route-map-shell.vigo-ymaps-dark [class*="open-maps"],
+.route-map-shell.vigo-ymaps-dark a[href*="maps.yandex"],
+.route-map-shell.vigo-ymaps-dark a[href*="yandex.ru/maps"],
+.vigo-ymaps-dark [class*="copyrights"],
+.vigo-ymaps-dark [class*="copyright"],
 .vigo-ymaps-dark [class*="goto"],
 .vigo-ymaps-dark [class*="Goto"],
 .vigo-ymaps-dark a[href*="maps.yandex"],
 .vigo-ymaps-dark a[href*="yandex.ru/maps"] {
+  color: #cbd5e1 !important;
+  background: rgba(15, 23, 42, 0.9) !important;
+  border: 1px solid rgba(148, 163, 184, 0.25) !important;
+  -webkit-text-fill-color: #cbd5e1 !important;
   filter: none !important;
-  color: #e2e8f0 !important;
-  background: rgba(15, 23, 42, 0.88) !important;
+}
+.route-map-shell.vigo-ymaps-dark [class*="copyrights"] *,
+.route-map-shell.vigo-ymaps-dark [class*="goto"] *,
+.vigo-ymaps-dark [class*="copyrights"] *,
+.vigo-ymaps-dark [class*="goto"] * {
+  color: #cbd5e1 !important;
+  -webkit-text-fill-color: #cbd5e1 !important;
+  fill: #cbd5e1 !important;
+  filter: none !important;
+}
+.route-map-shell img[class*="logo"],
+.route-map-yandex img[class*="logo"] {
+  opacity: 0.75;
+  filter: none !important;
 }
 
 /* User geolocation pin on EZS map — distinct from operator station dots */
