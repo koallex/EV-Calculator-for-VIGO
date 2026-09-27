@@ -333,7 +333,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       chargerMarkersRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, JSON.stringify(stops)]);
+  }, [mapReady, JSON.stringify(stops), onChargingStopClick]);
 
   useEffect(() => {
     const bundle = bundleRef.current;

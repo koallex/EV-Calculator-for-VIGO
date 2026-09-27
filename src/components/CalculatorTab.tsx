@@ -1966,6 +1966,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                           : stop.connector === 'ccs2'
                             ? 'CCS'
                             : 'Type2',
+                      stationId: stop.station.id,
+                      address: stop.station.address,
+                      operator: stop.station.operator,
+                      ccs2PowerKw: stop.station.ccs2PowerKw,
+                      gbtPowerKw: stop.station.gbtPowerKw,
+                      type2PowerKw: stop.station.type2PowerKw,
                     })),
                     {
                       kind: 'destination' as const,

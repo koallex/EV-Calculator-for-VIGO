@@ -32,6 +32,7 @@ import {
   Flag,
   ChevronDown,
   PlugZap,
+  X,
   SkipForward,
 } from 'lucide-react';
 import { UserSettings, TripSession } from '../types';
@@ -102,6 +103,13 @@ export type HudRouteWaypoint = {
   /** Planned SoC after charging (only for kind=charge). */
   chargeTargetSoc?: number;
   connectorLabel?: string;
+  /** Optional EVSE metadata for map card (from Calculator). */
+  stationId?: string;
+  address?: string;
+  operator?: string;
+  ccs2PowerKw?: number;
+  gbtPowerKw?: number;
+  type2PowerKw?: number;
 };
 
 export type HudRoutePlan = {
@@ -236,6 +244,8 @@ export const HudTab: React.FC<HudTabProps> = ({
 
   /** Multi-stop plan from Calculator: charge legs + final B. */
   const [routeWaypoints, setRouteWaypoints] = useState<HudRouteWaypoint[]>([]);
+  /** EVSE card opened by tapping a charge marker on the HUD map */
+  const [selectedMapStop, setSelectedMapStop] = useState<HudRouteWaypoint | null>(null);
   const [routeTotalDistanceKm, setRouteTotalDistanceKm] = useState<number | null>(null);
   /** Index of the next waypoint the live SoC is aimed at. */
   const [activeWaypointIndex, setActiveWaypointIndex] = useState(0);
@@ -1881,10 +1891,35 @@ export const HudTab: React.FC<HudTabProps> = ({
           chargingStops={routeWaypoints
             .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
             .map((w) => ({
+              id: w.stationId || `${w.lat},${w.lon}`,
               lat: w.lat!,
               lon: w.lon!,
               name: w.name,
+              address: w.address,
             }))}
+          onChargingStopClick={(stop) => {
+            triggerHaptic('light', settings.hapticFeedback);
+            const match = routeWaypoints.find(
+              (w) =>
+                w.kind === 'charge' &&
+                ((w.stationId && w.stationId === stop.id) ||
+                  (Number.isFinite(w.lat) &&
+                    Number.isFinite(w.lon) &&
+                    Math.abs(w.lat! - stop.lat) < 1e-5 &&
+                    Math.abs(w.lon! - stop.lon) < 1e-5)),
+            );
+            setSelectedMapStop(
+              match || {
+                kind: 'charge',
+                name: stop.name,
+                distanceAlongRouteKm: 0,
+                lat: stop.lat,
+                lon: stop.lon,
+                address: stop.address,
+                stationId: stop.id,
+              },
+            );
+          }}
         />
       ) : (
         <div className={`absolute inset-0 flex items-center justify-center text-xs ${isDark ? 'bg-slate-900 text-slate-500' : 'bg-slate-200 text-slate-500'}`}>
@@ -1893,6 +1928,81 @@ export const HudTab: React.FC<HudTabProps> = ({
       )}
     </div>
   );
+
+
+  const hudEvseCard = selectedMapStop ? (
+    <div
+      className={`pointer-events-auto absolute left-1/2 z-30 w-[min(22rem,calc(100%-1.25rem))] -translate-x-1/2 rounded-2xl border p-3 shadow-2xl backdrop-blur-md ${
+        isDark
+          ? 'border-amber-700/40 bg-slate-950/95 text-slate-100'
+          : 'border-amber-200 bg-white/95 text-slate-900'
+      }`}
+      style={{ bottom: 'calc(5.5rem + env(safe-area-inset-bottom, 0px))' }}
+    >
+      <div className="flex items-start gap-2">
+        <div className={`mt-0.5 rounded-lg p-1.5 ${isDark ? 'bg-amber-500/15 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>
+          <PlugZap className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-[13px] font-bold leading-tight">{selectedMapStop.name}</p>
+              {selectedMapStop.address && (
+                <p className={`truncate text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {selectedMapStop.address}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedMapStop(null)}
+              className={`rounded-lg p-1 ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
+              aria-label="Закрыть"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {selectedMapStop.operator && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                {selectedMapStop.operator}
+              </span>
+            )}
+            {selectedMapStop.connectorLabel && (
+              <span className="rounded-full bg-amber-600/90 px-2 py-0.5 text-[10px] font-semibold text-white">
+                {selectedMapStop.connectorLabel}
+              </span>
+            )}
+            {selectedMapStop.ccs2PowerKw != null && selectedMapStop.ccs2PowerKw > 0 && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isDark ? 'bg-slate-800 text-cyan-300' : 'bg-cyan-50 text-cyan-700'}`}>
+                CCS · {Math.round(selectedMapStop.ccs2PowerKw)} кВт
+              </span>
+            )}
+            {selectedMapStop.gbtPowerKw != null && selectedMapStop.gbtPowerKw > 0 && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isDark ? 'bg-slate-800 text-cyan-300' : 'bg-cyan-50 text-cyan-700'}`}>
+                GB/T · {Math.round(selectedMapStop.gbtPowerKw)} кВт
+              </span>
+            )}
+            {selectedMapStop.type2PowerKw != null && selectedMapStop.type2PowerKw > 0 && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isDark ? 'bg-slate-800 text-cyan-300' : 'bg-cyan-50 text-cyan-700'}`}>
+                Type2 · {Math.round(selectedMapStop.type2PowerKw)} кВт
+              </span>
+            )}
+            {selectedMapStop.plannedArrivalSoc != null && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isDark ? 'bg-slate-800 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>
+                Прибытие ~{Math.round(selectedMapStop.plannedArrivalSoc)}%
+              </span>
+            )}
+            {selectedMapStop.chargeTargetSoc != null && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isDark ? 'bg-slate-800 text-emerald-300' : 'bg-emerald-50 text-emerald-700'}`}>
+                Заряд до {Math.round(selectedMapStop.chargeTargetSoc)}%
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   // Save dialog must live outside tracking-only branches — after STOP isTracking becomes false
   // and we often land on pre-start (route still present).
@@ -2010,6 +2120,7 @@ export const HudTab: React.FC<HudTabProps> = ({
         } ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'}`}
       >
         {mapLayer}
+        {hudEvseCard}
 
         {completedTripModal}
 
@@ -2239,6 +2350,7 @@ export const HudTab: React.FC<HudTabProps> = ({
           }`}
         >
           {mapLayer}
+        {hudEvseCard}
         </div>
 
         {/* Landscape: side panel with metrics */}
@@ -2469,10 +2581,32 @@ export const HudTab: React.FC<HudTabProps> = ({
               chargingStops={routeWaypoints
                 .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
                 .map((w) => ({
+                  id: w.stationId || `${w.lat},${w.lon}`,
                   lat: w.lat!,
                   lon: w.lon!,
                   name: w.name,
+                  address: w.address,
                 }))}
+              onChargingStopClick={(stop) => {
+                triggerHaptic('light', settings.hapticFeedback);
+                const match = routeWaypoints.find(
+                  (w) =>
+                    w.kind === 'charge' &&
+                    ((w.stationId && w.stationId === stop.id) ||
+                      (Math.abs((w.lat ?? 0) - stop.lat) < 1e-5 && Math.abs((w.lon ?? 0) - stop.lon) < 1e-5)),
+                );
+                setSelectedMapStop(
+                  match || {
+                    kind: 'charge',
+                    name: stop.name,
+                    distanceAlongRouteKm: 0,
+                    lat: stop.lat,
+                    lon: stop.lon,
+                    address: stop.address,
+                    stationId: stop.id,
+                  },
+                );
+              }}
             />
           )}
         </div>
