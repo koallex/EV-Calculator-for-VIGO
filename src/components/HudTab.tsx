@@ -691,11 +691,18 @@ export const HudTab: React.FC<HudTabProps> = ({
       latestGpsSpeedRef.current = smoothedSpeed;
 
       let vehicleHeading = heading;
-      if (vehicleHeading !== null && !isNaN(vehicleHeading) && vehicleHeading >= 0) {
+      // Prefer device compass when moving; otherwise derive course from GPS track.
+      // Keep last stable heading when stationary so map rotation does not snap to 0.
+      if (
+        vehicleHeading !== null &&
+        !isNaN(vehicleHeading) &&
+        vehicleHeading >= 0 &&
+        smoothedSpeed >= 3
+      ) {
         const roundedHeading = Math.round(vehicleHeading);
         setGpsHeading(roundedHeading);
         lastHeadingRef.current = roundedHeading;
-      } else if (prevPositionRef.current && smoothedSpeed >= 5) {
+      } else if (prevPositionRef.current && smoothedSpeed >= 4) {
         const bearing = calculateBearing(
           prevPositionRef.current.lat,
           prevPositionRef.current.lon,
@@ -704,6 +711,9 @@ export const HudTab: React.FC<HudTabProps> = ({
         );
         setGpsHeading(bearing);
         lastHeadingRef.current = bearing;
+      } else if (lastHeadingRef.current != null) {
+        // Hold last heading while stopped / weak GPS
+        setGpsHeading(Math.round(lastHeadingRef.current));
       }
 
       // === ACCUMULATE TRIP DISTANCE (with strict glitch checks) ===
@@ -1960,7 +1970,7 @@ export const HudTab: React.FC<HudTabProps> = ({
           fill
           currentPosition={isTracking ? mapLivePosition : null}
           followMode={isTracking && !!mapLivePosition}
-          headingDeg={isTracking ? (gpsHeading ?? lastHeadingRef.current ?? null) : null}
+          headingDeg={isTracking ? (gpsHeading ?? lastHeadingRef.current ?? 0) : null}
           chargingStops={routeWaypoints
             .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
             .map((w) => ({
@@ -2484,14 +2494,16 @@ export const HudTab: React.FC<HudTabProps> = ({
         {/* Portrait overlays on top of map */}
         {!isLandscape && (
           <>
-            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2">
-              <div className={`pointer-events-auto rounded-2xl border px-2.5 py-2 ${glass}`}>
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2 flex justify-center">
+              <div className={`pointer-events-auto w-full max-w-md rounded-2xl border px-2.5 py-2 space-y-2 shadow-lg ${glass}`}>
                 {metricsBlock}
+                <div className={`border-t pt-2 ${isDark ? 'border-white/10' : 'border-slate-300/40'}`}>
+                  {controlsBlock}
+                </div>
               </div>
-              <div className="pointer-events-auto mt-2">{controlsBlock}</div>
             </div>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-12">
-              <div className="pointer-events-auto">{telemetryBlock}</div>
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-12 flex justify-center">
+              <div className="pointer-events-auto w-full max-w-md">{telemetryBlock}</div>
             </div>
           </>
         )}

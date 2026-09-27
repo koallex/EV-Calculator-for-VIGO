@@ -1985,7 +1985,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     | undefined;
                   const pts = routeElevation?.points;
                   if (pts && pts.length >= 2) {
-                    const maxPts = 160;
+                    const maxPts = 280;
                     const toPt = (p: (typeof pts)[number]) => ({
                       lat: p.lat,
                       lon: p.lon,

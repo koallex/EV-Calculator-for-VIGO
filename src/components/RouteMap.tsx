@@ -55,6 +55,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   const chargerMarkersRef = useRef<any[]>([]);
   const [loadError, setLoadError] = useState('');
   const [mapReady, setMapReady] = useState(false);
+  /** After user pans/zooms, pause GPS follow so gestures are not fought. */
+  const userNavPauseUntilRef = useRef(0);
+  const lastAppliedHeadingRef = useRef<number | null>(null);
 
   const positions = useMemo(
     () => points.map((p) => [p.lat, p.lon] as [number, number]),
@@ -88,6 +91,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       lon: start?.[1] ?? 27.5667,
       zoom: 12,
       isDark,
+      showZoom: true,
     })
       .then((bundle) => {
         if (cancelled) {
@@ -96,6 +100,18 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         }
         bundleRef.current = bundle;
         setMapReady(true);
+        // Allow pan/zoom: pause followMode briefly after user gesture
+        const el = containerRef.current;
+        const pauseFollow = () => {
+          userNavPauseUntilRef.current = Date.now() + 8000;
+        };
+        if (el) {
+          el.addEventListener('pointerdown', pauseFollow, { passive: true });
+          el.addEventListener('wheel', pauseFollow, { passive: true });
+          el.addEventListener('touchstart', pauseFollow, { passive: true });
+          (bundle as any)._vigoPauseFollow = pauseFollow;
+          (bundle as any)._vigoPauseEl = el;
+        }
       })
       .catch((e) => setLoadError(e instanceof Error ? e.message : 'Ошибка карты'));
 
@@ -106,6 +122,16 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       endMarkerRef.current = null;
       currentPosMarkerRef.current = null;
       chargerMarkersRef.current = [];
+      try {
+        const b = bundleRef.current as any;
+        const el = b?._vigoPauseEl as HTMLElement | undefined;
+        const fn = b?._vigoPauseFollow as (() => void) | undefined;
+        if (el && fn) {
+          el.removeEventListener('pointerdown', fn);
+          el.removeEventListener('wheel', fn);
+          el.removeEventListener('touchstart', fn);
+        }
+      } catch { /* ignore */ }
       bundleRef.current?.destroy();
       bundleRef.current = null;
       setMapReady(false);
@@ -368,28 +394,46 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         currentPosMarkerRef.current = m;
       }
 
-      // Nav-style follow: center + zoom; rotate by heading when API allows.
-      if (followMode) {
+      // Nav-style follow: center + rotate. Skip while user is panning/zooming.
+      if (followMode && Date.now() >= userNavPauseUntilRef.current) {
         const hasHeading = headingDeg != null && Number.isFinite(headingDeg);
-        const azimuthRad = hasHeading ? (Number(headingDeg) * Math.PI) / 180 : undefined;
+        // Smooth heading to reduce compass jitter (degrees → radians for API).
+        let headingForMap = hasHeading ? Number(headingDeg) : lastAppliedHeadingRef.current;
+        if (headingForMap != null && Number.isFinite(headingForMap)) {
+          const prev = lastAppliedHeadingRef.current;
+          if (prev != null) {
+            let d = ((headingForMap - prev + 540) % 360) - 180;
+            headingForMap = (prev + d * 0.35 + 360) % 360;
+          }
+          lastAppliedHeadingRef.current = headingForMap;
+        }
+        const azimuthRad =
+          headingForMap != null && Number.isFinite(headingForMap)
+            ? (headingForMap * Math.PI) / 180
+            : undefined;
         try {
-          // YMaps JS API 3 — location may accept azimuth (radians, 0 = north).
+          // Keep current zoom if user changed it; only force center + azimuth.
+          let zoom = 16;
+          try {
+            if (typeof map.zoom === 'number') zoom = map.zoom;
+            else if (typeof map.location?.zoom === 'number') zoom = map.location.zoom;
+          } catch { /* ignore */ }
           const loc: Record<string, unknown> = {
             center: coords,
-            zoom: 16,
-            duration: 350,
+            zoom,
+            duration: 400,
           };
           if (azimuthRad != null) loc.azimuth = azimuthRad;
           map.setLocation(loc);
         } catch {
           try {
             if (azimuthRad != null && typeof map.setAzimuth === 'function') {
-              map.setAzimuth(azimuthRad, { duration: 350 });
+              map.setAzimuth(azimuthRad, { duration: 400 });
             }
             if (typeof map.setCenter === 'function') {
               map.setCenter(coords);
             } else {
-              (bundle as any).setLocation?.(currentPosition.lat, currentPosition.lon, 16);
+              (bundle as any).setLocation?.(currentPosition.lat, currentPosition.lon, zoom as any);
             }
           } catch {
             try {
@@ -415,13 +459,14 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         currentPosMarkerRef.current = m;
       }
 
-      // API 2.1: pan/zoom follow. Rotation is not supported reliably on 2.1.
-      if (followMode) {
+      // API 2.1: pan follow. Pause when user interacts; keep user zoom.
+      if (followMode && Date.now() >= userNavPauseUntilRef.current) {
         try {
-          map.setCenter(coords, 16, { duration: 300 });
+          const z = typeof map.getZoom === 'function' ? map.getZoom() : 16;
+          map.setCenter(coords, z, { duration: 300 });
         } catch {
           try {
-            (bundle as any).setLocation?.(currentPosition.lat, currentPosition.lon, 16);
+            (bundle as any).setLocation?.(currentPosition.lat, currentPosition.lon);
           } catch {
             /* ignore */
           }
