@@ -369,6 +369,8 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const [operatorFilter, setOperatorFilter] = useState<string[]>([]);
   /** Max DC day price BYN; null = any */
   const [maxPrice, setMaxPrice] = useState<number | null>(null);
+  /** Min station power kW; null = any */
+  const [minPowerKw, setMinPowerKw] = useState<number | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [findingNearest, setFindingNearest] = useState(false);
   const [nearestFreeList, setNearestFreeList] = useState<FreeChargerResult[]>([]);
@@ -432,6 +434,18 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     [evraceTariffs],
   );
 
+  const stationMaxPowerKw = useCallback((s: MapStation): number => {
+    const fromGroups = (s.portGroups || [])
+      .map((g) => (typeof g.powerKw === 'number' && g.powerKw > 0 ? g.powerKw : 0));
+    return Math.max(
+      s.ccs2PowerKw ?? 0,
+      s.gbtPowerKw ?? 0,
+      s.type2PowerKw ?? 0,
+      ...(fromGroups.length ? fromGroups : [0]),
+      0,
+    );
+  }, []);
+
   const matchesFilters = useCallback(
     (s: MapStation) => {
       const typeOk =
@@ -444,6 +458,11 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         const rate = stationDcDayRate(s);
         if (rate == null || rate > maxPrice) return false;
       }
+      if (minPowerKw != null) {
+        const pw = stationMaxPowerKw(s);
+        // Stations without power metadata stay visible only when filter is off.
+        if (pw <= 0 || pw < minPowerKw) return false;
+      }
       if (onlyFree) {
         if (!s.liveChecked) return false;
         const free =
@@ -454,7 +473,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       }
       return true;
     },
-    [connFilters, onlyFree, operatorFilter, maxPrice, stationDcDayRate],
+    [connFilters, onlyFree, operatorFilter, maxPrice, minPowerKw, stationDcDayRate, stationMaxPowerKw],
   );
 
   const operatorsInView = useMemo(() => {
@@ -1278,6 +1297,41 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
               </button>
             ))}
           </div>
+
+          <p className={`mb-1.5 text-[11px] font-bold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Мощность от
+          </p>
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {(
+              [
+                { v: null as number | null, label: 'Любая' },
+                { v: 50, label: '≥ 50 кВт' },
+                { v: 80, label: '≥ 80 кВт' },
+                { v: 120, label: '≥ 120 кВт' },
+                { v: 150, label: '≥ 150 кВт' },
+                { v: 180, label: '≥ 180 кВт' },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={String(opt.v)}
+                type="button"
+                onClick={() => {
+                  setMinPowerKw(opt.v);
+                  triggerHaptic('light', settings.hapticFeedback);
+                }}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                  minPowerKw === opt.v
+                    ? 'bg-cyan-600 text-white'
+                    : isDark
+                      ? 'bg-slate-800 text-slate-300'
+                      : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
           <button
             type="button"
             onClick={() => {
@@ -1381,6 +1435,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
 
           <p className={`mt-2 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
             Порты — из профиля авто. Цвет маркера = оператор.
+            {minPowerKw != null ? ` · Мощность ≥ ${minPowerKw} кВт` : ''}
           </p>
         </div>
       )}
