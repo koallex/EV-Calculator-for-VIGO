@@ -220,13 +220,44 @@ input[type=range]::-moz-range-thumb {
 .vigo-ymaps-dark .ymaps-2-1-79-copyrights-pane,
 .vigo-ymaps-dark [class*="ymaps-"][class*="-copyrights-pane"] {
   filter: invert(1) hue-rotate(180deg);
-  opacity: 0.85;
+  opacity: 0.75;
 }
 
-
-
-
-
+/* Yandex attribution — readable in light and dark (API 2.1 + 3).
+   Default pure-white label looks wrong on light tiles and too harsh on dark. */
+.route-map-shell [class*="copyrights"],
+.route-map-shell [class*="copyright"],
+.route-map-shell [class*="gototech"],
+.route-map-yandex [class*="copyrights"],
+.route-map-yandex [class*="copyright"] {
+  color: #64748b !important;
+  opacity: 0.9 !important;
+  text-shadow: none !important;
+}
+.route-map-shell [class*="copyrights"] a,
+.route-map-shell [class*="copyright"] a,
+.route-map-yandex [class*="copyrights"] a,
+.route-map-yandex [class*="copyright"] a {
+  color: #475569 !important;
+}
+.route-map-shell.vigo-ymaps-dark [class*="copyrights"],
+.route-map-shell.vigo-ymaps-dark [class*="copyright"],
+.route-map-shell.vigo-ymaps-dark [class*="gototech"],
+.vigo-ymaps-dark [class*="copyrights"],
+.vigo-ymaps-dark [class*="copyright"] {
+  color: #94a3b8 !important;
+  opacity: 0.85 !important;
+}
+.route-map-shell.vigo-ymaps-dark [class*="copyrights"] a,
+.route-map-shell.vigo-ymaps-dark [class*="copyright"] a,
+.vigo-ymaps-dark [class*="copyrights"] a,
+.vigo-ymaps-dark [class*="copyright"] a {
+  color: #cbd5e1 !important;
+}
+.route-map-shell img[class*="logo"],
+.route-map-yandex img[class*="logo"] {
+  opacity: 0.72;
+}
 
 /* User geolocation pin on EZS map — distinct from operator station dots */
 .vigo-user-pulse-ring {
