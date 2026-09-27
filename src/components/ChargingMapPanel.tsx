@@ -959,6 +959,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     setFindingNearest(true);
     setNearestFreeList([]);
     setNearestFreeOpen(true);
+    setFiltersOpen(false);
     setOnlyFree(true);
     setError('');
 
@@ -1102,7 +1103,10 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         >
           <button
             type="button"
-            onClick={() => setFiltersOpen((v) => !v)}
+            onClick={() => {
+              setFiltersOpen((v) => !v);
+              setNearestFreeOpen(false);
+            }}
             className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold ${
               filtersOpen ? 'bg-cyan-600 text-white' : isDark ? 'bg-slate-800' : 'bg-slate-100'
             }`}
@@ -1171,9 +1175,9 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       {/* Nearest free list — like Calculator */}
       {nearestFreeOpen && (
         <div
-          className={`absolute left-2 right-2 top-[6.5rem] z-20 max-h-[42%] overflow-hidden rounded-2xl border backdrop-blur-md ${
+          className={`absolute z-30 overflow-hidden rounded-2xl border backdrop-blur-md max-h-[min(55vh,22rem)] ${
             isDark ? 'bg-slate-950/95 border-slate-700 text-slate-100' : 'bg-white/95 border-slate-200 text-slate-900 shadow-lg'
-          }`}
+          } left-2 right-2 top-[6.5rem] landscape:left-auto landscape:right-2 landscape:top-14 landscape:w-[min(20rem,42vw)]`}
         >
           <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
             <span className="text-[11px] font-bold uppercase tracking-wide opacity-70">
@@ -1243,9 +1247,9 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       {/* Filter sheet */}
       {filtersOpen && (
         <div
-          className={`absolute left-2 right-2 top-14 z-20 rounded-2xl p-3 backdrop-blur-md ${
+          className={`absolute z-20 rounded-2xl p-3 backdrop-blur-md max-h-[min(60vh,24rem)] overflow-y-auto ${
             isDark ? 'bg-slate-950/95 border border-slate-700' : 'bg-white/95 border border-slate-200 shadow-lg'
-          }`}
+          } left-2 right-2 top-14 landscape:left-2 landscape:right-auto landscape:w-[min(20rem,42vw)] landscape:top-14`}
         >
           <p className={`mb-2 text-[11px] font-bold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
             Разъём
@@ -1397,14 +1401,14 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       {/* Selected station card — fixed above bottom nav */}
       {selected && (
         <div
-          className={`fixed left-3 right-3 z-40 mx-auto max-w-lg rounded-2xl border p-3 shadow-2xl backdrop-blur-md ${
+          className={`fixed left-3 right-3 z-40 mx-auto max-w-md landscape:max-w-sm rounded-2xl border p-3 shadow-2xl backdrop-blur-md ${
             isDark
               ? 'border-slate-700 bg-slate-950/95 text-slate-100'
               : 'border-slate-200 bg-white/95 text-slate-900'
           }`}
           style={{
-            bottom: 'calc(4.75rem + env(safe-area-inset-bottom, 0px))',
-            maxHeight: 'min(58dvh, 480px)',
+            bottom: 'calc(5.25rem + env(safe-area-inset-bottom, 0px))',
+            maxHeight: 'min(48dvh, 380px)',
             overflowY: 'auto',
           }}
         >

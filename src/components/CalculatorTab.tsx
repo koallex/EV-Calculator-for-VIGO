@@ -1139,7 +1139,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const isDark = settings.theme !== 'light';
 
   return (
-    <div id="calculator-tab-container" className="calculator-minimal-shell flex flex-col gap-3 pb-12 max-w-2xl mx-auto">
+    <div id="calculator-tab-container" className="calculator-minimal-shell flex flex-col gap-3 pb-12 max-w-2xl mx-auto w-full landscape:max-w-none">
       {/* Quick status */}
       <section className={`calculator-status rounded-2xl border px-4 py-2.5 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center justify-between gap-3">
