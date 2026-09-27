@@ -342,6 +342,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     setNearbyFreeList([]);
     setNearbyFreeStatus('idle');
     setNearbyFreeError('');
+    setSelectedRouteStop({
+      station: item.station,
+      connector: item.matchedConnector === 'gbt' ? 'gbt' : item.matchedConnector === 'type2' ? 'type2' : 'ccs2',
+    });
     triggerHaptic('light', settings.hapticFeedback);
     // Calculate immediately with explicit coords (don't wait for setState).
     void calculateRouteProfile({ lat: pin.lat, lon: pin.lon, displayName: name });
@@ -1488,13 +1492,27 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           )}
           {nearbyFreeList.length > 0 && (
             <ul className="space-y-1.5 max-h-56 overflow-auto">
-              {nearbyFreeList.map((item) => (
+              {nearbyFreeList.map((item) => {
+                const isActive = selectedRouteStop?.station.id === item.station.id;
+                return (
                 <li key={item.station.id}>
                   <button
                     type="button"
-                    onClick={() => applyFreeChargerAsDestination(item)}
-                    className={`w-full text-left rounded-lg px-3 py-2 ${
-                      isDark ? 'bg-slate-900/80 hover:bg-slate-800' : 'bg-white hover:bg-slate-100 border border-slate-100'
+                    onClick={() => {
+                      triggerHaptic('light', settings.hapticFeedback);
+                      setSelectedRouteStop({
+                        station: item.station,
+                        connector: item.matchedConnector === 'gbt' ? 'gbt' : item.matchedConnector === 'type2' ? 'type2' : 'ccs2',
+                      });
+                    }}
+                    className={`w-full text-left rounded-lg px-3 py-2 border ${
+                      isActive
+                        ? isDark
+                          ? 'bg-amber-950/40 border-amber-600/50'
+                          : 'bg-amber-50 border-amber-300'
+                        : isDark
+                        ? 'bg-slate-900/80 hover:bg-slate-800 border-transparent'
+                        : 'bg-white hover:bg-slate-100 border-slate-100'
                     }`}
                   >
                     <div className={`text-[12px] font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
@@ -1517,8 +1535,103 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     </div>
                   </button>
                 </li>
-              ))}
+                );
+              })}
             </ul>
+          )}
+          {/* EVSE card when a nearby station is selected from the list (before route is built) */}
+          {selectedRouteStop && !routeElevation && (
+            <div className={`mt-2 rounded-2xl border p-3 shadow-lg ${
+              isDark ? 'border-amber-700/40 bg-slate-950' : 'border-amber-200 bg-white'
+            }`}>
+              <div className="flex items-start gap-2">
+                <div className={`mt-0.5 rounded-lg p-1.5 ${isDark ? 'bg-amber-500/15 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>
+                  <PlugZap className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className={`truncate text-[13px] font-bold leading-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        {selectedRouteStop.station.name}
+                      </p>
+                      {selectedRouteStop.station.address && (
+                        <p className={`truncate text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                          {selectedRouteStop.station.address}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRouteStop(null)}
+                      className={`shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                      Закрыть
+                    </button>
+                  </div>
+                  {(selectedRouteStop.station.operator) && (
+                    <p className={`mt-1.5 text-[12px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                      {selectedRouteStop.station.operator}
+                    </p>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {selectedRouteStop.station.hasCcs2 && (
+                      <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>
+                        CCS{selectedRouteStop.station.ccs2PowerKw ? ` · ${Math.round(selectedRouteStop.station.ccs2PowerKw)} кВт` : ''}
+                      </span>
+                    )}
+                    {selectedRouteStop.station.hasGbt && (
+                      <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>
+                        GB/T{selectedRouteStop.station.gbtPowerKw ? ` · ${Math.round(selectedRouteStop.station.gbtPowerKw)} кВт` : ''}
+                      </span>
+                    )}
+                    {selectedRouteStop.station.hasType2 && (
+                      <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>
+                        Type2{selectedRouteStop.station.type2PowerKw ? ` · ${Math.round(selectedRouteStop.station.type2PowerKw)} кВт` : ''}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const match = nearbyFreeList.find((x) => x.station.id === selectedRouteStop.station.id);
+                        if (match) applyFreeChargerAsDestination(match);
+                        else {
+                          applyFreeChargerAsDestination({
+                            station: selectedRouteStop.station,
+                            distanceKm: 0,
+                            freeCcs: 0,
+                            totalCcs: 0,
+                            matchedConnector: selectedRouteStop.connector === 'gbt' ? 'gbt' : selectedRouteStop.connector === 'type2' ? 'type2' : 'ccs2',
+                            operator: selectedRouteStop.station.operator || '',
+                            connectors: [],
+                          });
+                        }
+                      }}
+                      className="rounded-xl px-3 py-2.5 text-[12px] font-bold bg-emerald-600 text-white hover:bg-emerald-500"
+                    >
+                      Построить маршрут
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic('medium', settings.hapticFeedback);
+                        const { lat, lon } = selectedRouteStop.station;
+                        const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+                        if (isMobile) {
+                          window.location.href = `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lon}`;
+                        } else {
+                          window.open(`https://yandex.ru/maps/?rtext=~${lat},${lon}&rtt=auto`, '_blank', 'noopener,noreferrer');
+                        }
+                      }}
+                      className="rounded-xl px-3 py-2.5 text-[12px] font-bold bg-cyan-600 text-white hover:bg-cyan-500"
+                    >
+                      В навигатор
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
         {routeElevation && !routeElevation.elevationAvailable && routeElevation.elevationNote && (
@@ -1907,8 +2020,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               >
                 <Navigation className="w-5 h-5" />
                 {chargingStops.length > 0
-                  ? `Вести в HUD · ${chargingStops.length} зарядк${chargingStops.length === 1 ? 'а' : chargingStops.length < 5 ? 'и' : 'ок'}`
-                  : 'Вести в HUD'}
+                  ? `Начать поездку · ${chargingStops.length} зарядк${chargingStops.length === 1 ? 'а' : chargingStops.length < 5 ? 'и' : 'ок'}`
+                  : 'Начать поездку'}
               </button>
             )}
 
