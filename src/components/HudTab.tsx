@@ -2529,140 +2529,146 @@ export const HudTab: React.FC<HudTabProps> = ({
           {hudEvseCard}
         </div>
 
-        {/* Landscape: compact top dashboard (not full-bleed) + bottom controls clear of floating nav */}
+        {/* Landscape: left info column + right-bottom controls. Map stays open on the right. */}
         {isLandscape && (
           <>
-            <div className="pointer-events-none absolute left-2 right-2 top-2 z-20 flex justify-center">
-              <div className={`pointer-events-auto w-full max-w-xl rounded-2xl border px-3 py-2 shadow-xl ${glass}`}>
-                <div className="flex items-center gap-3 min-w-0">
-                  {/* Hero speed */}
-                  <div className="shrink-0 text-center px-0.5">
-                    <div className="text-[2.75rem] leading-none font-black font-mono tabular-nums tracking-tight">
-                      {currentSpeed}
-                    </div>
-                    <div className="text-[10px] font-bold uppercase opacity-60 mt-0.5">км/ч</div>
+            {/* Left cluster — glanceable, narrow, does not span the screen */}
+            <div
+              className="pointer-events-none absolute left-2 top-2 z-20 flex flex-col gap-1.5"
+              style={{ maxHeight: 'calc(100% - 5.5rem - env(safe-area-inset-bottom, 0px))' }}
+            >
+              <div className={`pointer-events-auto w-[11.5rem] rounded-2xl border px-2.5 py-2 shadow-xl ${glass}`}>
+                {/* Speed hero */}
+                <div className="text-center">
+                  <div className="text-[2.6rem] leading-none font-black font-mono tabular-nums tracking-tight">
+                    {currentSpeed}
                   </div>
-                  <div className={`w-px self-stretch shrink-0 ${isDark ? 'bg-white/15' : 'bg-slate-300/50'}`} />
-                  {/* Metrics */}
-                  <div className="flex-1 grid grid-cols-3 gap-2 min-w-0 text-center">
-                    <div>
-                      <div className="text-[10px] font-bold uppercase opacity-60">SOC</div>
-                      <div className={`text-2xl font-black font-mono tabular-nums leading-none ${socColor}`}>
-                        {Math.round(liveDynamicSoc)}%
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] font-bold uppercase opacity-60">Расход</div>
-                      <div className="text-2xl font-black font-mono tabular-nums leading-none">
-                        {liveTripConsumption}
-                      </div>
-                      <div className="text-[9px] font-semibold opacity-50">кВт⋅ч/100</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] font-bold uppercase opacity-60">Запас</div>
-                      <div className="text-2xl font-black font-mono tabular-nums leading-none">
-                        {rangeShown}
-                        <span className="text-xs font-bold opacity-50 ml-0.5">км</span>
-                      </div>
-                    </div>
+                  <div className="text-[9px] font-bold uppercase opacity-55 mt-0.5">км/ч</div>
+                </div>
+
+                <div className={`my-1.5 h-px ${isDark ? 'bg-white/12' : 'bg-slate-300/50'}`} />
+
+                {/* Primary metrics — compact rows */}
+                <div className="space-y-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[9px] font-bold uppercase opacity-55">SOC</span>
+                    <span className={`text-lg font-black font-mono tabular-nums leading-none ${socColor}`}>
+                      {Math.round(liveDynamicSoc)}%
+                    </span>
                   </div>
-                  <div className={`w-px self-stretch shrink-0 ${isDark ? 'bg-white/15' : 'bg-slate-300/50'}`} />
-                  {/* Weather + GPS */}
-                  <div className="shrink-0 text-[12px] font-mono space-y-1 pl-0.5">
-                    <div className="flex items-center gap-1.5 whitespace-nowrap">
-                      <span className={`w-2 h-2 rounded-full ${gpsAccuracy != null && gpsAccuracy <= 15 ? 'bg-cyan-400' : gpsAccuracy != null ? 'bg-amber-400' : 'bg-rose-500'}`} />
-                      <span className="font-bold tabular-nums">{gpsAccuracy != null ? `±${gpsAccuracy} м` : 'GPS…'}</span>
-                    </div>
-                    <div className="font-bold tabular-nums text-sm">
-                      {weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°` : '—'}
-                    </div>
-                    <div className={`flex items-center gap-1 font-bold whitespace-nowrap ${windInfo.color}`}>
-                      <ArrowDown className="w-3.5 h-3.5 shrink-0" style={{ transform: `rotate(${windInfo.arrowRotation}deg)` }} />
-                      <span className="tabular-nums text-sm">{weather.isLoaded ? `${windSpeedMs}` : '—'}</span>
-                      <span className="opacity-60 text-[11px]">м/с</span>
-                    </div>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[9px] font-bold uppercase opacity-55">Расход</span>
+                    <span className="text-lg font-black font-mono tabular-nums leading-none">
+                      {liveTripConsumption}
+                      <span className="text-[9px] font-semibold opacity-50 ml-0.5">/100</span>
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[9px] font-bold uppercase opacity-55">Запас</span>
+                    <span className="text-lg font-black font-mono tabular-nums leading-none">
+                      {rangeShown}
+                      <span className="text-[9px] font-semibold opacity-50 ml-0.5">км</span>
+                    </span>
                   </div>
                 </div>
-                {activeWaypoint && (
-                  <div className={`mt-2 pt-1.5 border-t flex items-center justify-between gap-3 min-w-0 ${isDark ? 'border-white/10' : 'border-slate-300/40'}`}>
-                    <div className="min-w-0 flex items-center gap-2 overflow-hidden">
-                      {activeWaypoint.kind === 'charge' ? (
-                        <PlugZap className="w-4 h-4 shrink-0 text-amber-400" />
-                      ) : (
-                        <Flag className="w-4 h-4 shrink-0 text-cyan-400" />
-                      )}
-                      <div className="min-w-0">
-                        <div className="text-[10px] font-bold uppercase opacity-60 truncate">
-                          {activeWaypoint.kind === 'charge' ? 'До зарядки' : 'До финиша'}
-                          {destinationResult?.arrivalTimeLabel ? ` · ${destinationResult.arrivalTimeLabel}` : ''}
-                        </div>
-                        <div className="text-sm font-semibold truncate">{activeWaypoint.name}</div>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0 whitespace-nowrap">
-                      <div className="text-[10px] font-bold uppercase opacity-60">SOC на финише</div>
-                      <div className="text-xl font-black font-mono tabular-nums leading-none">
-                        {finishSoc}%
-                        {remainingKmToActiveWaypoint != null && (
-                          <span className="ml-1.5 text-sm font-bold opacity-60">
-                            · {remainingKmToActiveWaypoint < 1
-                              ? `${Math.round(remainingKmToActiveWaypoint * 1000)} м`
-                              : `${remainingKmToActiveWaypoint.toFixed(1)} км`}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+
+                <div className={`my-1.5 h-px ${isDark ? 'bg-white/12' : 'bg-slate-300/50'}`} />
+
+                {/* Trip strip */}
+                <div className="grid grid-cols-3 gap-1 text-center">
+                  <div>
+                    <div className="text-[8px] font-bold uppercase opacity-50">В пути</div>
+                    <div className="text-[11px] font-black font-mono tabular-nums leading-tight">{formatTime(elapsedSeconds)}</div>
                   </div>
+                  <div>
+                    <div className="text-[8px] font-bold uppercase opacity-50">Средн.</div>
+                    <div className="text-[11px] font-black font-mono tabular-nums leading-tight">{avgTripSpeedKmH}</div>
+                  </div>
+                  <div>
+                    <div className="text-[8px] font-bold uppercase opacity-50">Км</div>
+                    <div className="text-[11px] font-black font-mono tabular-nums leading-tight">{tripDistanceKm.toFixed(1)}</div>
+                  </div>
+                </div>
+
+                <div className={`my-1.5 h-px ${isDark ? 'bg-white/12' : 'bg-slate-300/50'}`} />
+
+                {/* GPS + weather one line each */}
+                <div className="space-y-0.5 text-[11px] font-mono">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${gpsAccuracy != null && gpsAccuracy <= 15 ? 'bg-cyan-400' : gpsAccuracy != null ? 'bg-amber-400' : 'bg-rose-500'}`} />
+                    <span className="font-bold tabular-nums opacity-90">{gpsAccuracy != null ? `±${gpsAccuracy} м` : 'GPS…'}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-1 font-bold">
+                    <span className="tabular-nums">
+                      {weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°` : '—'}
+                    </span>
+                    <span className={`inline-flex items-center gap-0.5 tabular-nums ${windInfo.color}`}>
+                      <ArrowDown className="w-3 h-3 shrink-0" style={{ transform: `rotate(${windInfo.arrowRotation}deg)` }} />
+                      {weather.isLoaded ? `${windSpeedMs}` : '—'}
+                      <span className="opacity-50 text-[10px]">м/с</span>
+                    </span>
+                  </div>
+                </div>
+
+                {activeWaypoint && (
+                  <>
+                    <div className={`my-1.5 h-px ${isDark ? 'bg-white/12' : 'bg-slate-300/50'}`} />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1 text-[9px] font-bold uppercase opacity-55 truncate">
+                        {activeWaypoint.kind === 'charge' ? (
+                          <PlugZap className="w-3 h-3 shrink-0 text-amber-400" />
+                        ) : (
+                          <Flag className="w-3 h-3 shrink-0 text-cyan-400" />
+                        )}
+                        {activeWaypoint.kind === 'charge' ? 'До зарядки' : 'До финиша'}
+                        {destinationResult?.arrivalTimeLabel ? ` · ${destinationResult.arrivalTimeLabel}` : ''}
+                      </div>
+                      <div className="text-[11px] font-semibold truncate leading-tight mt-0.5">{activeWaypoint.name}</div>
+                      <div className="mt-1 flex items-baseline justify-between gap-1">
+                        <span className="text-[9px] font-bold uppercase opacity-55">SOC</span>
+                        <span className="text-base font-black font-mono tabular-nums leading-none">
+                          {finishSoc}%
+                          {remainingKmToActiveWaypoint != null && (
+                            <span className="ml-1 text-[10px] font-bold opacity-55">
+                              {remainingKmToActiveWaypoint < 1
+                                ? `${Math.round(remainingKmToActiveWaypoint * 1000)} м`
+                                : `${remainingKmToActiveWaypoint.toFixed(1)} км`}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
             </div>
 
-            {/* Bottom bar: above floating nav (z-50). Clearance = nav height + safe-area. */}
+            {/* Controls: bottom-right, above floating nav — not under the left cluster */}
             <div
-              className="pointer-events-none absolute left-2 right-2 z-20 flex flex-wrap items-end justify-center gap-2"
+              className="pointer-events-none absolute right-2 z-20 flex items-center gap-1.5"
               style={{ bottom: 'calc(4.75rem + env(safe-area-inset-bottom, 0px))' }}
             >
-              <div className={`pointer-events-auto rounded-2xl border px-3 py-1.5 grid grid-cols-3 gap-3 min-w-[12rem] ${glass}`}>
-                <div className="text-center">
-                  <div className="text-[9px] font-bold uppercase opacity-60">В пути</div>
-                  <div className="text-base font-black font-mono tabular-nums">{formatTime(elapsedSeconds)}</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-[9px] font-bold uppercase opacity-60">Средняя</div>
-                  <div className="text-base font-black font-mono tabular-nums">
-                    {avgTripSpeedKmH}<span className="text-[10px] opacity-60 ml-0.5">км/ч</span>
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-[9px] font-bold uppercase opacity-60">Дистанция</div>
-                  <div className="text-base font-black font-mono tabular-nums">
-                    {tripDistanceKm.toFixed(1)}<span className="text-[10px] opacity-60 ml-0.5">км</span>
-                  </div>
-                </div>
-              </div>
-              <div className={`pointer-events-auto flex items-center gap-1.5 rounded-2xl border px-2 py-1 ${glass}`}>
-                <div className="flex items-center gap-0.5">
-                  <button type="button" onClick={() => setPassengers((p) => Math.max(1, p - 1))} className="w-8 h-8 rounded-lg font-bold text-sm opacity-80">−</button>
-                  <span className="text-sm font-bold min-w-[3.25rem] text-center">👥 {passengers}</span>
-                  <button type="button" onClick={() => setPassengers((p) => Math.min(5, p + 1))} className="w-8 h-8 rounded-lg font-bold text-sm opacity-80">+</button>
-                </div>
+              <div className={`pointer-events-auto flex items-center gap-1 rounded-2xl border px-1.5 py-1 ${glass}`}>
+                <button type="button" onClick={() => setPassengers((p) => Math.max(1, p - 1))} className="w-7 h-7 rounded-lg font-bold text-sm opacity-80">−</button>
+                <span className="text-xs font-bold min-w-[2.75rem] text-center">👥 {passengers}</span>
+                <button type="button" onClick={() => setPassengers((p) => Math.min(5, p + 1))} className="w-7 h-7 rounded-lg font-bold text-sm opacity-80">+</button>
                 <button
                   type="button"
                   onClick={() => {
                     triggerHaptic('light', settings.hapticFeedback);
                     setClimateOn((v) => !v);
                   }}
-                  className={`rounded-xl border px-2.5 py-1.5 text-xs font-bold whitespace-nowrap ${
+                  className={`rounded-xl border px-2 py-1 text-[11px] font-bold whitespace-nowrap ${
                     isDark ? 'border-white/15' : 'border-slate-300'
                   } ${climateOn ? 'ring-1 ring-cyan-400/50' : 'opacity-70'}`}
                 >
-                  {climateOn ? 'Климат вкл' : 'Климат выкл'}
+                  {climateOn ? 'Климат' : 'Без клим.'}
                 </button>
               </div>
               <button
                 type="button"
                 onClick={handleStopTracking}
-                className="pointer-events-auto rounded-2xl bg-rose-600 text-white font-black text-sm px-5 py-2.5 flex items-center gap-2 shadow-lg shadow-rose-900/40 active:scale-[0.98]"
+                className="pointer-events-auto rounded-2xl bg-rose-600 text-white font-black text-sm px-4 py-2.5 flex items-center gap-1.5 shadow-lg shadow-rose-900/40 active:scale-[0.98]"
               >
                 <Square className="w-4 h-4 fill-current" /> СТОП
               </button>
