@@ -42,23 +42,65 @@ export default function App() {
   // Modals
   const [isAddTripOpen, setIsAddTripOpen] = useState(false);
   const [addTripInitialData, setAddTripInitialData] = useState<Partial<TripSession> | undefined>(undefined);
-  /** Landscape: hide header, keep floating bottom nav always visible. */
+  /**
+   * Adaptive layout flags — breakpoints aligned with index.css tokens:
+   *   xs 360 · sm 480 · md 640 · lg 900 · xl 1100
+   *   landscape / landscape-short (h≤430) / landscape-comfortable (h≥500)
+   */
   const [isLandscape, setIsLandscape] = useState(false);
 
   useEffect(() => {
+    const mqLandscape = window.matchMedia('(orientation: landscape)');
+    const mqShort = window.matchMedia('(max-height: 430px)');
+    const mqComfort = window.matchMedia('(min-height: 500px)');
+    const mqSm = window.matchMedia('(min-width: 480px)');
+    const mqMd = window.matchMedia('(min-width: 640px)');
+    const mqLg = window.matchMedia('(min-width: 900px)');
+    const mqXl = window.matchMedia('(min-width: 1100px)');
+
     const update = () => {
       const landscape =
-        (typeof window.matchMedia === 'function' &&
-          window.matchMedia('(orientation: landscape)').matches) ||
-        window.innerWidth > window.innerHeight * 1.05;
+        mqLandscape.matches || window.innerWidth > window.innerHeight * 1.05;
       setIsLandscape(landscape);
+
+      const root = document.documentElement;
+      root.dataset.orientation = landscape ? 'landscape' : 'portrait';
+      root.dataset.bp =
+        mqXl.matches ? 'xl' :
+        mqLg.matches ? 'lg' :
+        mqMd.matches ? 'md' :
+        mqSm.matches ? 'sm' : 'xs';
+      if (landscape && mqShort.matches) root.dataset.heightBand = 'short';
+      else if (landscape && mqComfort.matches) root.dataset.heightBand = 'comfortable';
+      else root.dataset.heightBand = 'default';
     };
+
     update();
-    window.addEventListener('resize', update);
-    window.addEventListener('orientationchange', update);
+    const opts = { passive: true } as AddEventListenerOptions;
+    window.addEventListener('resize', update, opts);
+    window.addEventListener('orientationchange', update, opts);
+    // matchMedia change is more reliable than resize on some mobile browsers
+    const mqs = [mqLandscape, mqShort, mqComfort, mqSm, mqMd, mqLg, mqXl];
+    mqs.forEach((mq) => {
+      try {
+        mq.addEventListener('change', update);
+      } catch {
+        // Safari < 14
+        // @ts-expect-error legacy API
+        mq.addListener?.(update);
+      }
+    });
     return () => {
       window.removeEventListener('resize', update);
       window.removeEventListener('orientationchange', update);
+      mqs.forEach((mq) => {
+        try {
+          mq.removeEventListener('change', update);
+        } catch {
+          // @ts-expect-error legacy API
+          mq.removeListener?.(update);
+        }
+      });
     };
   }, []);
 

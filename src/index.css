@@ -322,29 +322,111 @@ input[type=range]::-moz-range-thumb {
 
 
 
-/* ========== Landscape: always-on nav + compact auto-scale UI ========== */
+/*
+ * ========== Adaptive breakpoints (VIGO) ==========
+ * Width tokens (match Tailwind-ish scale used in components):
+ *   xs  ≥ 360px   narrow phones
+ *   sm  ≥ 480px   large phones
+ *   md  ≥ 640px   phablet / small tablet
+ *   lg  ≥ 900px   tablet / landscape phone wide
+ *   xl  ≥ 1100px  desktop / large tablet
+ *
+ * Height / orientation:
+ *   landscape              any landscape
+ *   landscape-short        landscape && height ≤ 430px
+ *   landscape-comfortable  landscape && height ≥ 500px
+ *
+ * CSS variables drive density; media queries only override tokens.
+ */
+:root {
+  --bp-xs: 360px;
+  --bp-sm: 480px;
+  --bp-md: 640px;
+  --bp-lg: 900px;
+  --bp-xl: 1100px;
+
+  --layout-content-max: 36rem;
+  --layout-content-pad-x: 0.75rem;
+  --layout-nav-clearance: 5.5rem;
+  --ui-font-size: 16px;
+  --ui-card-pad: 1rem;
+  --ui-stack-gap: 0.75rem;
+  --ui-control-min-h: 2.5rem;
+  --ui-btn-py: 0.55rem;
+  --ui-nav-scale: 1;
+}
+
+html {
+  font-size: var(--ui-font-size);
+}
+
+/* ---- Portrait width steps ---- */
+@media (max-width: 359.98px) {
+  :root {
+    --ui-font-size: 14.5px;
+    --layout-content-max: 100%;
+    --ui-card-pad: 0.7rem;
+    --ui-stack-gap: 0.55rem;
+    --ui-control-min-h: 2.25rem;
+  }
+}
+
+@media (min-width: 480px) {
+  :root {
+    --layout-content-max: 28rem;
+    --layout-content-pad-x: 1rem;
+  }
+}
+
+@media (min-width: 640px) {
+  :root {
+    --layout-content-max: 36rem;
+    --ui-font-size: 16px;
+  }
+}
+
+@media (min-width: 900px) {
+  :root {
+    --layout-content-max: 42rem;
+    --layout-content-pad-x: 1.25rem;
+  }
+}
+
+@media (min-width: 1100px) {
+  :root {
+    --layout-content-max: 48rem;
+  }
+}
+
+/* ---- Landscape (base) ---- */
 @media (orientation: landscape) {
-  /* Slightly denser base type for short viewport height */
-  html {
-    font-size: 15px;
+  :root {
+    --ui-font-size: 15px;
+    --layout-content-max: min(40rem, 92vw);
+    --layout-nav-clearance: 4.25rem;
+    --ui-card-pad: 0.65rem;
+    --ui-stack-gap: 0.55rem;
+    --ui-control-min-h: 2.15rem;
+    --ui-btn-py: 0.4rem;
   }
 
-  /* Form tabs: centered column with room for floating nav */
   #calculator-tab-container,
   #history-tab-container,
   #settings-tab-container {
-    max-width: min(40rem, 92vw);
+    max-width: var(--layout-content-max);
     width: 100%;
     margin-left: auto;
     margin-right: auto;
-    padding-bottom: 5.25rem;
+    padding-bottom: var(--layout-nav-clearance);
+    padding-left: var(--layout-content-pad-x);
+    padding-right: var(--layout-content-pad-x);
     box-sizing: border-box;
   }
 
   #calculator-tab-container.calculator-minimal-shell {
     display: flex !important;
     flex-direction: column !important;
-    gap: 0.55rem;
+    gap: var(--ui-stack-gap);
     align-items: stretch;
   }
 
@@ -355,21 +437,20 @@ input[type=range]::-moz-range-thumb {
     max-width: 100%;
   }
 
-  /* Compact cards / buttons across form tabs */
   #calculator-tab-container section,
   #calculator-tab-container > div.rounded-2xl,
   #settings-tab-container > div.rounded-2xl,
   #settings-tab-container > form > div.rounded-2xl,
   #history-tab-container .rounded-2xl {
-    padding: 0.65rem 0.75rem !important;
+    padding: var(--ui-card-pad) calc(var(--ui-card-pad) + 0.1rem) !important;
   }
 
   #calculator-tab-container button,
   #settings-tab-container button,
   #history-tab-container button {
-    min-height: 2.15rem;
-    padding-top: 0.4rem !important;
-    padding-bottom: 0.4rem !important;
+    min-height: var(--ui-control-min-h);
+    padding-top: var(--ui-btn-py) !important;
+    padding-bottom: var(--ui-btn-py) !important;
   }
 
   #calculator-tab-container input,
@@ -377,47 +458,32 @@ input[type=range]::-moz-range-thumb {
   #history-tab-container input,
   #calculator-tab-container select,
   #settings-tab-container select {
-    min-height: 2.15rem;
+    min-height: var(--ui-control-min-h);
     font-size: 0.875rem !important;
   }
 
-  #settings-tab-container {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-  }
+  #settings-tab-container,
   #settings-tab-container > form {
     display: flex !important;
     flex-direction: column !important;
-    gap: 0.6rem;
+    gap: var(--ui-stack-gap);
   }
   #settings-tab-container > form > * {
     width: 100%;
     max-width: 100%;
     min-width: 0;
   }
-  #settings-tab-container .grid.grid-cols-2 {
+  #settings-tab-container .grid.grid-cols-2,
+  #settings-tab-container .grid.grid-cols-1.sm\:grid-cols-2 {
     display: grid !important;
     grid-template-columns: 1fr 1fr;
     gap: 0.45rem;
   }
-  #settings-tab-container .grid.grid-cols-1.sm\:grid-cols-2 {
-    display: grid !important;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
-  }
 
-  /* Wide landscape: use horizontal space for settings tariff grids */
-  #settings-tab-container .grid.grid-cols-1.sm\:grid-cols-2 {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  /* History denser list */
   #history-tab-container {
-    gap: 0.55rem;
+    gap: var(--ui-stack-gap);
   }
 
-  /* Charging map: fullscreen under chrome */
   #charging-tab-container {
     max-width: none !important;
     height: 100%;
@@ -429,9 +495,9 @@ input[type=range]::-moz-range-thumb {
     margin: 0.4rem auto 0;
   }
 
-  /* Floating nav — compact, always on */
   #main-bottom-nav {
-    transform: none;
+    transform: scale(var(--ui-nav-scale));
+    transform-origin: bottom center;
     padding-top: 0.3rem !important;
     padding-bottom: 0.3rem !important;
   }
@@ -446,48 +512,70 @@ input[type=range]::-moz-range-thumb {
 
   .route-map-shell,
   [data-tab-panel='charging'] {
-    --vigo-nav-clearance: 4.25rem;
+    --vigo-nav-clearance: var(--layout-nav-clearance);
   }
 
-  /* HUD: clearance for persistent floating nav */
   #hud-tab-container {
     max-width: 100%;
   }
   #hud-tab-container .pb-12,
   #hud-tab-container .pb-14 {
-    padding-bottom: 4.25rem !important;
+    padding-bottom: var(--layout-nav-clearance) !important;
   }
 }
 
-/* Short landscape phones — extra compaction */
+/* landscape-short: phone on side, very little vertical room */
 @media (orientation: landscape) and (max-height: 430px) {
-  html {
-    font-size: 13.5px;
-  }
-  #calculator-tab-container.calculator-minimal-shell {
-    gap: 0.4rem;
-  }
-  #calculator-tab-container section,
-  #settings-tab-container > form > div,
-  #settings-tab-container > div {
-    padding: 0.5rem 0.6rem !important;
-  }
-  #main-bottom-nav {
-    transform: scale(0.94);
-    transform-origin: bottom center;
+  :root {
+    --ui-font-size: 13.5px;
+    --ui-card-pad: 0.5rem;
+    --ui-stack-gap: 0.4rem;
+    --ui-control-min-h: 2rem;
+    --ui-btn-py: 0.32rem;
+    --layout-nav-clearance: 3.75rem;
+    --ui-nav-scale: 0.94;
   }
 }
 
-/* Wider landscape tablets/phones: slightly wider form column */
+/* landscape-comfortable: enough height to breathe */
+@media (orientation: landscape) and (min-height: 500px) {
+  :root {
+    --ui-font-size: 15px;
+    --ui-card-pad: 0.75rem;
+    --ui-stack-gap: 0.65rem;
+    --ui-control-min-h: 2.25rem;
+  }
+}
+
+/* landscape + lg width */
 @media (orientation: landscape) and (min-width: 900px) {
-  #calculator-tab-container,
-  #history-tab-container,
-  #settings-tab-container {
-    max-width: min(44rem, 70vw);
+  :root {
+    --layout-content-max: min(44rem, 70vw);
+    --ui-font-size: 15.5px;
+    --layout-content-pad-x: 1rem;
   }
-  html {
-    font-size: 15.5px;
+}
+
+/* landscape + xl */
+@media (orientation: landscape) and (min-width: 1100px) {
+  :root {
+    --layout-content-max: min(48rem, 62vw);
+    --ui-font-size: 16px;
   }
+}
+
+/* Utility helpers (optional use in components) */
+.vigo-content-column {
+  max-width: var(--layout-content-max);
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: var(--layout-content-pad-x);
+  box-sizing: border-box;
+}
+.vigo-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-stack-gap);
 }
 
 /* ========== Capacitor / APK only (old Android WebView safe) ========== */
