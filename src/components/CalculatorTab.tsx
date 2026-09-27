@@ -1979,34 +1979,68 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       distanceAlongRouteKm: totalKm,
                     },
                   ];
-                  // Downsample route polyline for HUD map (first/last + step).
+                  // Shape-preserving downsample for HUD map (keeps corners; avoids off-road chords).
                   let routePoints:
                     | Array<{ lat: number; lon: number; elevationM?: number; distanceFromStartKm?: number }>
                     | undefined;
                   const pts = routeElevation?.points;
                   if (pts && pts.length >= 2) {
-                    const maxPts = 80;
+                    const maxPts = 160;
+                    const toPt = (p: (typeof pts)[number]) => ({
+                      lat: p.lat,
+                      lon: p.lon,
+                      elevationM: p.elevationM,
+                      distanceFromStartKm: p.distanceFromStartKm,
+                    });
                     if (pts.length <= maxPts) {
-                      routePoints = pts.map((p) => ({
-                        lat: p.lat,
-                        lon: p.lon,
-                        elevationM: p.elevationM,
-                        distanceFromStartKm: p.distanceFromStartKm,
-                      }));
+                      routePoints = pts.map(toPt);
                     } else {
-                      const step = Math.ceil(pts.length / maxPts);
-                      const sampled = pts.filter(
-                        (_, i) => i === 0 || i === pts.length - 1 || i % step === 0,
-                      );
-                      if (sampled[sampled.length - 1] !== pts[pts.length - 1]) {
-                        sampled.push(pts[pts.length - 1]);
+                      // Ramer–Douglas–Peucker on [lon,lat] with adaptive epsilon, then cap count.
+                      const rdp = (arr: typeof pts, eps: number): typeof pts => {
+                        if (arr.length <= 2) return arr.slice();
+                        const toRad = Math.PI / 180;
+                        const lat0 = arr[0].lat * toRad;
+                        const mPerDegLat = 111_320;
+                        const mPerDegLon = 111_320 * Math.cos(lat0);
+                        const dist = (a: (typeof pts)[0], b: (typeof pts)[0], p: (typeof pts)[0]) => {
+                          const ax = a.lon * mPerDegLon, ay = a.lat * mPerDegLat;
+                          const bx = b.lon * mPerDegLon, by = b.lat * mPerDegLat;
+                          const px = p.lon * mPerDegLon, py = p.lat * mPerDegLat;
+                          const dx = bx - ax, dy = by - ay;
+                          const len2 = dx * dx + dy * dy || 1;
+                          let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+                          t = Math.max(0, Math.min(1, t));
+                          const cx = ax + t * dx, cy = ay + t * dy;
+                          return Math.hypot(px - cx, py - cy);
+                        };
+                        let maxD = 0, idx = 0;
+                        for (let i = 1; i < arr.length - 1; i++) {
+                          const d = dist(arr[0], arr[arr.length - 1], arr[i]);
+                          if (d > maxD) { maxD = d; idx = i; }
+                        }
+                        if (maxD > eps) {
+                          const left = rdp(arr.slice(0, idx + 1), eps);
+                          const right = rdp(arr.slice(idx), eps);
+                          return left.slice(0, -1).concat(right);
+                        }
+                        return [arr[0], arr[arr.length - 1]];
+                      };
+                      // ~25–40 m tolerance keeps road shape; raise until under maxPts
+                      let eps = 25;
+                      let simplified = rdp(pts, eps);
+                      while (simplified.length > maxPts && eps < 200) {
+                        eps *= 1.35;
+                        simplified = rdp(pts, eps);
                       }
-                      routePoints = sampled.map((p) => ({
-                        lat: p.lat,
-                        lon: p.lon,
-                        elevationM: p.elevationM,
-                        distanceFromStartKm: p.distanceFromStartKm,
-                      }));
+                      // If still too many, fall back to stride but only between kept RDP vertices is unnecessary —
+                      // uniform thin as last resort while always keeping endpoints.
+                      if (simplified.length > maxPts) {
+                        const step = Math.ceil(simplified.length / maxPts);
+                        simplified = simplified.filter(
+                          (_, i) => i === 0 || i === simplified.length - 1 || i % step === 0,
+                        );
+                      }
+                      routePoints = simplified.map(toPt);
                     }
                   }
                   onSendToHud({
