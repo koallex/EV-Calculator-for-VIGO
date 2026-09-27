@@ -425,17 +425,20 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             {loadError}
           </div>
         )}
-        <div className="route-map-legend">
-          <span>
-            <i className="route-dot route-dot-start" />А
-          </span>
-          <span>
-            <i className="route-dot route-dot-end" />Б
-          </span>
-          {stops.length > 0 && (
-            <span>⚡ {stops.length > 1 ? `${stops.length} остановки` : 'Зарядка'}</span>
-          )}
-        </div>
+        {/* Hidden in fullscreen HUD (fill) — overlaps bottom trip telemetry */}
+        {!fill && (
+          <div className="route-map-legend">
+            <span>
+              <i className="route-dot route-dot-start" />А
+            </span>
+            <span>
+              <i className="route-dot route-dot-end" />Б
+            </span>
+            {stops.length > 0 && (
+              <span>⚡ {stops.length > 1 ? `${stops.length} остановки` : 'Зарядка'}</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
