@@ -2048,6 +2048,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     startSoc,
                     plannedSpeedKmH,
                     totalDistanceKm: totalKm,
+                    predictedEndSoc: endSoc,
+                    energyNeededKwh: energyUsedKwh,
+                    predictedConsumption: consumptionPer100Km,
                     waypoints,
                     routePoints,
                   });

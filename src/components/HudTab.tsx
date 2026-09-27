@@ -120,6 +120,12 @@ export type HudRoutePlan = {
   plannedSpeedKmH?: number;
   /** Full planned distance A→B (with stops on the way). */
   totalDistanceKm?: number;
+  /** Calculator result: predicted SoC at destination (after last charge if any). */
+  predictedEndSoc?: number;
+  /** Calculator result: energy required for the remaining route from A, kWh. */
+  energyNeededKwh?: number;
+  /** Calculator result: average consumption kWh/100km. */
+  predictedConsumption?: number;
   /** Intermediate charge stops + final destination, ordered by distanceAlongRouteKm. */
   waypoints?: HudRouteWaypoint[];
   /** Downsampled route geometry for map visualization in HUD. */
@@ -430,20 +436,52 @@ export const HudTab: React.FC<HudTabProps> = ({
     }
     if (typeof hudPlan.totalDistanceKm === 'number' && hudPlan.totalDistanceKm > 0) {
       setRouteTotalDistanceKm(hudPlan.totalDistanceKm);
-      // Seed compact pre-start card so it is not empty while live forecast catches up.
-      setDestinationResult((prev) =>
-        prev ?? {
-          name: (hudPlan.destination || 'Назначение').trim(),
-          distanceKm: Number(hudPlan.totalDistanceKm!.toFixed(1)),
-          gainM: 0,
-          lossM: 0,
-          predictedConsumption: 0,
-          energyNeededKwh: 0,
-          predictedSoc: Math.max(0, Math.round(hudPlan.startSoc || startTripSoc)),
-          approximate: true,
-          forecastUsed: false,
-        },
+      const startSocSeed = Math.min(
+        100,
+        Math.max(1, Math.round(hudPlan.startSoc || startTripSoc)),
       );
+      // Prefer calculator end-SoC. Fallback: last waypoint plannedArrivalSoc / chargeTargetSoc.
+      let endSocSeed: number | null =
+        typeof hudPlan.predictedEndSoc === 'number' && Number.isFinite(hudPlan.predictedEndSoc)
+          ? Math.max(0, Math.min(100, Math.round(hudPlan.predictedEndSoc)))
+          : null;
+      if (endSocSeed == null && Array.isArray(hudPlan.waypoints) && hudPlan.waypoints.length) {
+        const destWp = [...hudPlan.waypoints]
+          .filter((w) => w.kind === 'destination')
+          .sort((a, b) => b.distanceAlongRouteKm - a.distanceAlongRouteKm)[0]
+          || hudPlan.waypoints[hudPlan.waypoints.length - 1];
+        if (typeof destWp.plannedArrivalSoc === 'number') {
+          endSocSeed = Math.max(0, Math.min(100, Math.round(destWp.plannedArrivalSoc)));
+        }
+      }
+      const energySeed =
+        typeof hudPlan.energyNeededKwh === 'number' && hudPlan.energyNeededKwh > 0
+          ? hudPlan.energyNeededKwh
+          : endSocSeed != null
+            ? Math.max(0, ((startSocSeed - endSocSeed) / 100) * (settings.batteryCapacityKwh || 60))
+            : 0;
+      const predictedSocSeed =
+        endSocSeed != null
+          ? endSocSeed
+          : energySeed > 0
+            ? Math.max(0, Math.round(startSocSeed - (energySeed / (settings.batteryCapacityKwh || 60)) * 100))
+            : startSocSeed;
+
+      // Always seed from calculator plan (do not keep previous trip's energyNeededKwh: 0).
+      setDestinationResult({
+        name: (hudPlan.destination || 'Назначение').trim(),
+        distanceKm: Number(hudPlan.totalDistanceKm!.toFixed(1)),
+        gainM: 0,
+        lossM: 0,
+        predictedConsumption:
+          typeof hudPlan.predictedConsumption === 'number'
+            ? hudPlan.predictedConsumption
+            : 0,
+        energyNeededKwh: Number(energySeed.toFixed(2)),
+        predictedSoc: predictedSocSeed,
+        approximate: true,
+        forecastUsed: false,
+      });
     } else {
       setRouteTotalDistanceKm(null);
     }
@@ -462,7 +500,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       setHudRoutePoints([]);
     }
     onHudPlanConsumed?.();
-  }, [hudPlan, onHudPlanConsumed]);
+  }, [hudPlan, onHudPlanConsumed, settings.batteryCapacityKwh, startTripSoc]);
 
   // Keep weatherRef in sync so the geolocation callback (subscribed once per trip) always reads
   // the latest fetched weather without needing to resubscribe watchPosition.
@@ -1288,7 +1326,15 @@ export const HudTab: React.FC<HudTabProps> = ({
   // while tracking, even between full route recalculations.
   const livePredictedSoc =
     destinationResult != null
-      ? Math.max(0, Number((liveDynamicSoc - (destinationResult.energyNeededKwh / batteryCap) * 100).toFixed(1)))
+      ? destinationResult.energyNeededKwh > 0.01
+        ? Math.max(
+            0,
+            Number(
+              (liveDynamicSoc - (destinationResult.energyNeededKwh / batteryCap) * 100).toFixed(1),
+            ),
+          )
+        : // Seeded calculator value (or pending live recalc) — do not force equal to start SoC
+          Math.max(0, Number(destinationResult.predictedSoc))
       : null;
 
   // Multi-stop plan: remaining distance / SoC to the *next* waypoint (charge stop or B).
