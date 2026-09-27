@@ -4,6 +4,7 @@ import {
   createBestMap,
   makeDotMarkerEl,
   makeLabelMarkerEl,
+  makeNavArrowEl,
   scrubYandexOpenMapsPromo,
   toLonLat,
   type AnyMapBundle,
@@ -49,6 +50,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const bundleRef = useRef<AnyMapBundle | null>(null);
   const featureRef = useRef<any>(null);
+  const outlineFeatureRef = useRef<any>(null);
+  const traveledFeatureRef = useRef<any>(null);
   const startMarkerRef = useRef<any>(null);
   const endMarkerRef = useRef<any>(null);
   const currentPosMarkerRef = useRef<any>(null);
@@ -159,30 +162,38 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     const map = (bundle as any).map;
 
     removeObj(bundle, featureRef.current);
+    removeObj(bundle, outlineFeatureRef.current);
+    removeObj(bundle, traveledFeatureRef.current);
     removeObj(bundle, startMarkerRef.current);
     removeObj(bundle, endMarkerRef.current);
     featureRef.current = null;
+    outlineFeatureRef.current = null;
+    traveledFeatureRef.current = null;
     startMarkerRef.current = null;
     endMarkerRef.current = null;
 
-    let cancelled = false;
-    let timer: number | null = null;
+    const strokeMain = isDark ? 'rgba(34, 211, 238, 0.95)' : 'rgba(8, 145, 178, 0.95)';
+    const strokeOutline = isDark ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.9)';
+    const strokeTraveled = isDark ? 'rgba(100, 116, 139, 0.75)' : 'rgba(148, 163, 184, 0.85)';
 
-    const frames = compact ? 22 : 64;
-    const step = Math.max(1, Math.ceil((positions.length - 2) / frames));
-    let count = Math.min(2, positions.length);
+    // Instant full track for HUD (fill/follow); soft draw-in only for compact preview maps.
+    const animate = !fill && !followMode && !compact;
 
     if (bundle.apiVersion === 3) {
       const ymaps3 = (bundle as any).ymaps3;
       const { YMapFeature, YMapMarker } = ymaps3;
       const lonLatPath = positions.map(([la, lo]) => toLonLat(la, lo));
 
+      const outline = new YMapFeature({
+        geometry: { type: 'LineString', coordinates: lonLatPath },
+        style: { stroke: [{ width: 8, color: strokeOutline }] },
+      });
+      map.addChild(outline);
+      outlineFeatureRef.current = outline;
+
       const feature = new YMapFeature({
-        geometry: {
-          type: 'LineString',
-          coordinates: lonLatPath.slice(0, count),
-        },
-        style: { stroke: [{ width: 5, color: 'rgba(6, 182, 212, 0.92)' }] },
+        geometry: { type: 'LineString', coordinates: lonLatPath },
+        style: { stroke: [{ width: 5, color: strokeMain }] },
       });
       map.addChild(feature);
       featureRef.current = feature;
@@ -204,58 +215,39 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         endMarkerRef.current = m;
       }
 
-      const lats = positions.map(([la]) => la);
-      const lons = positions.map(([, lo]) => lo);
-      try {
-        map.setLocation({
-          bounds: [
-            toLonLat(Math.min(...lats), Math.min(...lons)),
-            toLonLat(Math.max(...lats), Math.max(...lons)),
-          ],
-          duration: 0,
-        });
-      } catch {
-        bundle.setLocation(start![0], start![1], 11);
-      }
-
-      timer = window.setInterval(() => {
-        if (cancelled || !featureRef.current) {
-          if (timer) window.clearInterval(timer);
-          return;
-        }
-        count = Math.min(positions.length, count + step);
+      if (!followMode) {
+        const lats = positions.map(([la]) => la);
+        const lons = positions.map(([, lo]) => lo);
         try {
-          featureRef.current.update({
-            geometry: {
-              type: 'LineString',
-              coordinates: lonLatPath.slice(0, count),
-            },
+          map.setLocation({
+            bounds: [
+              toLonLat(Math.min(...lats), Math.min(...lons)),
+              toLonLat(Math.max(...lats), Math.max(...lons)),
+            ],
+            duration: animate ? 400 : 0,
           });
         } catch {
-          /* some builds use setGeometry */
-          try {
-            featureRef.current.geometry = {
-              type: 'LineString',
-              coordinates: lonLatPath.slice(0, count),
-            };
-          } catch {
-            /* ignore */
-          }
+          bundle.setLocation(start![0], start![1], 11);
         }
-        if (count >= positions.length && timer) {
-          window.clearInterval(timer);
-          timer = null;
-        }
-      }, compact ? 16 : 28);
+      }
     } else {
       const ymaps = (bundle as any).ymaps;
-      const polyline = new ymaps.Polyline(
-        positions.slice(0, count),
+      const outline = new ymaps.Polyline(
+        positions,
         {},
-        { strokeColor: '#06b6d4', strokeWidth: 5, strokeOpacity: 0.92 },
+        { strokeColor: isDark ? '#0f172a' : '#ffffff', strokeWidth: 8, strokeOpacity: 0.9 },
+      );
+      map.geoObjects.add(outline);
+      outlineFeatureRef.current = outline;
+
+      const polyline = new ymaps.Polyline(
+        positions,
+        {},
+        { strokeColor: '#06b6d4', strokeWidth: 5, strokeOpacity: 0.95 },
       );
       map.geoObjects.add(polyline);
       featureRef.current = polyline;
+
       if (start) {
         const m = new ymaps.Placemark(
           start,
@@ -274,47 +266,115 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         map.geoObjects.add(m);
         endMarkerRef.current = m;
       }
-      try {
-        const lats = positions.map(([la]) => la);
-        const lons = positions.map(([, lo]) => lo);
-        map.setBounds(
-          [
-            [Math.min(...lats), Math.min(...lons)],
-            [Math.max(...lats), Math.max(...lons)],
-          ],
-          { checkZoomRange: true, zoomMargin: 28 },
-        );
-      } catch {
-        /* ignore */
-      }
-
-      timer = window.setInterval(() => {
-        if (cancelled || !featureRef.current) {
-          if (timer) window.clearInterval(timer);
-          return;
-        }
-        count = Math.min(positions.length, count + step);
+      if (!followMode) {
         try {
-          featureRef.current.geometry.setCoordinates(positions.slice(0, count));
+          const lats = positions.map(([la]) => la);
+          const lons = positions.map(([, lo]) => lo);
+          map.setBounds(
+            [
+              [Math.min(...lats), Math.min(...lons)],
+              [Math.max(...lats), Math.max(...lons)],
+            ],
+            { checkZoomRange: true, zoomMargin: 36 },
+          );
         } catch {
           /* ignore */
         }
-        if (count >= positions.length && timer) {
-          window.clearInterval(timer);
-          timer = null;
-        }
-      }, compact ? 16 : 28);
+      }
     }
 
     return () => {
-      cancelled = true;
-      if (timer) window.clearInterval(timer);
       removeObj(bundle, featureRef.current);
+      removeObj(bundle, outlineFeatureRef.current);
+      removeObj(bundle, traveledFeatureRef.current);
       removeObj(bundle, startMarkerRef.current);
       removeObj(bundle, endMarkerRef.current);
+      featureRef.current = null;
+      outlineFeatureRef.current = null;
+      traveledFeatureRef.current = null;
+      startMarkerRef.current = null;
+      endMarkerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, JSON.stringify(positions), compact]);
+  }, [mapReady, JSON.stringify(positions), compact, fill, isDark]);
+
+  // Progress split: muted traveled path + bright remaining while following GPS on route.
+  useEffect(() => {
+    const bundle = bundleRef.current;
+    if (!bundle || !mapReady || positions.length < 2) return;
+    if (!followMode || !currentPosition) return;
+    const map = (bundle as any).map;
+
+    // Nearest vertex on planned path
+    let bestIdx = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < positions.length; i++) {
+      const dLat = positions[i][0] - currentPosition.lat;
+      const dLon = positions[i][1] - currentPosition.lon;
+      const d = dLat * dLat + dLon * dLon;
+      if (d < bestD) {
+        bestD = d;
+        bestIdx = i;
+      }
+    }
+    const traveledPos = positions.slice(0, Math.max(2, bestIdx + 1));
+    const remainingPos = positions.slice(Math.max(0, bestIdx));
+    if (remainingPos.length < 2) return;
+
+    const strokeMain = isDark ? 'rgba(34, 211, 238, 0.95)' : 'rgba(8, 145, 178, 0.95)';
+    const strokeTraveled = isDark ? 'rgba(100, 116, 139, 0.8)' : 'rgba(148, 163, 184, 0.9)';
+
+    removeObj(bundle, traveledFeatureRef.current);
+    traveledFeatureRef.current = null;
+
+    if (bundle.apiVersion === 3) {
+      const { YMapFeature } = (bundle as any).ymaps3;
+      if (traveledPos.length >= 2) {
+        const traveled = new YMapFeature({
+          geometry: {
+            type: 'LineString',
+            coordinates: traveledPos.map(([la, lo]) => toLonLat(la, lo)),
+          },
+          style: { stroke: [{ width: 5, color: strokeTraveled }] },
+        });
+        map.addChild(traveled);
+        traveledFeatureRef.current = traveled;
+      }
+      // Update main feature to remaining only
+      if (featureRef.current) {
+        try {
+          featureRef.current.update({
+            geometry: {
+              type: 'LineString',
+              coordinates: remainingPos.map(([la, lo]) => toLonLat(la, lo)),
+            },
+            style: { stroke: [{ width: 5, color: strokeMain }] },
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+    } else {
+      const ymaps = (bundle as any).ymaps;
+      if (traveledPos.length >= 2) {
+        const traveled = new ymaps.Polyline(
+          traveledPos,
+          {},
+          { strokeColor: '#94a3b8', strokeWidth: 5, strokeOpacity: 0.85 },
+        );
+        map.geoObjects.add(traveled);
+        traveledFeatureRef.current = traveled;
+      }
+      if (featureRef.current?.geometry?.setCoordinates) {
+        try {
+          featureRef.current.geometry.setCoordinates(remainingPos);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, currentPosition?.lat, currentPosition?.lon, followMode, JSON.stringify(positions), isDark]);
 
   useEffect(() => {
     const bundle = bundleRef.current;
@@ -378,18 +438,28 @@ export const RouteMap: React.FC<RouteMapProps> = ({
 
     if (bundle.apiVersion === 3) {
       const coords = toLonLat(currentPosition.lat, currentPosition.lon);
+      const h =
+        headingDeg != null && Number.isFinite(headingDeg)
+          ? Number(headingDeg)
+          : lastAppliedHeadingRef.current ?? 0;
       if (currentPosMarkerRef.current) {
         try {
           currentPosMarkerRef.current.update({ coordinates: coords });
         } catch {
           /* ignore */
         }
+        // Refresh arrow rotation via DOM child when possible
+        try {
+          const root = currentPosMarkerRef.current?.element || currentPosMarkerRef.current?._element;
+          const arrow = root?.querySelector?.('[data-vigo-nav-arrow]') as HTMLElement | null;
+          if (arrow) arrow.style.transform = `translate(-50%,-50%) rotate(${h}deg)`;
+        } catch {
+          /* ignore */
+        }
       } else {
         const { YMapMarker } = (bundle as any).ymaps3;
-        const m = new YMapMarker(
-          { coordinates: coords },
-          makeDotMarkerEl('#38bdf8', 14, '#fff'),
-        );
+        const el = followMode ? makeNavArrowEl('#38bdf8', h) : makeDotMarkerEl('#38bdf8', 14, '#fff');
+        const m = new YMapMarker({ coordinates: coords }, el);
         map.addChild(m);
         currentPosMarkerRef.current = m;
       }
