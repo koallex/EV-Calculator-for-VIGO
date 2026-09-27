@@ -178,8 +178,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     const strokeMain = isDark ? 'rgba(34, 211, 238, 0.95)' : 'rgba(6, 182, 212, 0.95)';
     const strokeOutline = isDark ? 'rgba(15, 23, 42, 0.55)' : 'rgba(255, 255, 255, 0.65)';
 
-    // Draw-in animation for preview maps; full instant path in HUD follow/fill.
-    const animateDraw = !fill && !followMode;
+    // Draw-in animation A→B unless actively following GPS (HUD trip).
+    // Pre-start HUD uses fill=true but followMode=false — still animate.
+    const animateDraw = !followMode;
     const frames = compact ? 22 : 56;
     const step = Math.max(1, Math.ceil((positions.length - 2) / frames));
     let count = animateDraw ? Math.min(2, positions.length) : positions.length;
