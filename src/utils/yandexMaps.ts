@@ -248,10 +248,32 @@ export async function createV21Map(
       type: 'yandex#map',
     },
     {
+      // Hide "Открыть в Яндекс.Картах" promo block (license © logo still shown).
       suppressMapOpenBlock: true,
       yandexMapDisablePoiInteractivity: true,
     },
   );
+
+  // Extra safety: remove promo control if API still injects it.
+  try {
+    const ctrls = (map as any).controls;
+    if (ctrls && typeof ctrls.each === 'function') {
+      const toRemove: any[] = [];
+      ctrls.each((c: any) => {
+        const name = String(c?.constructor?.name || c?.options?.get?.('name') || '');
+        if (/goto|open|promo|mapOpen/i.test(name)) toRemove.push(c);
+      });
+      toRemove.forEach((c) => {
+        try {
+          ctrls.remove(c);
+        } catch {
+          /* ignore */
+        }
+      });
+    }
+  } catch {
+    /* ignore */
+  }
 
   const el: HTMLElement | null =
     typeof map.container?.getElement === 'function' ? map.container.getElement() : null;
