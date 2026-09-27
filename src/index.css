@@ -220,67 +220,82 @@ input[type=range]::-moz-range-thumb {
   filter: none !important;
 }
 
-/* Attribution + "Открыть в Яндекс.Картах" — explicit colors (light / dark) */
+/*
+ * Hide promo "Открыть / Показать в Яндекс.Картах".
+ * Required license © / logo stays visible, muted, without white frame.
+ */
+.route-map-shell [class*="gotoymaps"],
+.route-map-shell [class*="goto-ymaps"],
+.route-map-shell [class*="GotoYmaps"],
+.route-map-shell [class*="map-copyrights-promo"],
+.route-map-shell [class*="copyrights-promo"],
+.route-map-shell [class*="gototech"],
+.route-map-yandex [class*="gotoymaps"],
+.route-map-yandex [class*="goto-ymaps"],
+.route-map-yandex [class*="map-copyrights-promo"],
+.route-map-shell .ymaps-2-1-79-map-copyrights-promo,
+.route-map-shell [class*="ymaps-"][class*="-map-copyrights-promo"],
+.route-map-shell [class*="ymaps-"][class*="-gotoymaps"],
+.route-map-shell a[href*="maps.yandex"][class*="goto"],
+.route-map-shell a[href*="yandex.ru/maps"][class*="goto"] {
+  display: none !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Fallback: any link whose visible text is the open-in-maps CTA */
+.route-map-shell a[href*="maps.yandex.ru"],
+.route-map-shell a[href*="yandex.ru/maps"],
+.route-map-yandex a[href*="maps.yandex.ru"],
+.route-map-yandex a[href*="yandex.ru/maps"] {
+  display: none !important;
+}
+
+/* Remaining required © / logo — muted, no white frame */
 .route-map-shell [class*="copyrights"],
 .route-map-shell [class*="copyright"],
-.route-map-shell [class*="gototech"],
 .route-map-yandex [class*="copyrights"],
-.route-map-yandex [class*="copyright"],
-.route-map-shell [class*="goto"],
-.route-map-shell [class*="Goto"],
-.route-map-shell [class*="open-maps"],
-.route-map-shell [class*="OpenMaps"],
-.route-map-shell a[href*="maps.yandex"],
-.route-map-shell a[href*="yandex.ru/maps"],
-.route-map-yandex a[href*="maps.yandex"],
-.route-map-yandex a[href*="yandex.ru/maps"] {
-  color: #334155 !important;
-  background: rgba(255, 255, 255, 0.92) !important;
-  border-radius: 8px !important;
+.route-map-yandex [class*="copyright"] {
+  color: #64748b !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
   text-shadow: none !important;
-  opacity: 0.95 !important;
   filter: none !important;
-  -webkit-text-fill-color: #334155 !important;
+  -webkit-text-fill-color: #64748b !important;
+  opacity: 0.85 !important;
 }
 .route-map-shell [class*="copyrights"] a,
-.route-map-shell [class*="copyright"] a,
-.route-map-yandex [class*="copyrights"] a,
-.route-map-yandex [class*="copyright"] a {
-  color: #334155 !important;
-  -webkit-text-fill-color: #334155 !important;
+.route-map-shell [class*="copyright"] a {
+  color: #64748b !important;
+  -webkit-text-fill-color: #64748b !important;
+  background: transparent !important;
+  border: none !important;
 }
 .route-map-shell.vigo-ymaps-dark [class*="copyrights"],
 .route-map-shell.vigo-ymaps-dark [class*="copyright"],
-.route-map-shell.vigo-ymaps-dark [class*="gototech"],
-.route-map-shell.vigo-ymaps-dark [class*="goto"],
-.route-map-shell.vigo-ymaps-dark [class*="Goto"],
-.route-map-shell.vigo-ymaps-dark [class*="open-maps"],
-.route-map-shell.vigo-ymaps-dark a[href*="maps.yandex"],
-.route-map-shell.vigo-ymaps-dark a[href*="yandex.ru/maps"],
 .vigo-ymaps-dark [class*="copyrights"],
-.vigo-ymaps-dark [class*="copyright"],
-.vigo-ymaps-dark [class*="goto"],
-.vigo-ymaps-dark [class*="Goto"],
-.vigo-ymaps-dark a[href*="maps.yandex"],
-.vigo-ymaps-dark a[href*="yandex.ru/maps"] {
-  color: #cbd5e1 !important;
-  background: rgba(15, 23, 42, 0.9) !important;
-  border: 1px solid rgba(148, 163, 184, 0.25) !important;
-  -webkit-text-fill-color: #cbd5e1 !important;
-  filter: none !important;
+.vigo-ymaps-dark [class*="copyright"] {
+  color: #94a3b8 !important;
+  -webkit-text-fill-color: #94a3b8 !important;
+  background: transparent !important;
+  border: none !important;
+  opacity: 0.8 !important;
 }
-.route-map-shell.vigo-ymaps-dark [class*="copyrights"] *,
-.route-map-shell.vigo-ymaps-dark [class*="goto"] *,
-.vigo-ymaps-dark [class*="copyrights"] *,
-.vigo-ymaps-dark [class*="goto"] * {
-  color: #cbd5e1 !important;
-  -webkit-text-fill-color: #cbd5e1 !important;
-  fill: #cbd5e1 !important;
-  filter: none !important;
+.route-map-shell.vigo-ymaps-dark [class*="copyrights"] a,
+.route-map-shell.vigo-ymaps-dark [class*="copyright"] a,
+.vigo-ymaps-dark [class*="copyrights"] a,
+.vigo-ymaps-dark [class*="copyright"] a {
+  color: #94a3b8 !important;
+  -webkit-text-fill-color: #94a3b8 !important;
 }
 .route-map-shell img[class*="logo"],
 .route-map-yandex img[class*="logo"] {
-  opacity: 0.75;
+  opacity: 0.7;
   filter: none !important;
 }
 
