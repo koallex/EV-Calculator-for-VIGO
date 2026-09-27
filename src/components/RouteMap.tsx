@@ -23,6 +23,10 @@ interface RouteMapProps {
   chargingStop?: RouteMapChargingStop | null;
   chargingStops?: RouteMapChargingStop[];
   currentPosition?: { lat: number; lon: number } | null;
+  /** Compass heading 0–359° for nav-style map rotation (API v3). */
+  headingDeg?: number | null;
+  /** Keep map centered on currentPosition with closer zoom (HUD follow). */
+  followMode?: boolean;
   compact?: boolean;
   fill?: boolean;
   /** Fired when user taps a charging-stop marker on the map. */
@@ -35,6 +39,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   chargingStop,
   chargingStops,
   currentPosition = null,
+  headingDeg = null,
+  followMode = false,
   compact = false,
   fill = false,
   onChargingStopClick,
@@ -350,6 +356,28 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         map.addChild(m);
         currentPosMarkerRef.current = m;
       }
+
+      // Nav-style follow: center + zoom; rotate map by heading when available (v3 only).
+      if (followMode) {
+        try {
+          const loc: Record<string, unknown> = {
+            center: coords,
+            zoom: 16,
+            duration: 400,
+          };
+          if (headingDeg != null && Number.isFinite(headingDeg)) {
+            // YMaps JS API 3 uses azimuth in radians, 0 = north.
+            loc.azimuth = (Number(headingDeg) * Math.PI) / 180;
+          }
+          map.setLocation(loc);
+        } catch {
+          try {
+            (bundle as any).setLocation?.(currentPosition.lat, currentPosition.lon, 16);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
     } else {
       const coords: [number, number] = [currentPosition.lat, currentPosition.lon];
       if (currentPosMarkerRef.current) {
@@ -364,8 +392,21 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         map.geoObjects.add(m);
         currentPosMarkerRef.current = m;
       }
+
+      // API 2.1: pan/zoom follow only (no reliable map rotation).
+      if (followMode) {
+        try {
+          map.setCenter(coords, 16, { duration: 300 });
+        } catch {
+          try {
+            (bundle as any).setLocation?.(currentPosition.lat, currentPosition.lon, 16);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
     }
-  }, [mapReady, currentPosition?.lat, currentPosition?.lon]);
+  }, [mapReady, currentPosition?.lat, currentPosition?.lon, followMode, headingDeg]);
 
   return (
     <div

@@ -1799,6 +1799,8 @@ export const HudTab: React.FC<HudTabProps> = ({
           isDark={isDark}
           fill
           currentPosition={isTracking ? mapLivePosition : null}
+          followMode={isTracking && !!mapLivePosition}
+          headingDeg={isTracking ? gpsHeading : null}
           chargingStops={routeWaypoints
             .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
             .map((w) => ({
@@ -1813,6 +1815,108 @@ export const HudTab: React.FC<HudTabProps> = ({
     </div>
   );
 
+  // Save dialog must live outside tracking-only branches — after STOP isTracking becomes false
+  // and we often land on pre-start (route still present).
+  const completedTripModal = completedTripSummary ? (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+      <div className={`border rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl text-left ${
+        isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
+      }`}>
+        <div className={`flex items-center justify-between border-b pb-3 ${
+          isDark ? 'border-slate-800' : 'border-slate-200'
+        }`}>
+          <div className="flex items-center gap-2">
+            <div className={`p-2 rounded-xl ${
+              isDark ? 'bg-cyan-500/20 text-cyan-400' : 'bg-cyan-100 text-cyan-700'
+            }`}>
+              <Check className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className={`text-base font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                Поездка завершена
+              </h3>
+              <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                SoC: {Math.round(completedTripSummary.startSoc)}% → {Math.round(completedTripSummary.endSoc)}%
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCompletedTripSummary(null)}
+            className={`text-sm ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2.5">
+          <div className={`border rounded-xl p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+            <span className={`text-[10px] block font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Дистанция</span>
+            <span className={`text-xl font-bold font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
+              {completedTripSummary.distanceKm} км
+            </span>
+          </div>
+          <div className={`border rounded-xl p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+            <span className={`text-[10px] block font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Средняя</span>
+            <span className={`text-xl font-bold font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
+              {completedTripSummary.avgSpeedKmH} км/ч
+            </span>
+          </div>
+          <div className={`border rounded-xl p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+            <span className={`text-[10px] block font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>В пути</span>
+            <span className={`text-xl font-bold font-mono ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+              {completedTripSummary.durationMinutes} мин
+            </span>
+          </div>
+          <div className={`border rounded-xl p-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+            <span className={`text-[10px] block font-semibold uppercase ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Расход</span>
+            <span className={`text-xl font-bold font-mono ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+              {completedTripSummary.estimatedCons} кВт⋅ч/100
+            </span>
+          </div>
+        </div>
+
+        <div className={`p-2.5 border rounded-xl text-xs space-y-1 ${
+          isDark ? 'bg-slate-950/70 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
+        }`}>
+          <div className="flex justify-between gap-2">
+            <span>Энергия</span>
+            <span className="font-bold font-mono">{completedTripSummary.energyUsedKwh} кВт⋅ч</span>
+          </div>
+          <div className="flex justify-between gap-2">
+            <span>Макс. скорость</span>
+            <span className="font-bold font-mono">{completedTripSummary.maxSpeedKmH} км/ч</span>
+          </div>
+          <div className="flex justify-between gap-2">
+            <span>Температура</span>
+            <span className="font-bold font-mono">
+              {completedTripSummary.temp > 0 ? `+${completedTripSummary.temp}` : completedTripSummary.temp}°C
+            </span>
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            onClick={handleSaveTrackedTrip}
+            className="flex-1 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-sm active:scale-[0.98]"
+          >
+            Сохранить в историю
+          </button>
+          <button
+            type="button"
+            onClick={() => setCompletedTripSummary(null)}
+            className={`px-4 py-3 rounded-xl border font-semibold text-sm ${
+              isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-700'
+            }`}
+          >
+            Закрыть
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   // ── Pre-start: route from Calculator, map + compact controls ────────────
   if (!isTracking && hudRoutePoints.length >= 2) {
     return (
@@ -1824,23 +1928,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       >
         {mapLayer}
 
-        {/* Top: GPS / weather on the right */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2.5">
-          <div className="flex justify-end">
-            <div className={`pointer-events-auto flex items-center gap-1.5 rounded-2xl border px-2.5 py-1.5 text-[11px] ${glass}`}>
-              <span className={`w-2 h-2 rounded-full ${gpsAccuracy != null && gpsAccuracy <= 15 ? 'bg-cyan-400 animate-pulse' : gpsAccuracy != null ? 'bg-amber-400' : 'bg-rose-500'}`} />
-              <span className="font-mono font-bold">{gpsAccuracy != null ? `±${gpsAccuracy}м` : 'GPS…'}</span>
-              <span className="opacity-50">·</span>
-              <Thermometer className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="font-mono font-bold">
-                {weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°` : '—'}
-              </span>
-              <Wind className="w-3.5 h-3.5 text-sky-400" />
-              <span className="font-mono font-bold">{weather.isLoaded ? windSpeedMs : '—'}</span>
-              <span className="opacity-60">м/с</span>
-            </div>
-          </div>
-        </div>
+        {completedTripModal}
 
         {/* Center-bottom panel — above Yandex attribution */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-14 pt-2">
@@ -1926,96 +2014,81 @@ export const HudTab: React.FC<HudTabProps> = ({
         }`}
       >
         {mapLayer}
+        {completedTripModal}
 
-        {/* Top overlay: metrics left, GPS/weather right */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2.5 space-y-2">
-          <div className="pointer-events-auto flex items-start justify-between gap-2">
-            <div className="grid grid-cols-[auto_1fr] gap-2 min-w-0 flex-1">
-              <div className={`rounded-2xl border px-3 py-2 min-w-[5.5rem] ${glass}`}>
-                <div className="text-[10px] font-bold uppercase opacity-60">Скорость</div>
-                <div className="text-4xl font-black font-mono tabular-nums leading-none">{currentSpeed}</div>
-                <div className="text-[11px] opacity-60">км/ч</div>
+        {/* Single compact top strip — no overlapping columns */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2">
+          <div className={`pointer-events-auto rounded-2xl border px-2.5 py-2 ${glass}`}>
+            <div className="flex items-center gap-2.5">
+              <div className="shrink-0 text-center min-w-[3.25rem]">
+                <div className="text-3xl font-black font-mono tabular-nums leading-none">{currentSpeed}</div>
+                <div className="text-[9px] font-bold uppercase opacity-60">км/ч</div>
               </div>
-              <div className={`rounded-2xl border px-3 py-2 ${glass}`}>
-                <div className="flex items-end justify-between gap-2">
-                  <div>
-                    <div className="text-[10px] font-bold uppercase opacity-60">SOC сейчас</div>
-                    <div className={`text-3xl font-black font-mono tabular-nums ${liveDynamicSoc < 20 ? 'text-rose-400' : liveDynamicSoc < 40 ? 'text-amber-400' : 'text-cyan-300'}`}>
-                      {Math.round(liveDynamicSoc)}%
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[10px] font-bold uppercase opacity-60">Расход</div>
-                    <div className="text-lg font-black font-mono tabular-nums">{liveTripConsumption}</div>
-                    <div className="text-[10px] opacity-60">кВт⋅ч/100</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[10px] font-bold uppercase opacity-60">Запас</div>
-                    <div className="text-lg font-black font-mono tabular-nums">{dynamicRemainingRangeKm}</div>
-                    <div className="text-[10px] opacity-60">км</div>
+              <div className={`w-px self-stretch ${isDark ? 'bg-white/10' : 'bg-slate-300/60'}`} />
+              <div className="min-w-0 flex-1 grid grid-cols-3 gap-1.5 text-center">
+                <div>
+                  <div className="text-[9px] font-bold uppercase opacity-60">SOC</div>
+                  <div className={`text-lg font-black font-mono tabular-nums leading-tight ${liveDynamicSoc < 20 ? 'text-rose-400' : liveDynamicSoc < 40 ? 'text-amber-400' : 'text-cyan-300'}`}>
+                    {Math.round(liveDynamicSoc)}%
                   </div>
                 </div>
+                <div>
+                  <div className="text-[9px] font-bold uppercase opacity-60">Расход</div>
+                  <div className="text-lg font-black font-mono tabular-nums leading-tight">{liveTripConsumption}</div>
+                </div>
+                <div>
+                  <div className="text-[9px] font-bold uppercase opacity-60">Запас</div>
+                  <div className="text-lg font-black font-mono tabular-nums leading-tight">{dynamicRemainingRangeKm}<span className="text-[10px] font-bold opacity-60"> км</span></div>
+                </div>
               </div>
-            </div>
-            <div className={`shrink-0 flex flex-col items-end gap-1 rounded-2xl border px-2.5 py-1.5 text-[11px] ${glass}`}>
-              <div className="flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${gpsAccuracy != null && gpsAccuracy <= 15 ? 'bg-cyan-400 animate-pulse' : gpsAccuracy != null ? 'bg-amber-400' : 'bg-rose-500'}`} />
-                <span className="font-mono font-bold">{gpsAccuracy != null ? `±${gpsAccuracy}м` : 'GPS…'}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Thermometer className="w-3.5 h-3.5 text-cyan-400" />
-                <span className="font-mono font-bold">
+              <div className={`w-px self-stretch ${isDark ? 'bg-white/10' : 'bg-slate-300/60'}`} />
+              <div className="shrink-0 text-[10px] font-mono leading-tight space-y-0.5 text-right">
+                <div className="flex items-center justify-end gap-1">
+                  <span className={`w-1.5 h-1.5 rounded-full ${gpsAccuracy != null && gpsAccuracy <= 15 ? 'bg-cyan-400' : gpsAccuracy != null ? 'bg-amber-400' : 'bg-rose-500'}`} />
+                  <span className="font-bold">{gpsAccuracy != null ? `±${gpsAccuracy}` : '…'}</span>
+                </div>
+                <div className="font-bold">
                   {weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°` : '—'}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <Wind className="w-3.5 h-3.5 text-sky-400" />
-                <span className="font-mono font-bold">{weather.isLoaded ? windSpeedMs : '—'}</span>
-                <span className="opacity-60">м/с</span>
+                </div>
+                <div className="opacity-70">{weather.isLoaded ? `${windSpeedMs} м/с` : '—'}</div>
               </div>
             </div>
-          </div>
 
-          {activeWaypoint && (
-            <div className={`pointer-events-auto rounded-2xl border px-3 py-2 ${glass}`}>
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0 flex items-center gap-2">
+            {activeWaypoint && (
+              <div className={`mt-2 pt-2 border-t flex items-center justify-between gap-2 ${isDark ? 'border-white/10' : 'border-slate-300/50'}`}>
+                <div className="min-w-0 flex items-center gap-1.5">
                   {activeWaypoint.kind === 'charge' ? (
-                    <PlugZap className="w-4 h-4 shrink-0 text-amber-400" />
+                    <PlugZap className="w-3.5 h-3.5 shrink-0 text-amber-400" />
                   ) : (
-                    <Flag className="w-4 h-4 shrink-0 text-cyan-400" />
+                    <Flag className="w-3.5 h-3.5 shrink-0 text-cyan-400" />
                   )}
                   <div className="min-w-0">
-                    <div className="text-[10px] font-bold uppercase opacity-60">
+                    <div className="text-[10px] font-bold uppercase opacity-60 truncate">
                       {activeWaypoint.kind === 'charge' ? 'До зарядки' : 'До финиша'}
-                      {destinationResult?.arrivalTimeLabel ? ` · ETA ${destinationResult.arrivalTimeLabel}` : ''}
+                      {destinationResult?.arrivalTimeLabel ? ` · ${destinationResult.arrivalTimeLabel}` : ''}
                     </div>
-                    <div className="text-[12px] font-semibold truncate">{activeWaypoint.name}</div>
+                    <div className="text-[11px] font-semibold truncate">{activeWaypoint.name}</div>
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  {(liveSocAtActiveWaypoint != null || livePredictedSoc != null) && (
-                    <>
-                      <div className="text-[10px] font-bold uppercase opacity-60">SOC на финише</div>
-                      <div className="text-xl font-black font-mono tabular-nums">
-                        {Math.round(liveSocAtActiveWaypoint ?? livePredictedSoc ?? 0)}%
-                      </div>
-                    </>
-                  )}
-                  {remainingKmToActiveWaypoint != null && (
-                    <div className="text-[11px] font-mono opacity-70">
-                      {remainingKmToActiveWaypoint < 1
-                        ? `${Math.round(remainingKmToActiveWaypoint * 1000)} м`
-                        : `${remainingKmToActiveWaypoint.toFixed(1)} км`}
-                    </div>
-                  )}
+                  <div className="text-[9px] font-bold uppercase opacity-60">SOC на финише</div>
+                  <div className="text-base font-black font-mono tabular-nums">
+                    {Math.round(liveSocAtActiveWaypoint ?? livePredictedSoc ?? 0)}%
+                    {remainingKmToActiveWaypoint != null && (
+                      <span className="ml-1 text-[10px] font-bold opacity-60">
+                        · {remainingKmToActiveWaypoint < 1
+                          ? `${Math.round(remainingKmToActiveWaypoint * 1000)} м`
+                          : `${remainingKmToActiveWaypoint.toFixed(1)} км`}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {/* Controls raised above Yandex attribution */}
-          <div className="pointer-events-auto flex items-center gap-2">
+          {/* Controls under the strip (not at map bottom / Yandex logo) */}
+          <div className="pointer-events-auto mt-2 flex items-center gap-2">
             <div className={`flex items-center gap-1 rounded-2xl border px-2 py-1.5 ${glass}`}>
               <button type="button" onClick={() => setPassengers((p) => Math.max(1, p - 1))} className="w-8 h-8 rounded-lg font-bold text-sm opacity-80">−</button>
               <span className="text-[12px] font-bold min-w-[3.5rem] text-center">👥 {passengers}</span>
@@ -2043,59 +2116,23 @@ export const HudTab: React.FC<HudTabProps> = ({
           </div>
         </div>
 
-        {/* Bottom telemetry only — extra bottom padding for Yandex label */}
+        {/* Bottom telemetry — padding above Yandex attribution */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-12">
-          <div className={`pointer-events-auto rounded-2xl border px-2 py-2 grid grid-cols-3 gap-1 ${glass}`}>
+          <div className={`pointer-events-auto rounded-2xl border px-2 py-1.5 grid grid-cols-3 gap-1 ${glass}`}>
             <div className="text-center">
-              <div className="text-[10px] font-bold uppercase opacity-60">В пути</div>
-              <div className="text-base font-black font-mono tabular-nums">{formatTime(elapsedSeconds)}</div>
+              <div className="text-[9px] font-bold uppercase opacity-60">В пути</div>
+              <div className="text-sm font-black font-mono tabular-nums">{formatTime(elapsedSeconds)}</div>
             </div>
             <div className="text-center">
-              <div className="text-[10px] font-bold uppercase opacity-60">Средняя</div>
-              <div className="text-base font-black font-mono tabular-nums">{avgTripSpeedKmH} <span className="text-[10px] font-bold opacity-60">км/ч</span></div>
+              <div className="text-[9px] font-bold uppercase opacity-60">Средняя</div>
+              <div className="text-sm font-black font-mono tabular-nums">{avgTripSpeedKmH} <span className="text-[9px] opacity-60">км/ч</span></div>
             </div>
             <div className="text-center">
-              <div className="text-[10px] font-bold uppercase opacity-60">Дистанция</div>
-              <div className="text-base font-black font-mono tabular-nums">{tripDistanceKm.toFixed(1)} <span className="text-[10px] font-bold opacity-60">км</span></div>
+              <div className="text-[9px] font-bold uppercase opacity-60">Дистанция</div>
+              <div className="text-sm font-black font-mono tabular-nums">{tripDistanceKm.toFixed(1)} <span className="text-[9px] opacity-60">км</span></div>
             </div>
           </div>
         </div>
-
-        {/* Completed trip modal (same as before) */}
-        {completedTripSummary && (
-          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-            <div className={`border rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl text-left ${
-              isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
-            }`}>
-              <div className="flex items-center justify-between border-b pb-3 border-slate-800">
-                <div className="font-bold">Поездка завершена</div>
-                <button type="button" onClick={() => setCompletedTripSummary(null)} className="text-sm opacity-70">Закрыть</button>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>Расход: <b className="font-mono">{completedTripSummary.estimatedCons}</b> кВт⋅ч/100</div>
-                <div>Дистанция: <b className="font-mono">{completedTripSummary.distanceKm}</b> км</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  if (onOpenAddModalWithData) {
-                    onOpenAddModalWithData({
-                      startSoc: startTripSoc,
-                      endSoc: Math.round(liveDynamicSoc),
-                      distanceKm: tripDistanceKm,
-                      climateOn,
-                      passengers,
-                    });
-                  }
-                  setCompletedTripSummary(null);
-                }}
-                className="w-full py-3 rounded-xl bg-cyan-600 text-white font-bold"
-              >
-                Сохранить в историю
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
