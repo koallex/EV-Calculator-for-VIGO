@@ -243,9 +243,13 @@ export const HudTab: React.FC<HudTabProps> = ({
   const [hudRoutePoints, setHudRoutePoints] = useState<RoutePoint[]>([]);
   /** Collapsed by default so the phone HUD keeps STOP visible; user expands when needed. */
   const [hudMapOpen, setHudMapOpen] = useState(false);
-  /** Live GPS for map marker (updated while tracking). */
+  /** Live GPS for map marker (updated while tracking) — EMA-smoothed. */
   const [mapLivePosition, setMapLivePosition] = useState<{ lat: number; lon: number } | null>(null);
   const lastMapPosUpdateRef = useRef(0);
+  const smoothMapPosRef = useRef<{ lat: number; lon: number } | null>(null);
+  /** Display-smoothed remaining range so the HUD number does not jump every tick. */
+  const [displayRangeKm, setDisplayRangeKm] = useState(0);
+  const [isLandscape, setIsLandscape] = useState(false);
 
   // Weather data fetched via GPS coordinates
   const [weather, setWeather] = useState<GpsWeather>({
@@ -588,10 +592,19 @@ export const HudTab: React.FC<HudTabProps> = ({
       const { latitude, longitude, speed, accuracy, heading } = pos.coords;
       const now = Date.now();
       latestGpsPositionRef.current = { lat: latitude, lon: longitude };
-      // Throttle map marker updates (~1.5 s) to avoid re-rendering the map every GPS tick.
-      if (now - lastMapPosUpdateRef.current > 1500) {
-        lastMapPosUpdateRef.current = now;
-        setMapLivePosition({ lat: latitude, lon: longitude });
+      // EMA-smoothed map marker — reduces GPS jumpiness on the HUD map.
+      {
+        const prev = smoothMapPosRef.current;
+        const alpha = prev ? 0.28 : 1;
+        const smoothed = {
+          lat: prev ? prev.lat * (1 - alpha) + latitude * alpha : latitude,
+          lon: prev ? prev.lon * (1 - alpha) + longitude * alpha : longitude,
+        };
+        smoothMapPosRef.current = smoothed;
+        if (now - lastMapPosUpdateRef.current > 900) {
+          lastMapPosUpdateRef.current = now;
+          setMapLivePosition(smoothed);
+        }
       }
 
       const accMeters = accuracy ? Math.round(accuracy) : null;
@@ -1275,6 +1288,34 @@ export const HudTab: React.FC<HudTabProps> = ({
     Math.round((dynamicRemainingBatteryKwh / rangeConsumption) * 100)
   );
 
+  // Smooth displayed range so it does not flicker every GPS/weather tick.
+  useEffect(() => {
+    setDisplayRangeKm((prev) => {
+      if (!prev || prev <= 0) return dynamicRemainingRangeKm;
+      const next = Math.round(prev * 0.72 + dynamicRemainingRangeKm * 0.28);
+      // Ignore sub-2 km noise
+      if (Math.abs(next - prev) < 2) return prev;
+      return next;
+    });
+  }, [dynamicRemainingRangeKm]);
+
+  // Landscape / wide layout for HUD driving and pre-start.
+  useEffect(() => {
+    const update = () => {
+      const landscape =
+        (typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches) ||
+        window.innerWidth > window.innerHeight * 1.05;
+      setIsLandscape(landscape);
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', update);
+    };
+  }, []);
+
   // Baseline nominal range at the vehicle's official passport rating (340 km at 100% charge for
   // the Dongfeng Vigo), scaled down proportionally to the current battery charge.
   const PASSPORT_RANGE_KM = 340;
@@ -1800,7 +1841,7 @@ export const HudTab: React.FC<HudTabProps> = ({
           fill
           currentPosition={isTracking ? mapLivePosition : null}
           followMode={isTracking && !!mapLivePosition}
-          headingDeg={isTracking ? gpsHeading : null}
+          headingDeg={isTracking ? (gpsHeading ?? lastHeadingRef.current ?? null) : null}
           chargingStops={routeWaypoints
             .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
             .map((w) => ({
@@ -2006,132 +2047,174 @@ export const HudTab: React.FC<HudTabProps> = ({
 
   // ── Map-first driving mode ──────────────────────────────────────────────
   if (isTracking) {
+    const rangeShown = displayRangeKm || dynamicRemainingRangeKm;
+
+    const metricsBlock = (
+      <>
+        <div className={isLandscape ? 'space-y-3' : ''}>
+          <div className={isLandscape ? 'text-center' : 'flex items-center gap-2.5'}>
+            <div className={isLandscape ? '' : 'shrink-0 text-center min-w-[3.25rem]'}>
+              <div className={`${isLandscape ? 'text-5xl' : 'text-3xl'} font-black font-mono tabular-nums leading-none`}>
+                {currentSpeed}
+              </div>
+              <div className="text-[9px] font-bold uppercase opacity-60">км/ч</div>
+            </div>
+            {!isLandscape && <div className={`w-px self-stretch ${isDark ? 'bg-white/10' : 'bg-slate-300/60'}`} />}
+            <div className={`${isLandscape ? 'grid grid-cols-1 gap-2 mt-2' : 'min-w-0 flex-1 grid grid-cols-3 gap-1.5'} text-center`}>
+              <div>
+                <div className="text-[9px] font-bold uppercase opacity-60">SOC</div>
+                <div className={`text-lg font-black font-mono tabular-nums leading-tight ${liveDynamicSoc < 20 ? 'text-rose-400' : liveDynamicSoc < 40 ? 'text-amber-400' : 'text-cyan-300'}`}>
+                  {Math.round(liveDynamicSoc)}%
+                </div>
+              </div>
+              <div>
+                <div className="text-[9px] font-bold uppercase opacity-60">Расход</div>
+                <div className="text-lg font-black font-mono tabular-nums leading-tight">{liveTripConsumption}</div>
+              </div>
+              <div>
+                <div className="text-[9px] font-bold uppercase opacity-60">Запас</div>
+                <div className="text-lg font-black font-mono tabular-nums leading-tight">
+                  {rangeShown}<span className="text-[10px] font-bold opacity-60"> км</span>
+                </div>
+              </div>
+            </div>
+            {!isLandscape && <div className={`w-px self-stretch ${isDark ? 'bg-white/10' : 'bg-slate-300/60'}`} />}
+            <div className={`${isLandscape ? 'mt-2 flex items-center justify-center gap-3 text-[11px]' : 'shrink-0 text-[10px] leading-tight space-y-0.5 text-right'} font-mono`}>
+              <div className={`flex items-center ${isLandscape ? '' : 'justify-end'} gap-1`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${gpsAccuracy != null && gpsAccuracy <= 15 ? 'bg-cyan-400' : gpsAccuracy != null ? 'bg-amber-400' : 'bg-rose-500'}`} />
+                <span className="font-bold">{gpsAccuracy != null ? `±${gpsAccuracy}` : '…'}</span>
+              </div>
+              <div className="font-bold">
+                {weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°` : '—'}
+              </div>
+              <div className={`flex items-center ${isLandscape ? '' : 'justify-end'} gap-0.5 font-bold ${windInfo.color}`}>
+                <ArrowDown className="w-3.5 h-3.5 shrink-0" style={{ transform: `rotate(${windInfo.arrowRotation}deg)` }} />
+                <span>{weather.isLoaded ? `${windSpeedMs}` : '—'}</span>
+                <span className="opacity-60 font-semibold">м/с</span>
+                {weather.isLoaded && windInfo.type !== 'calm' && (
+                  <span className="ml-0.5 text-[9px]">{windInfo.label}</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {activeWaypoint && (
+            <div className={`${isLandscape ? 'mt-1' : 'mt-2 pt-2 border-t'} flex items-center justify-between gap-2 ${!isLandscape && (isDark ? 'border-white/10' : 'border-slate-300/50')}`}>
+              <div className="min-w-0 flex items-center gap-1.5">
+                {activeWaypoint.kind === 'charge' ? (
+                  <PlugZap className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                ) : (
+                  <Flag className="w-3.5 h-3.5 shrink-0 text-cyan-400" />
+                )}
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase opacity-60 truncate">
+                    {activeWaypoint.kind === 'charge' ? 'До зарядки' : 'До финиша'}
+                    {destinationResult?.arrivalTimeLabel ? ` · ${destinationResult.arrivalTimeLabel}` : ''}
+                  </div>
+                  <div className="text-[11px] font-semibold truncate">{activeWaypoint.name}</div>
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-[9px] font-bold uppercase opacity-60">SOC на финише</div>
+                <div className="text-base font-black font-mono tabular-nums">
+                  {Math.round(liveSocAtActiveWaypoint ?? livePredictedSoc ?? 0)}%
+                  {remainingKmToActiveWaypoint != null && (
+                    <span className="ml-1 text-[10px] font-bold opacity-60">
+                      · {remainingKmToActiveWaypoint < 1
+                        ? `${Math.round(remainingKmToActiveWaypoint * 1000)} м`
+                        : `${remainingKmToActiveWaypoint.toFixed(1)} км`}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </>
+    );
+
+    const controlsBlock = (
+      <div className={`flex ${isLandscape ? 'flex-col' : 'items-center'} gap-2`}>
+        <div className={`flex items-center gap-1 rounded-2xl border px-2 py-1.5 ${glass}`}>
+          <button type="button" onClick={() => setPassengers((p) => Math.max(1, p - 1))} className="w-8 h-8 rounded-lg font-bold text-sm opacity-80">−</button>
+          <span className="text-[12px] font-bold min-w-[3.5rem] text-center">👥 {passengers}</span>
+          <button type="button" onClick={() => setPassengers((p) => Math.min(5, p + 1))} className="w-8 h-8 rounded-lg font-bold text-sm opacity-80">+</button>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic('light', settings.hapticFeedback);
+            setClimateOn((v) => !v);
+          }}
+          className={`rounded-2xl border px-3 py-2 text-[12px] font-bold ${glass} ${
+            climateOn ? 'ring-1 ring-cyan-400/50' : 'opacity-70'
+          }`}
+        >
+          {climateOn ? 'Климат вкл' : 'Климат выкл'}
+        </button>
+        <button
+          type="button"
+          onClick={handleStopTracking}
+          className={`${isLandscape ? 'w-full' : 'ml-auto'} rounded-2xl bg-rose-600 text-white font-black text-[14px] px-5 py-2.5 flex items-center justify-center gap-2 shadow-lg shadow-rose-900/40 active:scale-[0.98]`}
+        >
+          <Square className="w-4 h-4 fill-current" /> СТОП
+        </button>
+      </div>
+    );
+
+    const telemetryBlock = (
+      <div className={`rounded-2xl border px-2 py-1.5 grid grid-cols-3 gap-1 ${glass}`}>
+        <div className="text-center">
+          <div className="text-[9px] font-bold uppercase opacity-60">В пути</div>
+          <div className="text-sm font-black font-mono tabular-nums">{formatTime(elapsedSeconds)}</div>
+        </div>
+        <div className="text-center">
+          <div className="text-[9px] font-bold uppercase opacity-60">Средняя</div>
+          <div className="text-sm font-black font-mono tabular-nums">{avgTripSpeedKmH} <span className="text-[9px] opacity-60">км/ч</span></div>
+        </div>
+        <div className="text-center">
+          <div className="text-[9px] font-bold uppercase opacity-60">Дистанция</div>
+          <div className="text-sm font-black font-mono tabular-nums">{tripDistanceKm.toFixed(1)} <span className="text-[9px] opacity-60">км</span></div>
+        </div>
+      </div>
+    );
+
     return (
       <div
         id="hud-tab-container"
         className={`relative h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] overflow-hidden rounded-3xl select-none ${
-          isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'
-        }`}
+          isLandscape ? 'flex flex-row' : ''
+        } ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'}`}
       >
-        {mapLayer}
         {completedTripModal}
 
-        {/* Single compact top strip — no overlapping columns */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2">
-          <div className={`pointer-events-auto rounded-2xl border px-2.5 py-2 ${glass}`}>
-            <div className="flex items-center gap-2.5">
-              <div className="shrink-0 text-center min-w-[3.25rem]">
-                <div className="text-3xl font-black font-mono tabular-nums leading-none">{currentSpeed}</div>
-                <div className="text-[9px] font-bold uppercase opacity-60">км/ч</div>
-              </div>
-              <div className={`w-px self-stretch ${isDark ? 'bg-white/10' : 'bg-slate-300/60'}`} />
-              <div className="min-w-0 flex-1 grid grid-cols-3 gap-1.5 text-center">
-                <div>
-                  <div className="text-[9px] font-bold uppercase opacity-60">SOC</div>
-                  <div className={`text-lg font-black font-mono tabular-nums leading-tight ${liveDynamicSoc < 20 ? 'text-rose-400' : liveDynamicSoc < 40 ? 'text-amber-400' : 'text-cyan-300'}`}>
-                    {Math.round(liveDynamicSoc)}%
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[9px] font-bold uppercase opacity-60">Расход</div>
-                  <div className="text-lg font-black font-mono tabular-nums leading-tight">{liveTripConsumption}</div>
-                </div>
-                <div>
-                  <div className="text-[9px] font-bold uppercase opacity-60">Запас</div>
-                  <div className="text-lg font-black font-mono tabular-nums leading-tight">{dynamicRemainingRangeKm}<span className="text-[10px] font-bold opacity-60"> км</span></div>
-                </div>
-              </div>
-              <div className={`w-px self-stretch ${isDark ? 'bg-white/10' : 'bg-slate-300/60'}`} />
-              <div className="shrink-0 text-[10px] font-mono leading-tight space-y-0.5 text-right">
-                <div className="flex items-center justify-end gap-1">
-                  <span className={`w-1.5 h-1.5 rounded-full ${gpsAccuracy != null && gpsAccuracy <= 15 ? 'bg-cyan-400' : gpsAccuracy != null ? 'bg-amber-400' : 'bg-rose-500'}`} />
-                  <span className="font-bold">{gpsAccuracy != null ? `±${gpsAccuracy}` : '…'}</span>
-                </div>
-                <div className="font-bold">
-                  {weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°` : '—'}
-                </div>
-                <div className="opacity-70">{weather.isLoaded ? `${windSpeedMs} м/с` : '—'}</div>
-              </div>
-            </div>
-
-            {activeWaypoint && (
-              <div className={`mt-2 pt-2 border-t flex items-center justify-between gap-2 ${isDark ? 'border-white/10' : 'border-slate-300/50'}`}>
-                <div className="min-w-0 flex items-center gap-1.5">
-                  {activeWaypoint.kind === 'charge' ? (
-                    <PlugZap className="w-3.5 h-3.5 shrink-0 text-amber-400" />
-                  ) : (
-                    <Flag className="w-3.5 h-3.5 shrink-0 text-cyan-400" />
-                  )}
-                  <div className="min-w-0">
-                    <div className="text-[10px] font-bold uppercase opacity-60 truncate">
-                      {activeWaypoint.kind === 'charge' ? 'До зарядки' : 'До финиша'}
-                      {destinationResult?.arrivalTimeLabel ? ` · ${destinationResult.arrivalTimeLabel}` : ''}
-                    </div>
-                    <div className="text-[11px] font-semibold truncate">{activeWaypoint.name}</div>
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="text-[9px] font-bold uppercase opacity-60">SOC на финише</div>
-                  <div className="text-base font-black font-mono tabular-nums">
-                    {Math.round(liveSocAtActiveWaypoint ?? livePredictedSoc ?? 0)}%
-                    {remainingKmToActiveWaypoint != null && (
-                      <span className="ml-1 text-[10px] font-bold opacity-60">
-                        · {remainingKmToActiveWaypoint < 1
-                          ? `${Math.round(remainingKmToActiveWaypoint * 1000)} м`
-                          : `${remainingKmToActiveWaypoint.toFixed(1)} км`}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
+        {/* Landscape: side panel with all metrics; portrait: overlays on map */}
+        {isLandscape && (
+          <div className={`relative z-20 w-[min(42%,280px)] shrink-0 flex flex-col gap-2 p-2.5 overflow-y-auto ${
+            isDark ? 'bg-slate-950/95 border-r border-slate-800' : 'bg-white/95 border-r border-slate-200'
+          }`}>
+            <div className={`rounded-2xl border px-3 py-2.5 ${glass}`}>{metricsBlock}</div>
+            {controlsBlock}
+            {telemetryBlock}
           </div>
+        )}
 
-          {/* Controls under the strip (not at map bottom / Yandex logo) */}
-          <div className="pointer-events-auto mt-2 flex items-center gap-2">
-            <div className={`flex items-center gap-1 rounded-2xl border px-2 py-1.5 ${glass}`}>
-              <button type="button" onClick={() => setPassengers((p) => Math.max(1, p - 1))} className="w-8 h-8 rounded-lg font-bold text-sm opacity-80">−</button>
-              <span className="text-[12px] font-bold min-w-[3.5rem] text-center">👥 {passengers}</span>
-              <button type="button" onClick={() => setPassengers((p) => Math.min(5, p + 1))} className="w-8 h-8 rounded-lg font-bold text-sm opacity-80">+</button>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setClimateOn((v) => !v);
-              }}
-              className={`rounded-2xl border px-3 py-2 text-[12px] font-bold ${glass} ${
-                climateOn ? 'ring-1 ring-cyan-400/50' : 'opacity-70'
-              }`}
-            >
-              {climateOn ? 'Климат вкл' : 'Климат выкл'}
-            </button>
-            <button
-              type="button"
-              onClick={handleStopTracking}
-              className="ml-auto rounded-2xl bg-rose-600 text-white font-black text-[14px] px-5 py-2.5 flex items-center gap-2 shadow-lg shadow-rose-900/40 active:scale-[0.98]"
-            >
-              <Square className="w-4 h-4 fill-current" /> СТОП
-            </button>
-          </div>
-        </div>
+        <div className="relative min-w-0 flex-1">
+          {mapLayer}
 
-        {/* Bottom telemetry — padding above Yandex attribution */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-12">
-          <div className={`pointer-events-auto rounded-2xl border px-2 py-1.5 grid grid-cols-3 gap-1 ${glass}`}>
-            <div className="text-center">
-              <div className="text-[9px] font-bold uppercase opacity-60">В пути</div>
-              <div className="text-sm font-black font-mono tabular-nums">{formatTime(elapsedSeconds)}</div>
-            </div>
-            <div className="text-center">
-              <div className="text-[9px] font-bold uppercase opacity-60">Средняя</div>
-              <div className="text-sm font-black font-mono tabular-nums">{avgTripSpeedKmH} <span className="text-[9px] opacity-60">км/ч</span></div>
-            </div>
-            <div className="text-center">
-              <div className="text-[9px] font-bold uppercase opacity-60">Дистанция</div>
-              <div className="text-sm font-black font-mono tabular-nums">{tripDistanceKm.toFixed(1)} <span className="text-[9px] opacity-60">км</span></div>
-            </div>
-          </div>
+          {!isLandscape && (
+            <>
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2">
+                <div className={`pointer-events-auto rounded-2xl border px-2.5 py-2 ${glass}`}>
+                  {metricsBlock}
+                </div>
+                <div className="pointer-events-auto mt-2">{controlsBlock}</div>
+              </div>
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-12">
+                <div className="pointer-events-auto">{telemetryBlock}</div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     );

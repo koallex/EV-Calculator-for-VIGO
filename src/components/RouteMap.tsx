@@ -357,24 +357,35 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         currentPosMarkerRef.current = m;
       }
 
-      // Nav-style follow: center + zoom; rotate map by heading when available (v3 only).
+      // Nav-style follow: center + zoom; rotate by heading when API allows.
       if (followMode) {
+        const hasHeading = headingDeg != null && Number.isFinite(headingDeg);
+        const azimuthRad = hasHeading ? (Number(headingDeg) * Math.PI) / 180 : undefined;
         try {
+          // YMaps JS API 3 — location may accept azimuth (radians, 0 = north).
           const loc: Record<string, unknown> = {
             center: coords,
             zoom: 16,
-            duration: 400,
+            duration: 350,
           };
-          if (headingDeg != null && Number.isFinite(headingDeg)) {
-            // YMaps JS API 3 uses azimuth in radians, 0 = north.
-            loc.azimuth = (Number(headingDeg) * Math.PI) / 180;
-          }
+          if (azimuthRad != null) loc.azimuth = azimuthRad;
           map.setLocation(loc);
         } catch {
           try {
-            (bundle as any).setLocation?.(currentPosition.lat, currentPosition.lon, 16);
+            if (azimuthRad != null && typeof map.setAzimuth === 'function') {
+              map.setAzimuth(azimuthRad, { duration: 350 });
+            }
+            if (typeof map.setCenter === 'function') {
+              map.setCenter(coords);
+            } else {
+              (bundle as any).setLocation?.(currentPosition.lat, currentPosition.lon, 16);
+            }
           } catch {
-            /* ignore */
+            try {
+              (bundle as any).setLocation?.(currentPosition.lat, currentPosition.lon, 16);
+            } catch {
+              /* ignore */
+            }
           }
         }
       }
@@ -393,7 +404,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         currentPosMarkerRef.current = m;
       }
 
-      // API 2.1: pan/zoom follow only (no reliable map rotation).
+      // API 2.1: pan/zoom follow. Rotation is not supported reliably on 2.1.
       if (followMode) {
         try {
           map.setCenter(coords, 16, { duration: 300 });
@@ -411,7 +422,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   return (
     <div
       className={`route-map-shell overflow-hidden ${fill ? 'route-map-shell--fill' : ''} ${
-        isDark ? 'bg-slate-950' : 'bg-slate-100'
+        isDark ? 'bg-slate-950 vigo-ymaps-dark' : 'bg-slate-100'
       }`}
     >
       <div
