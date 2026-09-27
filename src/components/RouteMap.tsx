@@ -172,12 +172,17 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     startMarkerRef.current = null;
     endMarkerRef.current = null;
 
-    const strokeMain = isDark ? 'rgba(34, 211, 238, 0.95)' : 'rgba(8, 145, 178, 0.95)';
-    const strokeOutline = isDark ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.9)';
-    const strokeTraveled = isDark ? 'rgba(100, 116, 139, 0.75)' : 'rgba(148, 163, 184, 0.85)';
+    let cancelled = false;
+    let timer: number | null = null;
 
-    // Instant full track for HUD (fill/follow); soft draw-in only for compact preview maps.
-    const animate = !fill && !followMode && !compact;
+    const strokeMain = isDark ? 'rgba(34, 211, 238, 0.95)' : 'rgba(6, 182, 212, 0.95)';
+    const strokeOutline = isDark ? 'rgba(15, 23, 42, 0.55)' : 'rgba(255, 255, 255, 0.65)';
+
+    // Draw-in animation for preview maps; full instant path in HUD follow/fill.
+    const animateDraw = !fill && !followMode;
+    const frames = compact ? 22 : 56;
+    const step = Math.max(1, Math.ceil((positions.length - 2) / frames));
+    let count = animateDraw ? Math.min(2, positions.length) : positions.length;
 
     if (bundle.apiVersion === 3) {
       const ymaps3 = (bundle as any).ymaps3;
@@ -185,15 +190,15 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       const lonLatPath = positions.map(([la, lo]) => toLonLat(la, lo));
 
       const outline = new YMapFeature({
-        geometry: { type: 'LineString', coordinates: lonLatPath },
-        style: { stroke: [{ width: 8, color: strokeOutline }] },
+        geometry: { type: 'LineString', coordinates: lonLatPath.slice(0, count) },
+        style: { stroke: [{ width: 7, color: strokeOutline }] },
       });
       map.addChild(outline);
       outlineFeatureRef.current = outline;
 
       const feature = new YMapFeature({
-        geometry: { type: 'LineString', coordinates: lonLatPath },
-        style: { stroke: [{ width: 5, color: strokeMain }] },
+        geometry: { type: 'LineString', coordinates: lonLatPath.slice(0, count) },
+        style: { stroke: [{ width: 4.5, color: strokeMain }] },
       });
       map.addChild(feature);
       featureRef.current = feature;
@@ -224,24 +229,57 @@ export const RouteMap: React.FC<RouteMapProps> = ({
               toLonLat(Math.min(...lats), Math.min(...lons)),
               toLonLat(Math.max(...lats), Math.max(...lons)),
             ],
-            duration: animate ? 400 : 0,
+            duration: 0,
           });
         } catch {
           bundle.setLocation(start![0], start![1], 11);
         }
       }
+
+      if (animateDraw) {
+        timer = window.setInterval(() => {
+          if (cancelled || !featureRef.current) {
+            if (timer) window.clearInterval(timer);
+            return;
+          }
+          count = Math.min(positions.length, count + step);
+          const slice = lonLatPath.slice(0, count);
+          try {
+            outlineFeatureRef.current?.update?.({
+              geometry: { type: 'LineString', coordinates: slice },
+            });
+          } catch { /* ignore */ }
+          try {
+            featureRef.current.update({
+              geometry: { type: 'LineString', coordinates: slice },
+            });
+          } catch {
+            try {
+              featureRef.current.geometry = { type: 'LineString', coordinates: slice };
+            } catch { /* ignore */ }
+          }
+          if (count >= positions.length && timer) {
+            window.clearInterval(timer);
+            timer = null;
+          }
+        }, compact ? 16 : 28);
+      }
     } else {
       const ymaps = (bundle as any).ymaps;
       const outline = new ymaps.Polyline(
-        positions,
+        positions.slice(0, count),
         {},
-        { strokeColor: isDark ? '#0f172a' : '#ffffff', strokeWidth: 8, strokeOpacity: 0.9 },
+        {
+          strokeColor: isDark ? '#0f172a' : '#ffffff',
+          strokeWidth: 7,
+          strokeOpacity: 0.55,
+        },
       );
       map.geoObjects.add(outline);
       outlineFeatureRef.current = outline;
 
       const polyline = new ymaps.Polyline(
-        positions,
+        positions.slice(0, count),
         {},
         { strokeColor: '#06b6d4', strokeWidth: 5, strokeOpacity: 0.95 },
       );
@@ -277,13 +315,33 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             ],
             { checkZoomRange: true, zoomMargin: 36 },
           );
-        } catch {
-          /* ignore */
-        }
+        } catch { /* ignore */ }
+      }
+
+      if (animateDraw) {
+        timer = window.setInterval(() => {
+          if (cancelled || !featureRef.current) {
+            if (timer) window.clearInterval(timer);
+            return;
+          }
+          count = Math.min(positions.length, count + step);
+          try {
+            outlineFeatureRef.current?.geometry?.setCoordinates?.(positions.slice(0, count));
+          } catch { /* ignore */ }
+          try {
+            featureRef.current.geometry.setCoordinates(positions.slice(0, count));
+          } catch { /* ignore */ }
+          if (count >= positions.length && timer) {
+            window.clearInterval(timer);
+            timer = null;
+          }
+        }, compact ? 16 : 28);
       }
     }
 
     return () => {
+      cancelled = true;
+      if (timer) window.clearInterval(timer);
       removeObj(bundle, featureRef.current);
       removeObj(bundle, outlineFeatureRef.current);
       removeObj(bundle, traveledFeatureRef.current);
@@ -296,16 +354,35 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       endMarkerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, JSON.stringify(positions), compact, fill, isDark]);
+  }, [mapReady, JSON.stringify(positions), compact, fill, followMode, isDark]);
 
-  // Progress split: muted traveled path + bright remaining while following GPS on route.
+  // Progress: only after the car has clearly moved along the path (avoid full-route gray at start).
   useEffect(() => {
     const bundle = bundleRef.current;
     if (!bundle || !mapReady || positions.length < 2) return;
-    if (!followMode || !currentPosition) return;
-    const map = (bundle as any).map;
+    if (!followMode || !currentPosition) {
+      // Restore full bright route if leaving follow
+      if (featureRef.current && bundle.apiVersion === 3) {
+        try {
+          const lonLatPath = positions.map(([la, lo]) => toLonLat(la, lo));
+          featureRef.current.update({
+            geometry: { type: 'LineString', coordinates: lonLatPath },
+            style: {
+              stroke: [
+                {
+                  width: 4.5,
+                  color: isDark ? 'rgba(34, 211, 238, 0.95)' : 'rgba(6, 182, 212, 0.95)',
+                },
+              ],
+            },
+          });
+        } catch { /* ignore */ }
+      }
+      removeObj(bundle, traveledFeatureRef.current);
+      traveledFeatureRef.current = null;
+      return;
+    }
 
-    // Nearest vertex on planned path
     let bestIdx = 0;
     let bestD = Infinity;
     for (let i = 0; i < positions.length; i++) {
@@ -317,12 +394,22 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         bestIdx = i;
       }
     }
+
+    // Require meaningful progress along polyline (not just "nearest is index 0/1")
+    const progressRatio = bestIdx / Math.max(1, positions.length - 1);
+    if (bestIdx < 3 && progressRatio < 0.02) {
+      removeObj(bundle, traveledFeatureRef.current);
+      traveledFeatureRef.current = null;
+      return;
+    }
+
+    const map = (bundle as any).map;
     const traveledPos = positions.slice(0, Math.max(2, bestIdx + 1));
     const remainingPos = positions.slice(Math.max(0, bestIdx));
     if (remainingPos.length < 2) return;
 
-    const strokeMain = isDark ? 'rgba(34, 211, 238, 0.95)' : 'rgba(8, 145, 178, 0.95)';
-    const strokeTraveled = isDark ? 'rgba(100, 116, 139, 0.8)' : 'rgba(148, 163, 184, 0.9)';
+    const strokeMain = isDark ? 'rgba(34, 211, 238, 0.95)' : 'rgba(6, 182, 212, 0.95)';
+    const strokeTraveled = isDark ? 'rgba(100, 116, 139, 0.75)' : 'rgba(148, 163, 184, 0.8)';
 
     removeObj(bundle, traveledFeatureRef.current);
     traveledFeatureRef.current = null;
@@ -335,12 +422,11 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             type: 'LineString',
             coordinates: traveledPos.map(([la, lo]) => toLonLat(la, lo)),
           },
-          style: { stroke: [{ width: 5, color: strokeTraveled }] },
+          style: { stroke: [{ width: 4.5, color: strokeTraveled }] },
         });
         map.addChild(traveled);
         traveledFeatureRef.current = traveled;
       }
-      // Update main feature to remaining only
       if (featureRef.current) {
         try {
           featureRef.current.update({
@@ -348,11 +434,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
               type: 'LineString',
               coordinates: remainingPos.map(([la, lo]) => toLonLat(la, lo)),
             },
-            style: { stroke: [{ width: 5, color: strokeMain }] },
+            style: { stroke: [{ width: 4.5, color: strokeMain }] },
           });
-        } catch {
-          /* ignore */
-        }
+        } catch { /* ignore */ }
       }
     } else {
       const ymaps = (bundle as any).ymaps;
@@ -360,7 +444,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         const traveled = new ymaps.Polyline(
           traveledPos,
           {},
-          { strokeColor: '#94a3b8', strokeWidth: 5, strokeOpacity: 0.85 },
+          { strokeColor: '#94a3b8', strokeWidth: 5, strokeOpacity: 0.8 },
         );
         map.geoObjects.add(traveled);
         traveledFeatureRef.current = traveled;
@@ -368,9 +452,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       if (featureRef.current?.geometry?.setCoordinates) {
         try {
           featureRef.current.geometry.setCoordinates(remainingPos);
-        } catch {
-          /* ignore */
-        }
+        } catch { /* ignore */ }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
