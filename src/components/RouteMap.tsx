@@ -4,6 +4,7 @@ import {
   createBestMap,
   makeDotMarkerEl,
   makeLabelMarkerEl,
+  scrubYandexOpenMapsPromo,
   toLonLat,
   type AnyMapBundle,
 } from '../utils/yandexMaps';
@@ -115,6 +116,16 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   useEffect(() => {
     bundleRef.current?.setTheme(isDark);
   }, [isDark]);
+
+  // Extra pass: promo block is sometimes injected outside the map instance root.
+  useEffect(() => {
+    if (!mapReady) return;
+    const root =
+      containerRef.current?.closest('.route-map-shell') ||
+      containerRef.current ||
+      undefined;
+    return scrubYandexOpenMapsPromo(root as HTMLElement | undefined);
+  }, [mapReady]);
 
   useEffect(() => {
     const bundle = bundleRef.current;
