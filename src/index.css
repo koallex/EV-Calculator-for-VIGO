@@ -222,37 +222,36 @@ input[type=range]::-moz-range-thumb {
 
 /*
  * Hide promo "Открыть / Показать в Яндекс.Картах".
- * Required license © / logo stays visible, muted, without white frame.
+ * Class hashes change between API builds — match by partial class + links.
+ * JS scrubYandexOpenMapsPromo() is the hard guarantee; CSS is the first line.
  */
-.route-map-shell [class*="gotoymaps"],
-.route-map-shell [class*="goto-ymaps"],
-.route-map-shell [class*="GotoYmaps"],
-.route-map-shell [class*="map-copyrights-promo"],
-.route-map-shell [class*="copyrights-promo"],
-.route-map-shell [class*="gototech"],
-.route-map-yandex [class*="gotoymaps"],
-.route-map-yandex [class*="goto-ymaps"],
-.route-map-yandex [class*="map-copyrights-promo"],
-.route-map-shell .ymaps-2-1-79-map-copyrights-promo,
-.route-map-shell [class*="ymaps-"][class*="-map-copyrights-promo"],
-.route-map-shell [class*="ymaps-"][class*="-gotoymaps"],
-.route-map-shell a[href*="maps.yandex"][class*="goto"],
-.route-map-shell a[href*="yandex.ru/maps"][class*="goto"] {
+[class*="gotoymaps"],
+[class*="goto-ymaps"],
+[class*="GotoYmaps"],
+[class*="map-copyrights-promo"],
+[class*="copyrights-promo"],
+[class*="gototech"],
+.ymaps-2-1-79-map-copyrights-promo,
+[class*="ymaps-"][class*="-map-copyrights-promo"],
+[class*="ymaps-"][class*="-gotoymaps"],
+.route-map-shell a[href*="maps.yandex"],
+.route-map-shell a[href*="yandex.ru/maps"],
+.route-map-shell a[href*="yandex.com/maps"],
+.route-map-yandex a[href*="maps.yandex"],
+.route-map-yandex a[href*="yandex.ru/maps"],
+.route-map-yandex a[href*="yandex.com/maps"],
+.route-map-shell [class*="copyrights-pane"] a,
+.route-map-yandex [class*="copyrights-pane"] a {
   display: none !important;
   visibility: hidden !important;
   width: 0 !important;
   height: 0 !important;
+  max-height: 0 !important;
   overflow: hidden !important;
   opacity: 0 !important;
   pointer-events: none !important;
-}
-
-/* Fallback: any link whose visible text is the open-in-maps CTA */
-.route-map-shell a[href*="maps.yandex.ru"],
-.route-map-shell a[href*="yandex.ru/maps"],
-.route-map-yandex a[href*="maps.yandex.ru"],
-.route-map-yandex a[href*="yandex.ru/maps"] {
-  display: none !important;
+  position: absolute !important;
+  left: -9999px !important;
 }
 
 /* Remaining required © / logo — muted, no white frame */
