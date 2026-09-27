@@ -515,3 +515,23 @@ export function createStationObjectManager(_ymaps: any) {
     removeAll: () => {},
   };
 }
+
+
+/** Navigation chevron for HUD live position (heading in degrees, 0 = north). */
+export function makeNavArrowEl(color = '#38bdf8', headingDeg = 0): HTMLElement {
+  const el = document.createElement('div');
+  el.style.cssText = [
+    'width:0',
+    'height:0',
+    'border-left:9px solid transparent',
+    'border-right:9px solid transparent',
+    'border-bottom:18px solid ' + color,
+    'filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))',
+    'transform:translate(-50%,-50%) rotate(' + String(headingDeg) + 'deg)',
+    'transform-origin:center center',
+    'cursor:default',
+    'pointer-events:none',
+  ].join(';');
+  el.setAttribute('data-vigo-nav-arrow', '1');
+  return el;
+}
