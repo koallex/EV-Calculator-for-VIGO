@@ -322,13 +322,16 @@ input[type=range]::-moz-range-thumb {
 
 
 
-/* ========== Landscape orientation — prevent stretched controls & overlaps ========== */
+/* ========== Landscape orientation — centered column, no broken grids ========== */
 @media (orientation: landscape) {
-  /* Form tabs: readable column width, room for floating nav */
+  /*
+   * Keep a single readable column. Previous 2-col grids on the root container
+   * shoved "Маршрут / Ручной ввод" into the left half and scrambled Settings cards.
+   */
   #calculator-tab-container,
   #history-tab-container,
   #settings-tab-container {
-    max-width: 48rem;
+    max-width: 36rem;
     width: 100%;
     margin-left: auto;
     margin-right: auto;
@@ -336,46 +339,49 @@ input[type=range]::-moz-range-thumb {
     box-sizing: border-box;
   }
 
-  /* Calculator: two-column denser layout; route/result span full width */
   #calculator-tab-container.calculator-minimal-shell {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 0.65rem 0.85rem;
-    align-items: start;
-  }
-  #calculator-tab-container.calculator-minimal-shell > .calculator-route,
-  #calculator-tab-container.calculator-minimal-shell > #route-result-main,
-  #calculator-tab-container.calculator-minimal-shell > [id='route-result-main'] {
-    grid-column: 1 / -1;
-  }
-  /* Avoid ultra-wide primary CTAs */
-  #calculator-tab-container button.w-full,
-  #settings-tab-container button.w-full,
-  #history-tab-container button.w-full {
-    max-width: 22rem;
-  }
-  #calculator-tab-container .calculator-route button.w-full,
-  #calculator-tab-container #route-result-main button.w-full {
-    max-width: none; /* route actions can stay full width of the result card */
-  }
-
-  /* Settings: pair cards side-by-side */
-  #settings-tab-container > form {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    display: flex !important;
+    flex-direction: column !important;
     gap: 0.75rem;
-    align-items: start;
-  }
-  #settings-tab-container > form > * {
-    min-width: 0;
+    align-items: stretch;
   }
 
-  /* History list cards not full viewport wide */
-  #history-tab-container .space-y-2\.5 > * {
+  /* Mode toggles and segmented controls always full width of the column */
+  #calculator-tab-container > div,
+  #calculator-tab-container > section,
+  #calculator-tab-container .grid.grid-cols-2 {
+    width: 100%;
     max-width: 100%;
   }
 
-  /* Charging map: true fullscreen under chrome; overlays compact */
+  #settings-tab-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+  #settings-tab-container > form {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.85rem;
+  }
+  #settings-tab-container > form > * {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  /* Internal 2-col chips (region, theme) stay 2-col — only root was broken */
+  #settings-tab-container .grid.grid-cols-2 {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+  #settings-tab-container .grid.grid-cols-1.sm\:grid-cols-2 {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+  }
+
+  /* Charging map: fullscreen; overlays compact */
   #charging-tab-container {
     max-width: none !important;
     height: 100%;
@@ -387,21 +393,20 @@ input[type=range]::-moz-range-thumb {
     margin: 0.5rem auto 0;
   }
 
-  /* Floating nav clearance for fixed cards */
   .route-map-shell,
   [data-tab-panel='charging'] {
     --vigo-nav-clearance: 4.5rem;
   }
 }
 
-/* Short landscape phones (typical phone landscape height) */
+/* Short landscape phones */
 @media (orientation: landscape) and (max-height: 500px) {
   #calculator-tab-container.calculator-minimal-shell {
     gap: 0.5rem;
   }
   #calculator-tab-container section,
-  #settings-tab-container section,
-  #settings-tab-container form > div {
+  #settings-tab-container > form > div,
+  #settings-tab-container > div {
     padding: 0.65rem !important;
   }
   #main-bottom-nav {
