@@ -259,6 +259,40 @@ input[type=range]::-moz-range-thumb {
   opacity: 0.72;
 }
 
+/* "Открыть в Яндекс.Картах" control — often pure white; force muted chip style */
+.route-map-shell [class*="goto"],
+.route-map-shell [class*="Goto"],
+.route-map-shell [class*="open-maps"],
+.route-map-shell [class*="OpenMaps"],
+.route-map-shell a[href*="maps.yandex"],
+.route-map-shell a[href*="yandex.ru/maps"],
+.route-map-yandex a[href*="maps.yandex"],
+.route-map-yandex a[href*="yandex.ru/maps"] {
+  color: #e2e8f0 !important;
+  background: rgba(15, 23, 42, 0.82) !important;
+  border-radius: 8px !important;
+  text-shadow: none !important;
+  opacity: 0.92 !important;
+  filter: none !important;
+}
+.route-map-shell:not(.vigo-ymaps-dark) [class*="goto"],
+.route-map-shell:not(.vigo-ymaps-dark) [class*="Goto"],
+.route-map-shell:not(.vigo-ymaps-dark) a[href*="maps.yandex"],
+.route-map-shell:not(.vigo-ymaps-dark) a[href*="yandex.ru/maps"] {
+  color: #334155 !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(148, 163, 184, 0.45) !important;
+}
+/* Do not double-invert the goto control inside dark map (keeps it readable) */
+.vigo-ymaps-dark [class*="goto"],
+.vigo-ymaps-dark [class*="Goto"],
+.vigo-ymaps-dark a[href*="maps.yandex"],
+.vigo-ymaps-dark a[href*="yandex.ru/maps"] {
+  filter: none !important;
+  color: #e2e8f0 !important;
+  background: rgba(15, 23, 42, 0.88) !important;
+}
+
 /* User geolocation pin on EZS map — distinct from operator station dots */
 .vigo-user-pulse-ring {
   position: absolute;
