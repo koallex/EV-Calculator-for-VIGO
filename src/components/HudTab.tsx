@@ -2177,9 +2177,15 @@ export const HudTab: React.FC<HudTabProps> = ({
 
   // Save dialog must live outside tracking-only branches — after STOP isTracking becomes false
   // and we often land on pre-start (route still present).
+  // z-[60] above floating bottom nav (z-50). Extra bottom padding keeps action buttons clear of the nav bar in landscape.
   const completedTripModal = completedTripSummary ? (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div className={`border rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl text-left ${
+    <div
+      className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center px-4 pt-4"
+      style={{
+        paddingBottom: 'calc(5.75rem + env(safe-area-inset-bottom, 0px))',
+      }}
+    >
+      <div className={`border rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl text-left max-h-[min(78dvh,calc(100dvh-7.5rem))] overflow-y-auto overscroll-contain ${
         isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
       }`}>
         <div className={`flex items-center justify-between border-b pb-3 ${
@@ -2295,8 +2301,11 @@ export const HudTab: React.FC<HudTabProps> = ({
 
         {completedTripModal}
 
-        {/* Center-bottom panel — above Yandex attribution */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-14 pt-2 flex justify-center">
+        {/* Center-bottom panel — above floating nav + Yandex attribution */}
+        <div
+          className="pointer-events-none absolute inset-x-0 z-20 px-2.5 pt-2 flex justify-center"
+          style={{ bottom: 'calc(4.75rem + env(safe-area-inset-bottom, 0px))' }}
+        >
           <div className={`pointer-events-auto w-full max-w-md sm:max-w-sm landscape:max-w-[22rem] rounded-2xl border p-3 space-y-2.5 shadow-xl ${glass}`}>
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
@@ -2520,62 +2529,62 @@ export const HudTab: React.FC<HudTabProps> = ({
           {hudEvseCard}
         </div>
 
-        {/* Landscape: wide top dashboard + bottom controls — large type, map stays readable */}
+        {/* Landscape: compact top dashboard (not full-bleed) + bottom controls clear of floating nav */}
         {isLandscape && (
           <>
-            <div className="pointer-events-none absolute left-2 right-2 top-2 z-20 flex gap-2 items-start">
-              <div className={`pointer-events-auto flex-1 min-w-0 rounded-2xl border px-3 py-2.5 shadow-xl ${glass}`}>
-                <div className="flex items-center gap-4 min-w-0">
+            <div className="pointer-events-none absolute left-2 right-2 top-2 z-20 flex justify-center">
+              <div className={`pointer-events-auto w-full max-w-xl rounded-2xl border px-3 py-2 shadow-xl ${glass}`}>
+                <div className="flex items-center gap-3 min-w-0">
                   {/* Hero speed */}
-                  <div className="shrink-0 text-center px-1">
-                    <div className="text-[3.25rem] leading-none font-black font-mono tabular-nums tracking-tight">
+                  <div className="shrink-0 text-center px-0.5">
+                    <div className="text-[2.75rem] leading-none font-black font-mono tabular-nums tracking-tight">
                       {currentSpeed}
                     </div>
-                    <div className="text-[11px] font-bold uppercase opacity-60 mt-0.5">км/ч</div>
+                    <div className="text-[10px] font-bold uppercase opacity-60 mt-0.5">км/ч</div>
                   </div>
                   <div className={`w-px self-stretch shrink-0 ${isDark ? 'bg-white/15' : 'bg-slate-300/50'}`} />
-                  {/* Big metrics */}
-                  <div className="flex-1 grid grid-cols-3 gap-3 min-w-0 text-center">
+                  {/* Metrics */}
+                  <div className="flex-1 grid grid-cols-3 gap-2 min-w-0 text-center">
                     <div>
-                      <div className="text-[11px] font-bold uppercase opacity-60">SOC</div>
-                      <div className={`text-3xl font-black font-mono tabular-nums leading-none ${socColor}`}>
+                      <div className="text-[10px] font-bold uppercase opacity-60">SOC</div>
+                      <div className={`text-2xl font-black font-mono tabular-nums leading-none ${socColor}`}>
                         {Math.round(liveDynamicSoc)}%
                       </div>
                     </div>
                     <div>
-                      <div className="text-[11px] font-bold uppercase opacity-60">Расход</div>
-                      <div className="text-3xl font-black font-mono tabular-nums leading-none">
+                      <div className="text-[10px] font-bold uppercase opacity-60">Расход</div>
+                      <div className="text-2xl font-black font-mono tabular-nums leading-none">
                         {liveTripConsumption}
                       </div>
-                      <div className="text-[10px] font-semibold opacity-50">кВт⋅ч/100</div>
+                      <div className="text-[9px] font-semibold opacity-50">кВт⋅ч/100</div>
                     </div>
                     <div>
-                      <div className="text-[11px] font-bold uppercase opacity-60">Запас</div>
-                      <div className="text-3xl font-black font-mono tabular-nums leading-none">
+                      <div className="text-[10px] font-bold uppercase opacity-60">Запас</div>
+                      <div className="text-2xl font-black font-mono tabular-nums leading-none">
                         {rangeShown}
-                        <span className="text-sm font-bold opacity-50 ml-0.5">км</span>
+                        <span className="text-xs font-bold opacity-50 ml-0.5">км</span>
                       </div>
                     </div>
                   </div>
                   <div className={`w-px self-stretch shrink-0 ${isDark ? 'bg-white/15' : 'bg-slate-300/50'}`} />
                   {/* Weather + GPS */}
-                  <div className="shrink-0 text-[13px] font-mono space-y-1.5 pl-1">
+                  <div className="shrink-0 text-[12px] font-mono space-y-1 pl-0.5">
                     <div className="flex items-center gap-1.5 whitespace-nowrap">
                       <span className={`w-2 h-2 rounded-full ${gpsAccuracy != null && gpsAccuracy <= 15 ? 'bg-cyan-400' : gpsAccuracy != null ? 'bg-amber-400' : 'bg-rose-500'}`} />
                       <span className="font-bold tabular-nums">{gpsAccuracy != null ? `±${gpsAccuracy} м` : 'GPS…'}</span>
                     </div>
-                    <div className="font-bold tabular-nums text-base">
+                    <div className="font-bold tabular-nums text-sm">
                       {weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°` : '—'}
                     </div>
                     <div className={`flex items-center gap-1 font-bold whitespace-nowrap ${windInfo.color}`}>
-                      <ArrowDown className="w-4 h-4 shrink-0" style={{ transform: `rotate(${windInfo.arrowRotation}deg)` }} />
-                      <span className="tabular-nums text-base">{weather.isLoaded ? `${windSpeedMs}` : '—'}</span>
-                      <span className="opacity-60 text-[12px]">м/с</span>
+                      <ArrowDown className="w-3.5 h-3.5 shrink-0" style={{ transform: `rotate(${windInfo.arrowRotation}deg)` }} />
+                      <span className="tabular-nums text-sm">{weather.isLoaded ? `${windSpeedMs}` : '—'}</span>
+                      <span className="opacity-60 text-[11px]">м/с</span>
                     </div>
                   </div>
                 </div>
                 {activeWaypoint && (
-                  <div className={`mt-2.5 pt-2 border-t flex items-center justify-between gap-3 min-w-0 ${isDark ? 'border-white/10' : 'border-slate-300/40'}`}>
+                  <div className={`mt-2 pt-1.5 border-t flex items-center justify-between gap-3 min-w-0 ${isDark ? 'border-white/10' : 'border-slate-300/40'}`}>
                     <div className="min-w-0 flex items-center gap-2 overflow-hidden">
                       {activeWaypoint.kind === 'charge' ? (
                         <PlugZap className="w-4 h-4 shrink-0 text-amber-400" />
@@ -2583,7 +2592,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                         <Flag className="w-4 h-4 shrink-0 text-cyan-400" />
                       )}
                       <div className="min-w-0">
-                        <div className="text-[11px] font-bold uppercase opacity-60 truncate">
+                        <div className="text-[10px] font-bold uppercase opacity-60 truncate">
                           {activeWaypoint.kind === 'charge' ? 'До зарядки' : 'До финиша'}
                           {destinationResult?.arrivalTimeLabel ? ` · ${destinationResult.arrivalTimeLabel}` : ''}
                         </div>
@@ -2591,8 +2600,8 @@ export const HudTab: React.FC<HudTabProps> = ({
                       </div>
                     </div>
                     <div className="text-right shrink-0 whitespace-nowrap">
-                      <div className="text-[11px] font-bold uppercase opacity-60">SOC на финише</div>
-                      <div className="text-2xl font-black font-mono tabular-nums leading-none">
+                      <div className="text-[10px] font-bold uppercase opacity-60">SOC на финише</div>
+                      <div className="text-xl font-black font-mono tabular-nums leading-none">
                         {finishSoc}%
                         {remainingKmToActiveWaypoint != null && (
                           <span className="ml-1.5 text-sm font-bold opacity-60">
@@ -2608,31 +2617,34 @@ export const HudTab: React.FC<HudTabProps> = ({
               </div>
             </div>
 
-            {/* Bottom bar: telemetry + controls + stop */}
-            <div className="pointer-events-none absolute left-2 right-2 bottom-12 z-20 flex items-end gap-2">
-              <div className={`pointer-events-auto rounded-2xl border px-3 py-2 grid grid-cols-3 gap-4 min-w-[14rem] ${glass}`}>
+            {/* Bottom bar: above floating nav (z-50). Clearance = nav height + safe-area. */}
+            <div
+              className="pointer-events-none absolute left-2 right-2 z-20 flex flex-wrap items-end justify-center gap-2"
+              style={{ bottom: 'calc(4.75rem + env(safe-area-inset-bottom, 0px))' }}
+            >
+              <div className={`pointer-events-auto rounded-2xl border px-3 py-1.5 grid grid-cols-3 gap-3 min-w-[12rem] ${glass}`}>
                 <div className="text-center">
-                  <div className="text-[10px] font-bold uppercase opacity-60">В пути</div>
-                  <div className="text-lg font-black font-mono tabular-nums">{formatTime(elapsedSeconds)}</div>
+                  <div className="text-[9px] font-bold uppercase opacity-60">В пути</div>
+                  <div className="text-base font-black font-mono tabular-nums">{formatTime(elapsedSeconds)}</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-[10px] font-bold uppercase opacity-60">Средняя</div>
-                  <div className="text-lg font-black font-mono tabular-nums">
-                    {avgTripSpeedKmH}<span className="text-[11px] opacity-60 ml-0.5">км/ч</span>
+                  <div className="text-[9px] font-bold uppercase opacity-60">Средняя</div>
+                  <div className="text-base font-black font-mono tabular-nums">
+                    {avgTripSpeedKmH}<span className="text-[10px] opacity-60 ml-0.5">км/ч</span>
                   </div>
                 </div>
                 <div className="text-center">
-                  <div className="text-[10px] font-bold uppercase opacity-60">Дистанция</div>
-                  <div className="text-lg font-black font-mono tabular-nums">
-                    {tripDistanceKm.toFixed(1)}<span className="text-[11px] opacity-60 ml-0.5">км</span>
+                  <div className="text-[9px] font-bold uppercase opacity-60">Дистанция</div>
+                  <div className="text-base font-black font-mono tabular-nums">
+                    {tripDistanceKm.toFixed(1)}<span className="text-[10px] opacity-60 ml-0.5">км</span>
                   </div>
                 </div>
               </div>
-              <div className={`pointer-events-auto flex items-center gap-2 rounded-2xl border px-2 py-1.5 ${glass}`}>
-                <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => setPassengers((p) => Math.max(1, p - 1))} className="w-9 h-9 rounded-lg font-bold text-base opacity-80">−</button>
-                  <span className="text-sm font-bold min-w-[3.5rem] text-center">👥 {passengers}</span>
-                  <button type="button" onClick={() => setPassengers((p) => Math.min(5, p + 1))} className="w-9 h-9 rounded-lg font-bold text-base opacity-80">+</button>
+              <div className={`pointer-events-auto flex items-center gap-1.5 rounded-2xl border px-2 py-1 ${glass}`}>
+                <div className="flex items-center gap-0.5">
+                  <button type="button" onClick={() => setPassengers((p) => Math.max(1, p - 1))} className="w-8 h-8 rounded-lg font-bold text-sm opacity-80">−</button>
+                  <span className="text-sm font-bold min-w-[3.25rem] text-center">👥 {passengers}</span>
+                  <button type="button" onClick={() => setPassengers((p) => Math.min(5, p + 1))} className="w-8 h-8 rounded-lg font-bold text-sm opacity-80">+</button>
                 </div>
                 <button
                   type="button"
@@ -2640,7 +2652,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                     triggerHaptic('light', settings.hapticFeedback);
                     setClimateOn((v) => !v);
                   }}
-                  className={`rounded-xl border px-3 py-2 text-sm font-bold whitespace-nowrap ${
+                  className={`rounded-xl border px-2.5 py-1.5 text-xs font-bold whitespace-nowrap ${
                     isDark ? 'border-white/15' : 'border-slate-300'
                   } ${climateOn ? 'ring-1 ring-cyan-400/50' : 'opacity-70'}`}
                 >
@@ -2650,9 +2662,9 @@ export const HudTab: React.FC<HudTabProps> = ({
               <button
                 type="button"
                 onClick={handleStopTracking}
-                className="pointer-events-auto ml-auto rounded-2xl bg-rose-600 text-white font-black text-base px-6 py-3 flex items-center gap-2 shadow-lg shadow-rose-900/40 active:scale-[0.98]"
+                className="pointer-events-auto rounded-2xl bg-rose-600 text-white font-black text-sm px-5 py-2.5 flex items-center gap-2 shadow-lg shadow-rose-900/40 active:scale-[0.98]"
               >
-                <Square className="w-5 h-5 fill-current" /> СТОП
+                <Square className="w-4 h-4 fill-current" /> СТОП
               </button>
             </div>
           </>
@@ -3313,10 +3325,15 @@ export const HudTab: React.FC<HudTabProps> = ({
         </div>
       </div>
 
-      {/* Completed Trip Summary Modal */}
+      {/* Completed Trip Summary Modal (legacy form branch) */}
       {completedTripSummary && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className={`border rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl text-left ${
+        <div
+          className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center px-4 pt-4"
+          style={{
+            paddingBottom: 'calc(5.75rem + env(safe-area-inset-bottom, 0px))',
+          }}
+        >
+          <div className={`border rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl text-left max-h-[min(78dvh,calc(100dvh-7.5rem))] overflow-y-auto overscroll-contain ${
             isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
           }`}>
             <div className={`flex items-center justify-between border-b pb-3 ${
