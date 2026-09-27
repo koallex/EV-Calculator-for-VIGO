@@ -1790,40 +1790,44 @@ export const HudTab: React.FC<HudTabProps> = ({
     ? 'bg-slate-950/70 border-white/10 text-white backdrop-blur-md'
     : 'bg-white/80 border-slate-200/80 text-slate-900 backdrop-blur-md';
 
-  // ── Map-first driving mode ──────────────────────────────────────────────
-  if (isTracking) {
+  // Shared fullscreen map layer (pre-start + driving)
+  const mapLayer = (
+    <div className="absolute inset-0">
+      {hudRoutePoints.length >= 2 ? (
+        <RouteMap
+          points={hudRoutePoints}
+          isDark={isDark}
+          fill
+          currentPosition={isTracking ? mapLivePosition : null}
+          chargingStops={routeWaypoints
+            .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
+            .map((w) => ({
+              lat: w.lat!,
+              lon: w.lon!,
+              name: w.name,
+            }))}
+        />
+      ) : (
+        <div className={`absolute inset-0 ${isDark ? 'bg-slate-900' : 'bg-slate-200'}`} />
+      )}
+    </div>
+  );
+
+  // ── Pre-start: route from Calculator, map + compact controls ────────────
+  if (!isTracking && hudRoutePoints.length >= 2) {
     return (
       <div
         id="hud-tab-container"
         className={`relative h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] overflow-hidden rounded-3xl select-none ${
-          isMirrored ? 'scale-x-[-1]' : ''
-        } ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'}`}
+          isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'
+        }`}
       >
-        {/* Fullscreen map */}
-        <div className="absolute inset-0">
-          {hudRoutePoints.length >= 2 ? (
-            <RouteMap
-              points={hudRoutePoints}
-              isDark={isDark}
-              fill
-              currentPosition={mapLivePosition}
-              chargingStops={routeWaypoints
-                .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
-                .map((w) => ({
-                  lat: w.lat!,
-                  lon: w.lon!,
-                  name: w.name,
-                }))}
-            />
-          ) : (
-            <div className={`absolute inset-0 ${isDark ? 'bg-slate-900' : 'bg-slate-200'}`} />
-          )}
-        </div>
+        {mapLayer}
 
-        {/* Top overlay */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2.5 space-y-2">
-          <div className="pointer-events-auto flex items-center justify-between gap-2">
-            <div className={`flex items-center gap-1.5 rounded-2xl border px-2.5 py-1.5 text-[11px] ${glass}`}>
+        {/* Top: GPS / weather on the right */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2.5">
+          <div className="flex justify-end">
+            <div className={`pointer-events-auto flex items-center gap-1.5 rounded-2xl border px-2.5 py-1.5 text-[11px] ${glass}`}>
               <span className={`w-2 h-2 rounded-full ${gpsAccuracy != null && gpsAccuracy <= 15 ? 'bg-cyan-400 animate-pulse' : gpsAccuracy != null ? 'bg-amber-400' : 'bg-rose-500'}`} />
               <span className="font-mono font-bold">{gpsAccuracy != null ? `±${gpsAccuracy}м` : 'GPS…'}</span>
               <span className="opacity-50">·</span>
@@ -1835,52 +1839,139 @@ export const HudTab: React.FC<HudTabProps> = ({
               <span className="font-mono font-bold">{weather.isLoaded ? windSpeedMs : '—'}</span>
               <span className="opacity-60">м/с</span>
             </div>
+          </div>
+        </div>
+
+        {/* Center-bottom panel — above Yandex attribution */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-14 pt-2">
+          <div className={`pointer-events-auto rounded-2xl border p-3 space-y-2.5 shadow-xl ${glass}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[10px] font-bold uppercase opacity-60">Маршрут готов</div>
+                <div className="text-[13px] font-semibold truncate">
+                  {destinationQuery || destinationResult?.name || 'Назначение'}
+                </div>
+                {destinationResult && (
+                  <div className="mt-0.5 text-[11px] opacity-70">
+                    {destinationResult.distanceKm} км
+                    {destinationResult.arrivalTimeLabel ? ` · ETA ${destinationResult.arrivalTimeLabel}` : ''}
+                  </div>
+                )}
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-[10px] font-bold uppercase opacity-60">SOC на финише</div>
+                <div className={`text-2xl font-black font-mono tabular-nums ${
+                  (livePredictedSoc ?? 100) < 20 ? 'text-rose-400' : (livePredictedSoc ?? 100) < 40 ? 'text-amber-400' : 'text-cyan-300'
+                }`}>
+                  {livePredictedSoc != null ? `${Math.round(livePredictedSoc)}%` : '—'}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] font-bold opacity-70">SOC на старте</span>
+                <span className="text-sm font-black font-mono">{startTripSoc}%</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={startTripSoc}
+                onChange={(e) => setStartTripSoc(Number(e.target.value))}
+                className="w-full accent-cyan-500 h-1.5"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 rounded-xl border border-white/10 px-1.5 py-1">
+                <button type="button" onClick={() => setPassengers((p) => Math.max(1, p - 1))} className="w-8 h-8 rounded-lg font-bold text-sm">−</button>
+                <span className="text-[12px] font-bold min-w-[3rem] text-center">👥 {passengers}</span>
+                <button type="button" onClick={() => setPassengers((p) => Math.min(5, p + 1))} className="w-8 h-8 rounded-lg font-bold text-sm">+</button>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('light', settings.hapticFeedback);
+                  setClimateOn((v) => !v);
+                }}
+                className={`rounded-xl border border-white/10 px-3 py-2 text-[12px] font-bold ${
+                  climateOn ? 'ring-1 ring-cyan-400/50' : 'opacity-70'
+                }`}
+              >
+                {climateOn ? 'Климат вкл' : 'Климат выкл'}
+              </button>
+            </div>
+
             <button
               type="button"
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setIsMirrored(!isMirrored);
-              }}
-              className={`pointer-events-auto p-2 rounded-xl border ${glass}`}
-              title="Зеркало"
+              onClick={handleStartWithLiveForecast}
+              className="w-full rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-[15px] py-3.5 active:scale-[0.98] shadow-lg shadow-cyan-900/30"
             >
-              <FlipHorizontal className="w-4 h-4" />
+              Начать поездку
             </button>
           </div>
+        </div>
+      </div>
+    );
+  }
 
-          <div className="pointer-events-auto grid grid-cols-[auto_1fr] gap-2">
-            {/* Speed */}
-            <div className={`rounded-2xl border px-3 py-2 min-w-[5.5rem] ${glass}`}>
-              <div className="text-[10px] font-bold uppercase opacity-60">Скорость</div>
-              <div className="text-4xl font-black font-mono tabular-nums leading-none">{currentSpeed}</div>
-              <div className="text-[11px] opacity-60">км/ч</div>
-            </div>
-            {/* SOC + consumption + range */}
-            <div className={`rounded-2xl border px-3 py-2 ${glass}`}>
-              <div className="flex items-end justify-between gap-2">
-                <div>
-                  <div className="text-[10px] font-bold uppercase opacity-60">SOC</div>
-                  <div className="flex items-baseline gap-1.5">
-                    <span className={`text-3xl font-black font-mono tabular-nums ${liveDynamicSoc < 20 ? 'text-rose-400' : liveDynamicSoc < 40 ? 'text-amber-400' : 'text-cyan-300'}`}>
+  // ── Map-first driving mode ──────────────────────────────────────────────
+  if (isTracking) {
+    return (
+      <div
+        id="hud-tab-container"
+        className={`relative h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] overflow-hidden rounded-3xl select-none ${
+          isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'
+        }`}
+      >
+        {mapLayer}
+
+        {/* Top overlay: metrics left, GPS/weather right */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2.5 space-y-2">
+          <div className="pointer-events-auto flex items-start justify-between gap-2">
+            <div className="grid grid-cols-[auto_1fr] gap-2 min-w-0 flex-1">
+              <div className={`rounded-2xl border px-3 py-2 min-w-[5.5rem] ${glass}`}>
+                <div className="text-[10px] font-bold uppercase opacity-60">Скорость</div>
+                <div className="text-4xl font-black font-mono tabular-nums leading-none">{currentSpeed}</div>
+                <div className="text-[11px] opacity-60">км/ч</div>
+              </div>
+              <div className={`rounded-2xl border px-3 py-2 ${glass}`}>
+                <div className="flex items-end justify-between gap-2">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase opacity-60">SOC сейчас</div>
+                    <div className={`text-3xl font-black font-mono tabular-nums ${liveDynamicSoc < 20 ? 'text-rose-400' : liveDynamicSoc < 40 ? 'text-amber-400' : 'text-cyan-300'}`}>
                       {Math.round(liveDynamicSoc)}%
-                    </span>
-                    {livePredictedSoc != null && (
-                      <span className="text-sm font-bold font-mono opacity-80">
-                        → {Math.round(livePredictedSoc)}%
-                      </span>
-                    )}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] font-bold uppercase opacity-60">Расход</div>
+                    <div className="text-lg font-black font-mono tabular-nums">{liveTripConsumption}</div>
+                    <div className="text-[10px] opacity-60">кВт⋅ч/100</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] font-bold uppercase opacity-60">Запас</div>
+                    <div className="text-lg font-black font-mono tabular-nums">{dynamicRemainingRangeKm}</div>
+                    <div className="text-[10px] opacity-60">км</div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-[10px] font-bold uppercase opacity-60">Расход</div>
-                  <div className="text-lg font-black font-mono tabular-nums">{liveTripConsumption}</div>
-                  <div className="text-[10px] opacity-60">кВт⋅ч/100</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-[10px] font-bold uppercase opacity-60">Запас</div>
-                  <div className="text-lg font-black font-mono tabular-nums">{dynamicRemainingRangeKm}</div>
-                  <div className="text-[10px] opacity-60">км</div>
-                </div>
+              </div>
+            </div>
+            <div className={`shrink-0 flex flex-col items-end gap-1 rounded-2xl border px-2.5 py-1.5 text-[11px] ${glass}`}>
+              <div className="flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${gpsAccuracy != null && gpsAccuracy <= 15 ? 'bg-cyan-400 animate-pulse' : gpsAccuracy != null ? 'bg-amber-400' : 'bg-rose-500'}`} />
+                <span className="font-mono font-bold">{gpsAccuracy != null ? `±${gpsAccuracy}м` : 'GPS…'}</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Thermometer className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="font-mono font-bold">
+                  {weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°` : '—'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Wind className="w-3.5 h-3.5 text-sky-400" />
+                <span className="font-mono font-bold">{weather.isLoaded ? windSpeedMs : '—'}</span>
+                <span className="opacity-60">м/с</span>
               </div>
             </div>
           </div>
@@ -1903,8 +1994,13 @@ export const HudTab: React.FC<HudTabProps> = ({
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  {liveSocAtActiveWaypoint != null && (
-                    <div className="text-xl font-black font-mono tabular-nums">{Math.round(liveSocAtActiveWaypoint)}%</div>
+                  {(liveSocAtActiveWaypoint != null || livePredictedSoc != null) && (
+                    <>
+                      <div className="text-[10px] font-bold uppercase opacity-60">SOC на финише</div>
+                      <div className="text-xl font-black font-mono tabular-nums">
+                        {Math.round(liveSocAtActiveWaypoint ?? livePredictedSoc ?? 0)}%
+                      </div>
+                    </>
                   )}
                   {remainingKmToActiveWaypoint != null && (
                     <div className="text-[11px] font-mono opacity-70">
@@ -1917,42 +2013,13 @@ export const HudTab: React.FC<HudTabProps> = ({
               </div>
             </div>
           )}
-        </div>
 
-        {/* Bottom overlay */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 p-2.5 space-y-2">
-          <div className={`pointer-events-auto rounded-2xl border px-2 py-2 grid grid-cols-3 gap-1 ${glass}`}>
-            <div className="text-center">
-              <div className="text-[10px] font-bold uppercase opacity-60">В пути</div>
-              <div className="text-base font-black font-mono tabular-nums">{formatTime(elapsedSeconds)}</div>
-            </div>
-            <div className="text-center">
-              <div className="text-[10px] font-bold uppercase opacity-60">Средняя</div>
-              <div className="text-base font-black font-mono tabular-nums">{avgTripSpeedKmH} <span className="text-[10px] font-bold opacity-60">км/ч</span></div>
-            </div>
-            <div className="text-center">
-              <div className="text-[10px] font-bold uppercase opacity-60">Дистанция</div>
-              <div className="text-base font-black font-mono tabular-nums">{tripDistanceKm.toFixed(1)} <span className="text-[10px] font-bold opacity-60">км</span></div>
-            </div>
-          </div>
-
+          {/* Controls raised above Yandex attribution */}
           <div className="pointer-events-auto flex items-center gap-2">
             <div className={`flex items-center gap-1 rounded-2xl border px-2 py-1.5 ${glass}`}>
-              <button
-                type="button"
-                onClick={() => setPassengers((p) => Math.max(1, p - 1))}
-                className="w-8 h-8 rounded-lg font-bold text-sm opacity-80"
-              >
-                −
-              </button>
+              <button type="button" onClick={() => setPassengers((p) => Math.max(1, p - 1))} className="w-8 h-8 rounded-lg font-bold text-sm opacity-80">−</button>
               <span className="text-[12px] font-bold min-w-[3.5rem] text-center">👥 {passengers}</span>
-              <button
-                type="button"
-                onClick={() => setPassengers((p) => Math.min(5, p + 1))}
-                className="w-8 h-8 rounded-lg font-bold text-sm opacity-80"
-              >
-                +
-              </button>
+              <button type="button" onClick={() => setPassengers((p) => Math.min(5, p + 1))} className="w-8 h-8 rounded-lg font-bold text-sm opacity-80">+</button>
             </div>
             <button
               type="button"
@@ -1973,6 +2040,24 @@ export const HudTab: React.FC<HudTabProps> = ({
             >
               <Square className="w-4 h-4 fill-current" /> СТОП
             </button>
+          </div>
+        </div>
+
+        {/* Bottom telemetry only — extra bottom padding for Yandex label */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-12">
+          <div className={`pointer-events-auto rounded-2xl border px-2 py-2 grid grid-cols-3 gap-1 ${glass}`}>
+            <div className="text-center">
+              <div className="text-[10px] font-bold uppercase opacity-60">В пути</div>
+              <div className="text-base font-black font-mono tabular-nums">{formatTime(elapsedSeconds)}</div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] font-bold uppercase opacity-60">Средняя</div>
+              <div className="text-base font-black font-mono tabular-nums">{avgTripSpeedKmH} <span className="text-[10px] font-bold opacity-60">км/ч</span></div>
+            </div>
+            <div className="text-center">
+              <div className="text-[10px] font-bold uppercase opacity-60">Дистанция</div>
+              <div className="text-base font-black font-mono tabular-nums">{tripDistanceKm.toFixed(1)} <span className="text-[10px] font-bold opacity-60">км</span></div>
+            </div>
           </div>
         </div>
 
@@ -2019,8 +2104,6 @@ export const HudTab: React.FC<HudTabProps> = ({
     <div
       id="hud-tab-container"
       className={`relative flex h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] flex-col overflow-hidden rounded-3xl select-none transition-all duration-200 ${
-        isMirrored ? 'scale-x-[-1]' : ''
-      } ${
         isDark
           ? 'bg-slate-950 text-white border border-slate-800/90 shadow-2xl'
           : 'bg-white text-slate-900 border border-slate-200 shadow-xl'
@@ -2058,44 +2141,25 @@ export const HudTab: React.FC<HudTabProps> = ({
             <span className="text-[11px] font-bold text-cyan-400 shrink-0">● LIVE</span>
           )}
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {hudRoutePoints.length >= 2 && (
-            <button
-              type="button"
-              onClick={() => {
-                setHudMapOpen((v) => !v);
-                triggerHaptic('light', settings.hapticFeedback);
-              }}
-              title={hudMapOpen ? 'Скрыть карту' : 'Показать карту'}
-              className={`p-2 rounded-xl border ${
-                hudMapOpen
-                  ? 'bg-cyan-600 text-white border-cyan-500'
-                  : isDark
-                    ? 'bg-slate-800 text-slate-300 border-slate-700'
-                    : 'bg-slate-100 text-slate-700 border-slate-300'
-              }`}
-            >
-              <Navigation className="w-4 h-4" />
-            </button>
-          )}
+        {hudRoutePoints.length >= 2 && (
           <button
             type="button"
             onClick={() => {
+              setHudMapOpen((v) => !v);
               triggerHaptic('light', settings.hapticFeedback);
-              setIsMirrored(!isMirrored);
             }}
-            title="Зеркальный режим"
-            className={`p-2 rounded-xl border ${
-              isMirrored
+            title={hudMapOpen ? 'Скрыть карту' : 'Показать карту'}
+            className={`p-2 rounded-xl border shrink-0 ${
+              hudMapOpen
                 ? 'bg-cyan-600 text-white border-cyan-500'
                 : isDark
-                ? 'bg-slate-800 text-slate-300 border-slate-700'
-                : 'bg-slate-100 text-slate-700 border-slate-300'
+                  ? 'bg-slate-800 text-slate-300 border-slate-700'
+                  : 'bg-slate-100 text-slate-700 border-slate-300'
             }`}
           >
-            <FlipHorizontal className="w-4 h-4" />
+            <Navigation className="w-4 h-4" />
           </button>
-        </div>
+        )}
       </div>
 
       {/* 2. Speed */}
