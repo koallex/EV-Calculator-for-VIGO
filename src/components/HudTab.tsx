@@ -1987,9 +1987,11 @@ export const HudTab: React.FC<HudTabProps> = ({
     return (
       <div
         id="hud-tab-container"
-        className={`relative h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] overflow-hidden rounded-3xl select-none ${
-          isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'
-        }`}
+        className={`relative overflow-hidden select-none ${
+          isLandscape
+            ? 'h-[100dvh] min-h-0 max-h-none rounded-none border-0'
+            : 'h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] rounded-3xl'
+        } ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'}`}
       >
         {mapLayer}
 
@@ -2206,9 +2208,11 @@ export const HudTab: React.FC<HudTabProps> = ({
     return (
       <div
         id="hud-tab-container"
-        className={`relative h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] overflow-hidden rounded-3xl select-none ${
-          isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'
-        }`}
+        className={`relative overflow-hidden select-none ${
+          isLandscape
+            ? 'h-[100dvh] min-h-0 max-h-none rounded-none border-0'
+            : 'h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] rounded-3xl'
+        } ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'}`}
       >
         {completedTripModal}
 
@@ -2255,7 +2259,11 @@ export const HudTab: React.FC<HudTabProps> = ({
   return (
     <div
       id="hud-tab-container"
-      className={`relative flex h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] flex-col overflow-hidden rounded-3xl select-none transition-all duration-200 ${
+      className={`relative flex flex-col overflow-hidden select-none transition-all duration-200 ${
+        isLandscape
+          ? 'h-[100dvh] min-h-0 max-h-none rounded-none'
+          : 'h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] rounded-3xl'
+      } ${
         isDark
           ? 'bg-slate-950 text-white border border-slate-800/90 shadow-2xl'
           : 'bg-white text-slate-900 border border-slate-200 shadow-xl'
