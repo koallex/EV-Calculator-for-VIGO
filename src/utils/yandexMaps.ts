@@ -103,6 +103,96 @@ export function loadYandexMaps21(): Promise<any> {
   return v21Promise;
 }
 
+/**
+ * Force-remove the "Открыть / Показать в Яндекс.Картах" promo block.
+ * suppressMapOpenBlock is unreliable across API builds; DOM scrub + MutationObserver is.
+ * Keeps the small © attribution when possible.
+ */
+export function scrubYandexOpenMapsPromo(root: HTMLElement | null | undefined): () => void {
+  if (!root || typeof MutationObserver === 'undefined') return () => {};
+
+  const PROMO_RE =
+    /открыть\s+в\s+яндекс|показать\s+в\s+яндекс|open\s+in\s+yandex|yandex\.ru\/maps/i;
+
+  const hide = (el: Element) => {
+    const html = el as HTMLElement;
+    html.style.setProperty('display', 'none', 'important');
+    html.style.setProperty('visibility', 'hidden', 'important');
+    html.style.setProperty('opacity', '0', 'important');
+    html.style.setProperty('pointer-events', 'none', 'important');
+    html.setAttribute('aria-hidden', 'true');
+    html.setAttribute('data-vigo-promo-hidden', '1');
+  };
+
+  const isPromoCandidate = (el: Element): boolean => {
+    const cls = (el.className && String(el.className)) || '';
+    if (/gotoymaps|goto-ymaps|map-copyrights-promo|copyrights-promo|gototech/i.test(cls)) {
+      return true;
+    }
+    if (el instanceof HTMLAnchorElement) {
+      const href = el.getAttribute('href') || '';
+      if (/maps\.yandex|yandex\.(ru|com)\/maps/i.test(href)) {
+        const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        // Keep bare © logo links without CTA text
+        if (PROMO_RE.test(text) || text.length === 0 || /яндекс\.?карт/i.test(text)) {
+          // Only hide if it looks like the open-in-maps CTA, not the tiny © mark alone
+          if (PROMO_RE.test(text) || /открыть|показать|open/i.test(text)) return true;
+        }
+      }
+    }
+    const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    if (text.length > 0 && text.length < 64 && PROMO_RE.test(text)) return true;
+    return false;
+  };
+
+  const sweep = () => {
+    try {
+      // Class-based promo nodes
+      root
+        .querySelectorAll(
+          [
+            '[class*="gotoymaps"]',
+            '[class*="goto-ymaps"]',
+            '[class*="map-copyrights-promo"]',
+            '[class*="copyrights-promo"]',
+            '[class*="gototech"]',
+            'a[href*="maps.yandex"]',
+            'a[href*="yandex.ru/maps"]',
+            'a[href*="yandex.com/maps"]',
+          ].join(','),
+        )
+        .forEach((el) => {
+          if (isPromoCandidate(el)) hide(el);
+        });
+
+      // Text walk — catches localized CTA even with hashed class names
+      root.querySelectorAll('a, button, span, div').forEach((el) => {
+        if (el.getAttribute('data-vigo-promo-hidden') === '1') return;
+        if (isPromoCandidate(el)) hide(el);
+      });
+    } catch {
+      /* ignore */
+    }
+  };
+
+  sweep();
+  const observer = new MutationObserver(() => sweep());
+  observer.observe(root, { childList: true, subtree: true, characterData: true });
+  // Promo is often injected a few hundred ms after init
+  const t1 = window.setTimeout(sweep, 200);
+  const t2 = window.setTimeout(sweep, 800);
+  const t3 = window.setTimeout(sweep, 2000);
+  const t4 = window.setTimeout(sweep, 5000);
+
+  return () => {
+    observer.disconnect();
+    window.clearTimeout(t1);
+    window.clearTimeout(t2);
+    window.clearTimeout(t3);
+    window.clearTimeout(t4);
+  };
+}
+
 /** Prefer v3, used by createV3Map */
 export function loadYandexMaps(): Promise<any> {
   return loadYandexMapsV3();
@@ -191,12 +281,19 @@ export async function createV3Map(
     }
   }
 
+  const stopPromoScrub = scrubYandexOpenMapsPromo(container);
+
   return {
     ymaps3,
     map,
     schemeLayer,
     apiVersion: 3,
     destroy: () => {
+      try {
+        stopPromoScrub();
+      } catch {
+        /* ignore */
+      }
       try {
         map.destroy();
       } catch {
@@ -248,11 +345,17 @@ export async function createV21Map(
       type: 'yandex#map',
     },
     {
-      // Hide "Открыть в Яндекс.Картах" promo block (license © logo still shown).
+      // Official switch for "Открыть в Яндекс.Картах" (often ignored by later builds).
       suppressMapOpenBlock: true,
       yandexMapDisablePoiInteractivity: true,
     },
   );
+
+  try {
+    map.options.set('suppressMapOpenBlock', true);
+  } catch {
+    /* ignore */
+  }
 
   // Extra safety: remove promo control if API still injects it.
   try {
@@ -279,11 +382,19 @@ export async function createV21Map(
     typeof map.container?.getElement === 'function' ? map.container.getElement() : null;
   if (el && opts.isDark) el.classList.add('vigo-ymaps-dark');
 
+  // DOM scrub — covers hashed class names and late-injected promo nodes.
+  const stopPromoScrub = scrubYandexOpenMapsPromo(el || container);
+
   return {
     ymaps,
     map,
     apiVersion: 2,
     destroy: () => {
+      try {
+        stopPromoScrub();
+      } catch {
+        /* ignore */
+      }
       try {
         map.destroy();
       } catch {
