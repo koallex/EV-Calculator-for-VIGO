@@ -1832,11 +1832,33 @@ export const HudTab: React.FC<HudTabProps> = ({
     : 'bg-white/80 border-slate-200/80 text-slate-900 backdrop-blur-md';
 
   // Shared fullscreen map layer (pre-start + driving)
+  // Prefer planned route geometry; if the user started tracking without a plan, still show
+  // a map centered on the live (or last) GPS fix so portrait HUD is never a blank panel.
+  const mapPointsForHud =
+    hudRoutePoints.length >= 2
+      ? hudRoutePoints
+      : mapLivePosition
+        ? [
+            {
+              lat: mapLivePosition.lat,
+              lon: mapLivePosition.lon,
+              elevationM: 0,
+              distanceFromStartKm: 0,
+            },
+            {
+              lat: mapLivePosition.lat + 0.0008,
+              lon: mapLivePosition.lon + 0.0008,
+              elevationM: 0,
+              distanceFromStartKm: 0.1,
+            },
+          ]
+        : [];
+
   const mapLayer = (
-    <div className="absolute inset-0">
-      {hudRoutePoints.length >= 2 ? (
+    <div className="absolute inset-0 h-full w-full">
+      {mapPointsForHud.length >= 2 ? (
         <RouteMap
-          points={hudRoutePoints}
+          points={mapPointsForHud}
           isDark={isDark}
           fill
           currentPosition={isTracking ? mapLivePosition : null}
@@ -1851,7 +1873,9 @@ export const HudTab: React.FC<HudTabProps> = ({
             }))}
         />
       ) : (
-        <div className={`absolute inset-0 ${isDark ? 'bg-slate-900' : 'bg-slate-200'}`} />
+        <div className={`absolute inset-0 flex items-center justify-center text-xs ${isDark ? 'bg-slate-900 text-slate-500' : 'bg-slate-200 text-slate-500'}`}>
+          Ожидание GPS…
+        </div>
       )}
     </div>
   );
@@ -2183,39 +2207,47 @@ export const HudTab: React.FC<HudTabProps> = ({
       <div
         id="hud-tab-container"
         className={`relative h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] overflow-hidden rounded-3xl select-none ${
-          isLandscape ? 'flex flex-row' : ''
-        } ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'}`}
+          isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'
+        }`}
       >
         {completedTripModal}
 
-        {/* Landscape: side panel with all metrics; portrait: overlays on map */}
+        {/* Map always fills the HUD frame (portrait fix: was collapsing to 0 height). */}
+        <div
+          className={`absolute inset-0 z-0 ${
+            isLandscape ? 'left-[min(42%,280px)]' : ''
+          }`}
+        >
+          {mapLayer}
+        </div>
+
+        {/* Landscape: side panel with metrics */}
         {isLandscape && (
-          <div className={`relative z-20 w-[min(42%,280px)] shrink-0 flex flex-col gap-2 p-2.5 overflow-y-auto ${
-            isDark ? 'bg-slate-950/95 border-r border-slate-800' : 'bg-white/95 border-r border-slate-200'
-          }`}>
+          <div
+            className={`absolute left-0 top-0 bottom-0 z-20 w-[min(42%,280px)] flex flex-col gap-2 p-2.5 overflow-y-auto ${
+              isDark ? 'bg-slate-950/95 border-r border-slate-800' : 'bg-white/95 border-r border-slate-200'
+            }`}
+          >
             <div className={`rounded-2xl border px-3 py-2.5 ${glass}`}>{metricsBlock}</div>
             {controlsBlock}
             {telemetryBlock}
           </div>
         )}
 
-        <div className="relative min-w-0 flex-1">
-          {mapLayer}
-
-          {!isLandscape && (
-            <>
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2">
-                <div className={`pointer-events-auto rounded-2xl border px-2.5 py-2 ${glass}`}>
-                  {metricsBlock}
-                </div>
-                <div className="pointer-events-auto mt-2">{controlsBlock}</div>
+        {/* Portrait overlays on top of map */}
+        {!isLandscape && (
+          <>
+            <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2">
+              <div className={`pointer-events-auto rounded-2xl border px-2.5 py-2 ${glass}`}>
+                {metricsBlock}
               </div>
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-12">
-                <div className="pointer-events-auto">{telemetryBlock}</div>
-              </div>
-            </>
-          )}
-        </div>
+              <div className="pointer-events-auto mt-2">{controlsBlock}</div>
+            </div>
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-2.5 pb-12">
+              <div className="pointer-events-auto">{telemetryBlock}</div>
+            </div>
+          </>
+        )}
       </div>
     );
   }
