@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import confetti from 'canvas-confetti';
 import { UserSettings, TripSession } from './types';
 import {
@@ -48,6 +48,10 @@ export default function App() {
    *   landscape / landscape-short (h≤430) / landscape-comfortable (h≥500)
    */
   const [isLandscape, setIsLandscape] = useState(false);
+  /** Bottom nav auto-hide on scroll down / show on scroll up */
+  const [navVisible, setNavVisible] = useState(true);
+  const lastScrollYRef = useRef(0);
+  const scrollTickingRef = useRef(false);
 
   useEffect(() => {
     const mqLandscape = window.matchMedia('(orientation: landscape)');
@@ -103,6 +107,67 @@ export default function App() {
       });
     };
   }, []);
+
+  // Hide floating nav on scroll down, show on scroll up (any scrollable surface).
+  useEffect(() => {
+    lastScrollYRef.current =
+      window.scrollY ||
+      document.documentElement.scrollTop ||
+      document.body.scrollTop ||
+      0;
+
+    const getScrollY = () => {
+      const main = document.querySelector('main');
+      const candidates = [
+        window.scrollY,
+        document.documentElement.scrollTop,
+        document.body.scrollTop,
+        main && (main as HTMLElement).scrollTop,
+      ].filter((v) => typeof v === 'number') as number[];
+      return Math.max(0, ...candidates);
+    };
+
+    const onScroll = () => {
+      if (scrollTickingRef.current) return;
+      scrollTickingRef.current = true;
+      window.requestAnimationFrame(() => {
+        const y = getScrollY();
+        const prev = lastScrollYRef.current;
+        const delta = y - prev;
+        // Ignore tiny jitter
+        if (Math.abs(delta) < 6) {
+          scrollTickingRef.current = false;
+          return;
+        }
+        if (y < 24) {
+          setNavVisible(true);
+        } else if (delta > 0) {
+          setNavVisible(false);
+        } else {
+          setNavVisible(true);
+        }
+        lastScrollYRef.current = y;
+        scrollTickingRef.current = false;
+      });
+    };
+
+    const opts: AddEventListenerOptions = { passive: true, capture: true };
+    window.addEventListener('scroll', onScroll, opts);
+    document.addEventListener('scroll', onScroll, opts);
+    const main = document.querySelector('main');
+    main?.addEventListener('scroll', onScroll, opts);
+
+    return () => {
+      window.removeEventListener('scroll', onScroll, opts);
+      document.removeEventListener('scroll', onScroll, opts);
+      main?.removeEventListener('scroll', onScroll, opts);
+    };
+  }, []);
+
+  // Always show nav when switching tabs
+  useEffect(() => {
+    setNavVisible(true);
+  }, [activeTab]);
 
   // Server-side authentication. No credentials are stored in localStorage.
   useEffect(() => {
@@ -409,7 +474,7 @@ export default function App() {
         )}
       </main>
 
-      {/* Floating pill nav — always visible (portrait + landscape) */}
+      {/* Floating pill nav — auto-hide on scroll down, show on scroll up */}
       {!showAdmin && (
         <Navigation
           activeTab={activeTab}
@@ -419,7 +484,7 @@ export default function App() {
           theme={settings.theme}
           isHudTracking={isHudTracking}
           floating
-          visible
+          visible={navVisible}
         />
       )}
 
