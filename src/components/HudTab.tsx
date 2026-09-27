@@ -2151,14 +2151,22 @@ export const HudTab: React.FC<HudTabProps> = ({
   );
 
 
+  // Sit above floating bottom nav; in landscape also clear trip controls (passengers / STOP).
   const hudEvseCard = selectedMapStop ? (
     <div
-      className={`pointer-events-auto absolute left-1/2 z-30 w-[min(22rem,calc(100%-1.25rem))] -translate-x-1/2 rounded-2xl border p-3 shadow-2xl backdrop-blur-md ${
+      className={`pointer-events-auto absolute left-1/2 z-40 w-[min(22rem,calc(100%-1.25rem))] -translate-x-1/2 rounded-2xl border p-3 shadow-2xl backdrop-blur-md overflow-y-auto overscroll-contain ${
         isDark
           ? 'border-amber-700/40 bg-slate-950/95 text-slate-100'
           : 'border-amber-200 bg-white/95 text-slate-900'
       }`}
-      style={{ bottom: 'calc(5.5rem + env(safe-area-inset-bottom, 0px))' }}
+      style={{
+        bottom: isLandscape
+          ? 'calc(7.5rem + env(safe-area-inset-bottom, 0px))'
+          : 'calc(6.25rem + env(safe-area-inset-bottom, 0px))',
+        maxHeight: isLandscape
+          ? 'calc(100dvh - 9rem - env(safe-area-inset-bottom, 0px))'
+          : 'calc(100dvh - 10rem - env(safe-area-inset-bottom, 0px))',
+      }}
     >
       <div className="flex items-start gap-2">
         <div className={`mt-0.5 rounded-lg p-1.5 ${isDark ? 'bg-amber-500/15 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>
