@@ -369,6 +369,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   /** Max DC day price BYN; null = any */
   const [maxPrice, setMaxPrice] = useState<number | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [findingNearest, setFindingNearest] = useState(false);
   const [stations, setStations] = useState<MapStation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -945,6 +946,81 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     );
   };
 
+  /** Enable free-only filter, fly to user, then select nearest free station once live data is in. */
+  const findNearestFree = () => {
+    if (!navigator.geolocation) {
+      setError('Геолокация недоступна');
+      return;
+    }
+    triggerHaptic('medium', settings.hapticFeedback);
+    setFindingNearest(true);
+    setOnlyFree(true);
+    setError(null as any);
+    setError('');
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        placeUserMarker(lat, lon);
+        bundleRef.current?.setLocation(lat, lon, 13);
+        scheduleFetch();
+
+        let tries = 0;
+        const pick = () => {
+          const list = stationsRef.current || [];
+          const free = list.filter((s) => {
+            const typeOk =
+              (connFilters.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
+              (connFilters.includes('gbt') && (s.freeGbt ?? 0) > 0) ||
+              (connFilters.includes('type2') && (s.freeType2 ?? 0) > 0);
+            return !!s.liveChecked && typeOk;
+          });
+          if (!free.length) return false;
+          const withDist = free
+            .map((s) => {
+              const R = 6371;
+              const r = Math.PI / 180;
+              const dLat = (s.lat - lat) * r;
+              const dLon = (s.lon - lon) * r;
+              const a =
+                Math.sin(dLat / 2) ** 2 +
+                Math.cos(lat * r) * Math.cos(s.lat * r) * Math.sin(dLon / 2) ** 2;
+              const km = 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+              return { s, km };
+            })
+            .sort((a, b) => a.km - b.km);
+          const best = withDist[0];
+          if (best) {
+            setSelected(best.s);
+            bundleRef.current?.setLocation(best.s.lat, best.s.lon, 15);
+            triggerHaptic('success', settings.hapticFeedback);
+            return true;
+          }
+          return false;
+        };
+
+        const tick = () => {
+          tries += 1;
+          if (pick() || tries >= 6) {
+            setFindingNearest(false);
+            if (tries >= 6 && !pick()) {
+              setError('Свободных ЭЗС рядом не найдено. Расширьте карту или снимите фильтры.');
+            }
+            return;
+          }
+          window.setTimeout(tick, 700);
+        };
+        window.setTimeout(tick, 600);
+      },
+      () => {
+        setFindingNearest(false);
+        setError('Геолокация недоступна');
+      },
+      { enableHighAccuracy: true, timeout: 12000 },
+    );
+  };
+
   type PortChip = { key: string; label: string; free?: number; total?: number; live: boolean };
   const portChips = (s: MapStation): PortChip[] => {
     const chips: PortChip[] = [];
@@ -1003,10 +1079,10 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const visibleCount = stations.filter(matchesFilters).length;
 
   return (
-    <div className="relative h-[calc(100dvh-13rem)] max-h-[560px] min-h-[280px] w-full overflow-hidden rounded-2xl border border-slate-800/60">
+    <div className="relative h-[calc(100dvh-7rem)] sm:h-[calc(100dvh-8rem)] landscape:h-[100dvh] max-h-none min-h-[320px] w-full overflow-hidden rounded-none sm:rounded-2xl border-0 sm:border border-slate-800/60">
       <div ref={containerRef} className="absolute inset-0 bg-slate-900" />
 
-      {/* Top controls */}
+      {/* Top controls: filters + my location only */}
       <div className="absolute left-2 right-2 top-2 z-20 flex items-start gap-2 pointer-events-none">
         <div
           className={`pointer-events-auto flex flex-1 flex-wrap items-center gap-1.5 rounded-xl px-2 py-1.5 backdrop-blur-md ${
@@ -1051,6 +1127,32 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           title="Моё местоположение"
         >
           <LocateFixed className="h-5 w-5" />
+        </button>
+      </div>
+
+      {/* Nearest free charger — prominent, laconic */}
+      <div className="absolute left-2 right-2 top-[3.25rem] z-20 flex justify-center pointer-events-none">
+        <button
+          type="button"
+          onClick={findNearestFree}
+          disabled={findingNearest}
+          className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-[13px] font-black shadow-lg backdrop-blur-md active:scale-[0.98] disabled:opacity-70 ${
+            findingNearest
+              ? 'bg-cyan-700 text-white'
+              : 'bg-emerald-600 text-white shadow-emerald-900/40'
+          }`}
+        >
+          {findingNearest ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Ищем свободную…
+            </>
+          ) : (
+            <>
+              <PlugZap className="h-4 w-4" />
+              Ближайшая свободная
+            </>
+          )}
         </button>
       </div>
 
