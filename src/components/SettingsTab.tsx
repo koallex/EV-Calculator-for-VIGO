@@ -54,6 +54,10 @@ interface SettingsTabProps {
   onOpenAdmin?: () => void;
   onLogout?: () => void;
   onOpenAbout?: () => void;
+  cloudSyncStatus?: 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
+  cloudSyncedAt?: string | null;
+  cloudSyncDetail?: string;
+  onCloudSyncNow?: () => void | Promise<void>;
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
@@ -66,6 +70,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   onOpenAdmin,
   onLogout,
   onOpenAbout,
+  cloudSyncStatus = 'idle',
+  cloudSyncedAt = null,
+  cloudSyncDetail = '',
+  onCloudSyncNow,
 }) => {
   const { ask } = useFeedback();
   const [form, setForm] = useState<UserSettings>(settings);
@@ -259,6 +267,80 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           <p className={`text-[11px] text-center ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
             {savedSuccess ? 'Сохранено' : 'Автосохранение…'}
           </p>
+        )}
+
+        {/* Account history sync (Redis) — localStorage remains the offline cache */}
+        {currentUser?.login && (
+          <div
+            className={`mt-2 rounded-xl border px-3 py-2.5 space-y-2 ${
+              isDark ? 'border-slate-800 bg-slate-950/50' : 'border-slate-200 bg-slate-50'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <p className={`text-[11px] font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                История в аккаунте
+              </p>
+              <span
+                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
+                  cloudSyncStatus === 'synced'
+                    ? isDark
+                      ? 'bg-emerald-950/60 text-emerald-400'
+                      : 'bg-emerald-50 text-emerald-700'
+                    : cloudSyncStatus === 'syncing'
+                      ? isDark
+                        ? 'bg-cyan-950/60 text-cyan-400'
+                        : 'bg-cyan-50 text-cyan-700'
+                      : cloudSyncStatus === 'offline'
+                        ? isDark
+                          ? 'bg-amber-950/50 text-amber-400'
+                          : 'bg-amber-50 text-amber-700'
+                        : cloudSyncStatus === 'error'
+                          ? isDark
+                            ? 'bg-rose-950/50 text-rose-400'
+                            : 'bg-rose-50 text-rose-700'
+                          : isDark
+                            ? 'bg-slate-800 text-slate-400'
+                            : 'bg-slate-200 text-slate-600'
+                }`}
+              >
+                {cloudSyncStatus === 'synced'
+                  ? 'Синхронизировано'
+                  : cloudSyncStatus === 'syncing'
+                    ? 'Синхронизация…'
+                    : cloudSyncStatus === 'offline'
+                      ? 'Нет сети'
+                      : cloudSyncStatus === 'error'
+                        ? 'Ошибка'
+                        : 'Ожидание'}
+              </span>
+            </div>
+            <p className={`text-[11px] leading-snug ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+              {cloudSyncDetail ||
+                (cloudSyncedAt
+                  ? `Обновлено ${new Date(cloudSyncedAt).toLocaleString('ru-RU', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}`
+                  : 'Поездки хранятся на устройстве и дублируются в аккаунт после входа.')}
+            </p>
+            <button
+              type="button"
+              disabled={cloudSyncStatus === 'syncing' || !onCloudSyncNow}
+              onClick={() => {
+                triggerHaptic('light', form.hapticFeedback);
+                void onCloudSyncNow?.();
+              }}
+              className={`w-full py-2 rounded-lg text-[12px] font-bold min-h-[40px] border active:scale-[0.99] disabled:opacity-50 ${
+                isDark
+                  ? 'bg-slate-900 border-slate-700 text-cyan-400 hover:bg-slate-800'
+                  : 'bg-white border-slate-200 text-cyan-700 hover:bg-cyan-50'
+              }`}
+            >
+              {cloudSyncStatus === 'syncing' ? 'Синхронизация…' : 'Синхронизировать сейчас'}
+            </button>
+          </div>
         )}
       </div>
 
