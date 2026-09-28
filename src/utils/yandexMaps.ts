@@ -517,21 +517,57 @@ export function createStationObjectManager(_ymaps: any) {
 }
 
 
-/** Navigation chevron for HUD live position (heading in degrees, 0 = north). */
+/**
+ * Navigation chevron for HUD live position.
+ * Default shape points UP (screen north). `headingDeg` is CSS rotation (clockwise).
+ */
 export function makeNavArrowEl(color = '#38bdf8', headingDeg = 0): HTMLElement {
-  const el = document.createElement('div');
-  el.style.cssText = [
+  const wrap = document.createElement('div');
+  wrap.style.cssText = [
+    'width:28px',
+    'height:28px',
+    'position:relative',
+    'transform:translate(-50%,-50%)',
+    'pointer-events:none',
+    'cursor:default',
+  ].join(';');
+  wrap.setAttribute('data-vigo-nav-arrow-root', '1');
+
+  const arrow = document.createElement('div');
+  arrow.style.cssText = [
+    'position:absolute',
+    'left:50%',
+    'top:50%',
     'width:0',
     'height:0',
-    'border-left:9px solid transparent',
-    'border-right:9px solid transparent',
-    'border-bottom:18px solid ' + color,
+    'margin-left:-10px',
+    'margin-top:-14px',
+    'border-left:10px solid transparent',
+    'border-right:10px solid transparent',
+    'border-bottom:20px solid ' + color,
     'filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))',
-    'transform:translate(-50%,-50%) rotate(' + String(headingDeg) + 'deg)',
-    'transform-origin:center center',
-    'cursor:default',
-    'pointer-events:none',
+    'transform-origin:50% 70%',
+    'transform:rotate(' + String(headingDeg) + 'deg)',
+    'will-change:transform',
   ].join(';');
-  el.setAttribute('data-vigo-nav-arrow', '1');
-  return el;
+  arrow.setAttribute('data-vigo-nav-arrow', '1');
+  wrap.appendChild(arrow);
+  return wrap;
+}
+
+/** Normalize degrees to [-180, 180]. */
+export function normalizeDeg180(deg: number): number {
+  let d = deg % 360;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  return d;
+}
+
+/**
+ * Geographic heading (0=N, 90=E, clockwise) → Yandex camera azimuth in radians [-π, π].
+ * Setting camera.azimuth to this value makes that heading point to the top of the screen (course-up).
+ */
+export function headingDegToAzimuthRad(headingDeg: number): number {
+  const rad = (normalizeDeg180(headingDeg) * Math.PI) / 180;
+  return rad;
 }
