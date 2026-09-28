@@ -220,6 +220,20 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   ]);
   const [routeWeather, setRouteWeather] = useState<{ temperature:number; windSpeed:number; windDirection:number; weatherCode:number; precipitation:number; routeBearing:number; etaMinutes:number; arrivalDate: Date; samples: RouteWeatherSample[] } | null>(null);
   const [routeForecast, setRouteForecast] = useState<{ consumption:number; energyKwh:number; arrivalSoc:number; windLabel:string; weatherLabel:string; precipitationLabel:string; relativeWindAngle:number; driverStyleFactor:number; driverStyleSource:string; climateLabel:string; climateImpactPct:number; climateDeltaKwh100:number; speedImpactPct:number; breakdown?: any } | null>(null);
+  const getChargingTemperatureAtDistance = useCallback((distanceKm: number): number | undefined => {
+    if (!routeWeather) return undefined;
+    if (!routeWeather.samples?.length) return routeWeather.temperature;
+    let nearest = routeWeather.samples[0];
+    let bestDelta = Math.abs(nearest.distanceFromStartKm - distanceKm);
+    for (const sample of routeWeather.samples) {
+      const delta = Math.abs(sample.distanceFromStartKm - distanceKm);
+      if (delta < bestDelta) {
+        nearest = sample;
+        bestDelta = delta;
+      }
+    }
+    return nearest.weather.temperature;
+  }, [routeWeather]);
   // Mid-route charging suggestion — computed whenever the forecast arrival SoC drops under 20%.
   // "loading"/"unavailable" keep the UI from silently showing nothing while EVRACE/OSM are queried
   // or when no reachable Type2/CCS2 station was found along the route.
@@ -557,7 +571,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 },
               );
           const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
-          const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
+          const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw, getChargingTemperatureAtDistance(station.distanceAlongRouteKm));
           // Finish SOC = leave station at targetSoc, then burn energy for the remaining km to B.
           // (Old formula arrivalSoc + chargeAdded was wrong: early charge + long remaining leg
           // still looked almost like the unassisted arrival.)
@@ -652,7 +666,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
             // When we must charge, even a 5% top-up is better than "no plan".
             if (chargeAddedSoc < (mustCharge ? 5 : 3)) return null;
-            const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
+            const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw, getChargingTemperatureAtDistance(station.distanceAlongRouteKm));
             if (session.minutes <= 0) return null;
             const finishSocAfterCharge = Math.max(
               0,
@@ -759,7 +773,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         });
         const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
         if (chargeAddedSoc < MIN_USEFUL_CHARGE_SOC) return null;
-        const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
+        const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw, getChargingTemperatureAtDistance(station.distanceAlongRouteKm));
         if (session.minutes <= 0) return null;
         const finishSocAfterCharge = Math.max(0, Math.min(100, targetSoc - (remainingEnergyKwh / batteryCap) * 100));
         const score =
@@ -846,6 +860,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             batteryCap,
             connector,
             stationMax,
+            getChargingTemperatureAtDistance(prev.station.distanceAlongRouteKm),
           );
           const finishSocAfterCharge = Math.max(
             0,
@@ -898,7 +913,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       }
     }
     return () => { cancelled = true; };
-  }, [routeElevation, routeForecast, startSoc, settings.batteryCapacityKwh]);
+  }, [routeElevation, routeForecast, routeWeather, startSoc, settings.batteryCapacityKwh, getChargingTemperatureAtDistance]);
 
   // Automatic search is deliberately limited to the low-arrival-SOC case.
   useEffect(() => {
