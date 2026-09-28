@@ -1397,6 +1397,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           </button>
         </div>
       </LayoutGroup>
+      <p className={`-mt-1 text-[11px] leading-snug px-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+        {calculatorMode === 'route'
+          ? 'Маршрут — прогноз до точки Б по карте, погоде и рельефу.'
+          : 'Ручной ввод — оценка по дистанции и скорости без построения маршрута (для уже пройденных поездок).'}
+      </p>
 
       <AnimatePresence mode="wait" initial={false}>
       {calculatorMode === 'route' && (
@@ -1737,31 +1742,259 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           <>
             {routeForecast && (() => {
               const arrival = routeForecast.arrivalSoc;
+              const displayArrival = hasChargingAdjustedFinishSoc ? chargingFinishSoc! : arrival;
               const statusTone =
-                arrival >= 20
+                displayArrival >= 20
                   ? 'good'
-                  : arrival >= ARRIVAL_RESERVE_SOC
+                  : displayArrival >= ARRIVAL_RESERVE_SOC
                   ? 'ok'
                   : 'low';
+              const needsCharge = arrival < CHARGE_SUGGEST_SOC;
               const statusText =
                 statusTone === 'good'
-                  ? '✓ Доедете с хорошим запасом'
+                  ? 'Доедете с хорошим запасом'
                   : statusTone === 'ok'
-                  ? 'Небольшой запас'
-                  : startSoc >= 99
+                  ? 'Небольшой запас на финише'
+                  : needsCharge
                   ? 'Нужна зарядка в пути'
                   : 'Недостаточно заряда';
               const statusColor =
                 statusTone === 'good'
                   ? isDark
-                    ? 'text-cyan-400'
-                    : 'text-cyan-600'
+                    ? 'text-emerald-400'
+                    : 'text-emerald-600'
                   : statusTone === 'ok'
                   ? 'text-amber-500'
                   : 'text-rose-500';
+              const driveMinutes = routeWeather?.etaMinutes
+                ?? Math.max(1, Math.round((routeElevation.distanceKm / Math.max(10, plannedSpeedKmH)) * 60));
+              const totalTripMinutes = driveMinutes + totalChargingMinutes;
+              const etaLabel = (() => {
+                const h = Math.floor(totalTripMinutes / 60);
+                const m = totalTripMinutes % 60;
+                if (h <= 0) return `${m} мин`;
+                return m > 0 ? `${h} ч ${m} мин` : `${h} ч`;
+              })();
+              const chargeAnswer =
+                chargingSuggestionStatus === 'loading'
+                  ? 'Ищем станции…'
+                  : chargingSuggestionStatus === 'ready' && (chargingStops.length > 0 || chargingSuggestion)
+                    ? chargingStops.length > 1
+                      ? `${chargingStops.length} остановки`
+                      : 'Да, одна остановка'
+                    : needsCharge
+                      ? chargingSuggestionStatus === 'unavailable'
+                        ? 'Да, но станций нет'
+                        : 'Да'
+                      : 'Нет, без остановки';
+
               return (
               <div id="route-result-main" className="space-y-3">
-                {/* Map first — main visual */}
+                {/* 1. Three answers the driver needs first */}
+                <div
+                  className={`rounded-2xl border overflow-hidden ${
+                    isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
+                  }`}
+                >
+                  <div className={`px-4 pt-3 pb-2 border-b ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
+                    <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                      Результат маршрута
+                    </p>
+                    <p className={`text-[13px] font-bold ${statusColor}`}>{statusText}</p>
+                  </div>
+                  <div className="grid grid-cols-3 divide-x divide-slate-800/40">
+                    <div className="px-3 py-3 text-center">
+                      <div className={`text-[10px] font-semibold mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        SoC на финише
+                      </div>
+                      <div className={`text-2xl font-black font-mono tabular-nums ${statusColor}`}>
+                        {Math.round(displayArrival)}%
+                      </div>
+                      <div className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        старт {Math.round(startSoc)}%
+                        {hasChargingAdjustedFinishSoc && arrival !== displayArrival ? (
+                          <span className="block">без зарядки {Math.round(arrival)}%</span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="px-3 py-3 text-center">
+                      <div className={`text-[10px] font-semibold mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        Зарядка
+                      </div>
+                      <div
+                        className={`text-[15px] font-bold leading-tight ${
+                          needsCharge
+                            ? isDark
+                              ? 'text-amber-400'
+                              : 'text-amber-600'
+                            : isDark
+                              ? 'text-emerald-400'
+                              : 'text-emerald-600'
+                        }`}
+                      >
+                        {chargeAnswer}
+                      </div>
+                      <div className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {routeForecast.consumption.toFixed(1)} кВт⋅ч/100
+                      </div>
+                    </div>
+                    <div className="px-3 py-3 text-center">
+                      <div className={`text-[10px] font-semibold mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        В пути
+                      </div>
+                      <div className={`text-[15px] font-bold tabular-nums ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        {etaLabel}
+                      </div>
+                      <div className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {routeElevation.distanceKm.toFixed(0)} км
+                        {totalChargingMinutes > 0 ? ` · +${totalChargingMinutes} мин зар.` : ''}
+                      </div>
+                    </div>
+                  </div>
+                  {finishArrivalDate && (
+                    <div className={`px-4 py-2 text-[11px] border-t ${isDark ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
+                      Прибытие ~{finishArrivalDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                      {finishTemperature != null && (
+                        <> · {finishTemperature >= 0 ? '+' : ''}{Math.round(finishTemperature)}°C</>
+                      )}
+                      {routeForecast.windLabel ? ` · ${routeForecast.windLabel}` : ''}
+                    </div>
+                  )}
+                </div>
+
+                {/* Compact sticky actions */}
+                <div className="space-y-2">
+                  {onSendToHud && destinationAddress.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        triggerHaptic('success', settings.hapticFeedback);
+                        const totalKm = routeElevation?.distanceKm ?? distanceKm;
+                        const waypoints = [
+                          ...chargingStops.map((stop) => ({
+                            kind: 'charge' as const,
+                            name: stop.station.name || 'Зарядка',
+                            distanceAlongRouteKm: stop.station.distanceAlongRouteKm,
+                            lat: stop.station.lat,
+                            lon: stop.station.lon,
+                            plannedArrivalSoc: stop.socAtStation,
+                            chargeTargetSoc: stop.targetSoc,
+                            connectorLabel:
+                              stop.connector === 'gbt'
+                                ? 'GB/T'
+                                : stop.connector === 'ccs2'
+                                  ? 'CCS'
+                                  : 'Type2',
+                            stationId: stop.station.id,
+                            address: stop.station.address,
+                            operator: stop.station.operator,
+                            ccs2PowerKw: stop.station.ccs2PowerKw,
+                            gbtPowerKw: stop.station.gbtPowerKw,
+                            type2PowerKw: stop.station.type2PowerKw,
+                          })),
+                          {
+                            kind: 'destination' as const,
+                            name: destinationAddress.trim(),
+                            distanceAlongRouteKm: totalKm,
+                          },
+                        ];
+                        let routePoints:
+                          | Array<{ lat: number; lon: number; elevationM?: number; distanceFromStartKm?: number }>
+                          | undefined;
+                        const pts = routeElevation?.points;
+                        if (pts && pts.length >= 2) {
+                          const maxPts = 280;
+                          const toPt = (p: (typeof pts)[number]) => ({
+                            lat: p.lat,
+                            lon: p.lon,
+                            elevationM: p.elevationM,
+                            distanceFromStartKm: p.distanceFromStartKm,
+                          });
+                          if (pts.length <= maxPts) {
+                            routePoints = pts.map(toPt);
+                          } else {
+                            const rdp = (arr: typeof pts, eps: number): typeof pts => {
+                              if (arr.length <= 2) return arr.slice();
+                              const toRad = Math.PI / 180;
+                              const lat0 = arr[0].lat * toRad;
+                              const mPerDegLat = 111_320;
+                              const mPerDegLon = 111_320 * Math.cos(lat0);
+                              const dist = (a: (typeof pts)[0], b: (typeof pts)[0], p: (typeof pts)[0]) => {
+                                const ax = a.lon * mPerDegLon, ay = a.lat * mPerDegLat;
+                                const bx = b.lon * mPerDegLon, by = b.lat * mPerDegLat;
+                                const px = p.lon * mPerDegLon, py = p.lat * mPerDegLat;
+                                const dx = bx - ax, dy = by - ay;
+                                const len2 = dx * dx + dy * dy || 1;
+                                let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+                                t = Math.max(0, Math.min(1, t));
+                                const cx = ax + t * dx, cy = ay + t * dy;
+                                return Math.hypot(px - cx, py - cy);
+                              };
+                              let maxD = 0, idx = 0;
+                              for (let i = 1; i < arr.length - 1; i++) {
+                                const d = dist(arr[0], arr[arr.length - 1], arr[i]);
+                                if (d > maxD) { maxD = d; idx = i; }
+                              }
+                              if (maxD > eps) {
+                                const left = rdp(arr.slice(0, idx + 1), eps);
+                                const right = rdp(arr.slice(idx), eps);
+                                return left.slice(0, -1).concat(right);
+                              }
+                              return [arr[0], arr[arr.length - 1]];
+                            };
+                            let eps = 25;
+                            let simplified = rdp(pts, eps);
+                            while (simplified.length > maxPts && eps < 200) {
+                              eps *= 1.35;
+                              simplified = rdp(pts, eps);
+                            }
+                            if (simplified.length > maxPts) {
+                              const step = Math.ceil(simplified.length / maxPts);
+                              simplified = simplified.filter(
+                                (_, i) => i === 0 || i === simplified.length - 1 || i % step === 0,
+                              );
+                            }
+                            routePoints = simplified.map(toPt);
+                          }
+                        }
+                        onSendToHud({
+                          destination: destinationAddress.trim(),
+                          startSoc,
+                          plannedSpeedKmH,
+                          totalDistanceKm: totalKm,
+                          predictedEndSoc: endSoc,
+                          energyNeededKwh: energyUsedKwh,
+                          predictedConsumption: consumptionPer100Km,
+                          waypoints,
+                          routePoints,
+                        });
+                      }}
+                      className={`w-full rounded-xl py-3.5 text-sm font-bold flex items-center justify-center gap-2 border transition-all active:scale-[0.98] ${
+                        isDark
+                          ? 'bg-cyan-600 border-cyan-500 text-white hover:bg-cyan-500 shadow-lg shadow-cyan-900/30'
+                          : 'bg-cyan-600 border-cyan-600 text-white hover:bg-cyan-500 shadow-md shadow-cyan-600/20'
+                      }`}
+                    >
+                      <Navigation className="w-5 h-5" />
+                      {chargingStops.length > 0
+                        ? `Начать поездку · ${chargingStops.length} зарядк${chargingStops.length === 1 ? 'а' : chargingStops.length < 5 ? 'и' : 'ок'}`
+                        : 'Начать поездку'}
+                    </button>
+                  )}
+                  <a
+                    href={typeof yandexNaviHref === 'string' ? '#' : yandexNaviHref.web}
+                    onClick={openYandexNavi}
+                    className={`block w-full rounded-xl px-3 py-2.5 text-center text-[12px] font-semibold border ${
+                      isDark
+                        ? 'bg-slate-900 border-slate-700 text-slate-200 hover:bg-slate-800'
+                        : 'bg-white border-slate-200 text-slate-800'
+                    }`}
+                  >
+                    Открыть в Яндекс Навигаторе
+                  </a>
+                </div>
+
+                {/* Map — secondary after the answers */}
                 <div className={`rounded-2xl border overflow-hidden ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                   <RouteMap
                     points={routeElevation.points}
@@ -1827,15 +2060,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       });
                     }}
                   />
-                  <div className={`p-2 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
-                    <a
-                      href={typeof yandexNaviHref === 'string' ? '#' : yandexNaviHref.web}
-                      onClick={openYandexNavi}
-                      className={`block w-full rounded-lg px-3 py-2.5 text-center text-[12px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200 hover:bg-slate-800' : 'bg-white text-slate-800 border border-slate-200'}`}
-                    >
-                      Открыть в Яндекс Навигаторе
-                    </a>
-                  </div>
                 </div>
 
                 {selectedRouteStop && (
@@ -1924,25 +2148,13 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   </div>
                 )}
 
-                {/* Compact SOC + charging strip under the map */}
+                {/* Charging plan details (SOC/ETA already in the hero above) */}
                 <div className={`rounded-2xl border px-4 py-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
-                  <div className="flex items-center gap-4">
-                    <RangeGauge percent={arrival} isDark={isDark} caption="на финише" />
-                    <div className="min-w-0 flex-1">
-                      <div className={`text-[11px] font-semibold ${statusColor}`}>{statusText}</div>
-                    </div>
-                    <div className={`text-right text-[11px] tabular-nums shrink-0 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      <div><span className={`font-mono ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{routeForecast.consumption.toFixed(1)}</span> кВт⋅ч/100</div>
-                      <div className="mt-0.5"><span className={`font-mono ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{routeForecast.energyKwh.toFixed(1)}</span> кВт⋅ч</div>
-                      <div className="mt-0.5">старт {Math.round(startSoc)}%</div>
-                    </div>
-                  </div>
-
                   {routeForecast && (
-                    <div className={`mt-3 pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
+                    <div>
                       <div className={`flex items-center gap-1.5 text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                         <PlugZap className="w-3.5 h-3.5" />
-                        {arrival < CHARGE_SUGGEST_SOC ? 'Зарядка в пути' : 'Зарядка по маршруту'}
+                        {arrival < CHARGE_SUGGEST_SOC ? 'План зарядки в пути' : 'Зарядка по маршруту'}
                       </div>
                       {chargingSuggestionStatus === 'loading' && (
                         <p className={`mt-1.5 text-[11px] flex items-center gap-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
@@ -2026,142 +2238,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                           ))}
                         </div>
                       )}
-                      {hasChargingAdjustedFinishSoc && (
-                        <div className={`mt-2 rounded-lg border px-3 py-2 ${isDark ? 'border-cyan-900/60 bg-cyan-950/30' : 'border-cyan-200 bg-cyan-50'}`}>
-                          <div className={`text-[10px] font-semibold ${isDark ? 'text-cyan-500' : 'text-cyan-700'}`}>После зарядки на финише</div>
-                          <div className={`text-lg font-black font-mono ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>{Math.round(chargingFinishSoc!)}%</div>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
               </div>
               );
             })()}
-
-            {/* Send planned route to HUD for live tracking (incl. charge stops) */}
-            {onSendToHud && destinationAddress.trim() && (
-              <button
-                type="button"
-                onClick={() => {
-                  triggerHaptic('success', settings.hapticFeedback);
-                  const totalKm = routeElevation?.distanceKm ?? distanceKm;
-                  const waypoints = [
-                    ...chargingStops.map((stop) => ({
-                      kind: 'charge' as const,
-                      name: stop.station.name || 'Зарядка',
-                      distanceAlongRouteKm: stop.station.distanceAlongRouteKm,
-                      lat: stop.station.lat,
-                      lon: stop.station.lon,
-                      plannedArrivalSoc: stop.socAtStation,
-                      chargeTargetSoc: stop.targetSoc,
-                      connectorLabel:
-                        stop.connector === 'gbt'
-                          ? 'GB/T'
-                          : stop.connector === 'ccs2'
-                            ? 'CCS'
-                            : 'Type2',
-                      stationId: stop.station.id,
-                      address: stop.station.address,
-                      operator: stop.station.operator,
-                      ccs2PowerKw: stop.station.ccs2PowerKw,
-                      gbtPowerKw: stop.station.gbtPowerKw,
-                      type2PowerKw: stop.station.type2PowerKw,
-                    })),
-                    {
-                      kind: 'destination' as const,
-                      name: destinationAddress.trim(),
-                      distanceAlongRouteKm: totalKm,
-                    },
-                  ];
-                  // Shape-preserving downsample for HUD map (keeps corners; avoids off-road chords).
-                  let routePoints:
-                    | Array<{ lat: number; lon: number; elevationM?: number; distanceFromStartKm?: number }>
-                    | undefined;
-                  const pts = routeElevation?.points;
-                  if (pts && pts.length >= 2) {
-                    const maxPts = 280;
-                    const toPt = (p: (typeof pts)[number]) => ({
-                      lat: p.lat,
-                      lon: p.lon,
-                      elevationM: p.elevationM,
-                      distanceFromStartKm: p.distanceFromStartKm,
-                    });
-                    if (pts.length <= maxPts) {
-                      routePoints = pts.map(toPt);
-                    } else {
-                      // Ramer–Douglas–Peucker on [lon,lat] with adaptive epsilon, then cap count.
-                      const rdp = (arr: typeof pts, eps: number): typeof pts => {
-                        if (arr.length <= 2) return arr.slice();
-                        const toRad = Math.PI / 180;
-                        const lat0 = arr[0].lat * toRad;
-                        const mPerDegLat = 111_320;
-                        const mPerDegLon = 111_320 * Math.cos(lat0);
-                        const dist = (a: (typeof pts)[0], b: (typeof pts)[0], p: (typeof pts)[0]) => {
-                          const ax = a.lon * mPerDegLon, ay = a.lat * mPerDegLat;
-                          const bx = b.lon * mPerDegLon, by = b.lat * mPerDegLat;
-                          const px = p.lon * mPerDegLon, py = p.lat * mPerDegLat;
-                          const dx = bx - ax, dy = by - ay;
-                          const len2 = dx * dx + dy * dy || 1;
-                          let t = ((px - ax) * dx + (py - ay) * dy) / len2;
-                          t = Math.max(0, Math.min(1, t));
-                          const cx = ax + t * dx, cy = ay + t * dy;
-                          return Math.hypot(px - cx, py - cy);
-                        };
-                        let maxD = 0, idx = 0;
-                        for (let i = 1; i < arr.length - 1; i++) {
-                          const d = dist(arr[0], arr[arr.length - 1], arr[i]);
-                          if (d > maxD) { maxD = d; idx = i; }
-                        }
-                        if (maxD > eps) {
-                          const left = rdp(arr.slice(0, idx + 1), eps);
-                          const right = rdp(arr.slice(idx), eps);
-                          return left.slice(0, -1).concat(right);
-                        }
-                        return [arr[0], arr[arr.length - 1]];
-                      };
-                      // ~25–40 m tolerance keeps road shape; raise until under maxPts
-                      let eps = 25;
-                      let simplified = rdp(pts, eps);
-                      while (simplified.length > maxPts && eps < 200) {
-                        eps *= 1.35;
-                        simplified = rdp(pts, eps);
-                      }
-                      // If still too many, fall back to stride but only between kept RDP vertices is unnecessary —
-                      // uniform thin as last resort while always keeping endpoints.
-                      if (simplified.length > maxPts) {
-                        const step = Math.ceil(simplified.length / maxPts);
-                        simplified = simplified.filter(
-                          (_, i) => i === 0 || i === simplified.length - 1 || i % step === 0,
-                        );
-                      }
-                      routePoints = simplified.map(toPt);
-                    }
-                  }
-                  onSendToHud({
-                    destination: destinationAddress.trim(),
-                    startSoc,
-                    plannedSpeedKmH,
-                    totalDistanceKm: totalKm,
-                    predictedEndSoc: endSoc,
-                    energyNeededKwh: energyUsedKwh,
-                    predictedConsumption: consumptionPer100Km,
-                    waypoints,
-                    routePoints,
-                  });
-                }}
-                className={`w-full rounded-xl py-3.5 text-sm font-bold flex items-center justify-center gap-2 border transition-all active:scale-[0.98] ${
-                  isDark
-                    ? 'bg-sky-950/50 border-sky-700/60 text-sky-300 hover:bg-sky-900/40'
-                    : 'bg-sky-50 border-sky-300 text-sky-800 hover:bg-sky-100'
-                }`}
-              >
-                <Navigation className="w-5 h-5" />
-                {chargingStops.length > 0
-                  ? `Начать поездку · ${chargingStops.length} зарядк${chargingStops.length === 1 ? 'а' : chargingStops.length < 5 ? 'и' : 'ок'}`
-                  : 'Начать поездку'}
-              </button>
-            )}
 
             {/* All secondary route info behind one control */}
             <CollapsibleDetails
