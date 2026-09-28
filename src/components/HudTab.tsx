@@ -698,7 +698,8 @@ export const HudTab: React.FC<HudTabProps> = ({
           lon: prev ? prev.lon * (1 - alpha) + longitude * alpha : longitude,
         };
         smoothMapPosRef.current = smoothed;
-        if (now - lastMapPosUpdateRef.current > 900) {
+        // ~2.5 Hz map marker feed — RouteMap interpolates between samples for smooth motion.
+        if (now - lastMapPosUpdateRef.current > 400) {
           lastMapPosUpdateRef.current = now;
           setMapLivePosition(smoothed);
         }
@@ -774,8 +775,9 @@ export const HudTab: React.FC<HudTabProps> = ({
           setGpsHeading(rounded);
           return;
         }
+        // 1° is enough to cut noise but still rotates the HUD map smoothly while driving.
         const delta = Math.abs(((rounded - prevUi + 540) % 360) - 180);
-        if (delta >= 2) {
+        if (delta >= 1) {
           uiGpsPublishedRef.current.heading = rounded;
           setGpsHeading(rounded);
         }

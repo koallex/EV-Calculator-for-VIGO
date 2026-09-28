@@ -61,6 +61,19 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   /** After user pans/zooms, pause GPS follow so gestures are not fought. */
   const userNavPauseUntilRef = useRef(0);
   const lastAppliedHeadingRef = useRef<number | null>(null);
+  /** Last route progress index applied to polylines — skip redraw when unchanged. */
+  const lastProgressIdxRef = useRef(-1);
+  /** Smooth marker interpolation between sparse GPS samples. */
+  const markerAnimRef = useRef<{
+    fromLat: number;
+    fromLon: number;
+    toLat: number;
+    toLon: number;
+    startMs: number;
+    durationMs: number;
+    raf: number | null;
+  } | null>(null);
+  const displayPosRef = useRef<{ lat: number; lon: number } | null>(null);
 
   const positions = useMemo(
     () => points.map((p) => [p.lat, p.lon] as [number, number]),
@@ -357,12 +370,12 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, JSON.stringify(positions), compact, fill, followMode, isDark]);
 
-  // Progress: only after the car has clearly moved along the path (avoid full-route gray at start).
+  // Progress along route: update geometry in place (no remove/add) to avoid track flicker.
   useEffect(() => {
     const bundle = bundleRef.current;
     if (!bundle || !mapReady || positions.length < 2) return;
     if (!followMode || !currentPosition) {
-      // Restore full bright route if leaving follow
+      lastProgressIdxRef.current = -1;
       if (featureRef.current && bundle.apiVersion === 3) {
         try {
           const lonLatPath = positions.map(([la, lo]) => toLonLat(la, lo));
@@ -399,10 +412,17 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     // Require meaningful progress along polyline (not just "nearest is index 0/1")
     const progressRatio = bestIdx / Math.max(1, positions.length - 1);
     if (bestIdx < 3 && progressRatio < 0.02) {
-      removeObj(bundle, traveledFeatureRef.current);
-      traveledFeatureRef.current = null;
+      if (lastProgressIdxRef.current !== -1) {
+        lastProgressIdxRef.current = -1;
+        removeObj(bundle, traveledFeatureRef.current);
+        traveledFeatureRef.current = null;
+      }
       return;
     }
+
+    // Only redraw when the nearest vertex actually advanced (or first paint).
+    if (bestIdx === lastProgressIdxRef.current) return;
+    lastProgressIdxRef.current = bestIdx;
 
     const map = (bundle as any).map;
     const traveledPos = positions.slice(0, Math.max(2, bestIdx + 1));
@@ -412,17 +432,25 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     const strokeMain = isDark ? 'rgba(34, 211, 238, 0.95)' : 'rgba(6, 182, 212, 0.95)';
     const strokeTraveled = isDark ? 'rgba(100, 116, 139, 0.75)' : 'rgba(148, 163, 184, 0.8)';
 
-    removeObj(bundle, traveledFeatureRef.current);
-    traveledFeatureRef.current = null;
-
     if (bundle.apiVersion === 3) {
       const { YMapFeature } = (bundle as any).ymaps3;
-      if (traveledPos.length >= 2) {
+      const traveledCoords = traveledPos.map(([la, lo]) => toLonLat(la, lo));
+      const remainCoords = remainingPos.map(([la, lo]) => toLonLat(la, lo));
+
+      if (traveledFeatureRef.current) {
+        try {
+          traveledFeatureRef.current.update({
+            geometry: { type: 'LineString', coordinates: traveledCoords },
+            style: { stroke: [{ width: 4.5, color: strokeTraveled }] },
+          });
+        } catch {
+          removeObj(bundle, traveledFeatureRef.current);
+          traveledFeatureRef.current = null;
+        }
+      }
+      if (!traveledFeatureRef.current && traveledPos.length >= 2) {
         const traveled = new YMapFeature({
-          geometry: {
-            type: 'LineString',
-            coordinates: traveledPos.map(([la, lo]) => toLonLat(la, lo)),
-          },
+          geometry: { type: 'LineString', coordinates: traveledCoords },
           style: { stroke: [{ width: 4.5, color: strokeTraveled }] },
         });
         map.addChild(traveled);
@@ -431,17 +459,22 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       if (featureRef.current) {
         try {
           featureRef.current.update({
-            geometry: {
-              type: 'LineString',
-              coordinates: remainingPos.map(([la, lo]) => toLonLat(la, lo)),
-            },
+            geometry: { type: 'LineString', coordinates: remainCoords },
             style: { stroke: [{ width: 4.5, color: strokeMain }] },
           });
         } catch { /* ignore */ }
       }
     } else {
       const ymaps = (bundle as any).ymaps;
-      if (traveledPos.length >= 2) {
+      if (traveledFeatureRef.current?.geometry?.setCoordinates) {
+        try {
+          traveledFeatureRef.current.geometry.setCoordinates(traveledPos);
+        } catch {
+          removeObj(bundle, traveledFeatureRef.current);
+          traveledFeatureRef.current = null;
+        }
+      }
+      if (!traveledFeatureRef.current && traveledPos.length >= 2) {
         const traveled = new ymaps.Polyline(
           traveledPos,
           {},
@@ -504,128 +537,186 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, JSON.stringify(stops), onChargingStopClick]);
 
+  // Live position marker + heading-up camera. Marker moves via rAF interpolation; track is separate.
   useEffect(() => {
     const bundle = bundleRef.current;
     if (!bundle || !mapReady) return;
     const map = (bundle as any).map;
+
+    const stopMarkerAnim = () => {
+      const anim = markerAnimRef.current;
+      if (anim?.raf != null) {
+        cancelAnimationFrame(anim.raf);
+        anim.raf = null;
+      }
+      markerAnimRef.current = null;
+    };
 
     if (
       !currentPosition ||
       !Number.isFinite(currentPosition.lat) ||
       !Number.isFinite(currentPosition.lon)
     ) {
+      stopMarkerAnim();
+      displayPosRef.current = null;
       removeObj(bundle, currentPosMarkerRef.current);
       currentPosMarkerRef.current = null;
       return;
     }
 
-    if (bundle.apiVersion === 3) {
-      const coords = toLonLat(currentPosition.lat, currentPosition.lon);
-      const h =
-        headingDeg != null && Number.isFinite(headingDeg)
-          ? Number(headingDeg)
-          : lastAppliedHeadingRef.current ?? 0;
-      if (currentPosMarkerRef.current) {
-        try {
-          currentPosMarkerRef.current.update({ coordinates: coords });
-        } catch {
-          /* ignore */
-        }
-        // Refresh arrow rotation via DOM child when possible
-        try {
-          const root = currentPosMarkerRef.current?.element || currentPosMarkerRef.current?._element;
-          const arrow = root?.querySelector?.('[data-vigo-nav-arrow]') as HTMLElement | null;
-          if (arrow) arrow.style.transform = `translate(-50%,-50%) rotate(${h}deg)`;
-        } catch {
-          /* ignore */
+    const targetLat = currentPosition.lat;
+    const targetLon = currentPosition.lon;
+
+    // Smooth heading for map camera (EMA on circular degrees).
+    const hasHeading = headingDeg != null && Number.isFinite(headingDeg);
+    let headingForMap = hasHeading ? Number(headingDeg) : lastAppliedHeadingRef.current;
+    if (headingForMap != null && Number.isFinite(headingForMap)) {
+      const prev = lastAppliedHeadingRef.current;
+      if (prev != null) {
+        const d = ((headingForMap - prev + 540) % 360) - 180;
+        headingForMap = (prev + d * 0.4 + 360) % 360;
+      }
+      lastAppliedHeadingRef.current = headingForMap;
+    }
+
+    /**
+     * Arrow orientation on screen:
+     * - API v3 + followMode: map camera azimuth = heading → travel direction is screen-up → arrow stays at 0°.
+     * - API 2.1 / no follow: north-up map → arrow rotates by geographic heading.
+     */
+    const arrowScreenDeg =
+      followMode && bundle.apiVersion === 3
+        ? 0
+        : headingForMap != null && Number.isFinite(headingForMap)
+          ? headingForMap
+          : 0;
+
+    const applyMarkerCoords = (lat: number, lon: number) => {
+      displayPosRef.current = { lat, lon };
+      if (bundle.apiVersion === 3) {
+        const coords = toLonLat(lat, lon);
+        if (currentPosMarkerRef.current) {
+          try {
+            currentPosMarkerRef.current.update({ coordinates: coords });
+          } catch { /* ignore */ }
+          try {
+            const root =
+              currentPosMarkerRef.current?.element ||
+              currentPosMarkerRef.current?._element;
+            const arrow = root?.querySelector?.('[data-vigo-nav-arrow]') as HTMLElement | null;
+            if (arrow) {
+              arrow.style.transform = `translate(-50%,-50%) rotate(${arrowScreenDeg}deg)`;
+            }
+          } catch { /* ignore */ }
+        } else {
+          const { YMapMarker } = (bundle as any).ymaps3;
+          const el = followMode
+            ? makeNavArrowEl('#38bdf8', arrowScreenDeg)
+            : makeDotMarkerEl('#38bdf8', 14, '#fff');
+          const m = new YMapMarker({ coordinates: coords }, el);
+          map.addChild(m);
+          currentPosMarkerRef.current = m;
         }
       } else {
-        const { YMapMarker } = (bundle as any).ymaps3;
-        const el = followMode ? makeNavArrowEl('#38bdf8', h) : makeDotMarkerEl('#38bdf8', 14, '#fff');
-        const m = new YMapMarker({ coordinates: coords }, el);
-        map.addChild(m);
-        currentPosMarkerRef.current = m;
-      }
-
-      // Nav-style follow: center + rotate. Skip while user is panning/zooming.
-      if (followMode && Date.now() >= userNavPauseUntilRef.current) {
-        const hasHeading = headingDeg != null && Number.isFinite(headingDeg);
-        // Smooth heading to reduce compass jitter (degrees → radians for API).
-        let headingForMap = hasHeading ? Number(headingDeg) : lastAppliedHeadingRef.current;
-        if (headingForMap != null && Number.isFinite(headingForMap)) {
-          const prev = lastAppliedHeadingRef.current;
-          if (prev != null) {
-            let d = ((headingForMap - prev + 540) % 360) - 180;
-            headingForMap = (prev + d * 0.35 + 360) % 360;
-          }
-          lastAppliedHeadingRef.current = headingForMap;
+        const coords: [number, number] = [lat, lon];
+        if (currentPosMarkerRef.current) {
+          try {
+            currentPosMarkerRef.current.geometry.setCoordinates(coords);
+          } catch { /* ignore */ }
+        } else {
+          const ymaps = (bundle as any).ymaps;
+          const m = new ymaps.Placemark(
+            coords,
+            { hintContent: 'Вы здесь' },
+            { preset: 'islands#blueCircleDotIcon', iconColor: '#38bdf8' },
+          );
+          map.geoObjects.add(m);
+          currentPosMarkerRef.current = m;
         }
+      }
+    };
+
+    // Start / continue interpolation toward the latest GPS sample.
+    const from = displayPosRef.current ?? { lat: targetLat, lon: targetLon };
+    stopMarkerAnim();
+    const durationMs = followMode ? 420 : 200;
+    const anim = {
+      fromLat: from.lat,
+      fromLon: from.lon,
+      toLat: targetLat,
+      toLon: targetLon,
+      startMs: performance.now(),
+      durationMs,
+      raf: null as number | null,
+    };
+    markerAnimRef.current = anim;
+
+    const tick = (now: number) => {
+      const a = markerAnimRef.current;
+      if (!a) return;
+      const t = Math.min(1, (now - a.startMs) / a.durationMs);
+      // ease-out for less overshoot feel
+      const e = 1 - (1 - t) * (1 - t);
+      const lat = a.fromLat + (a.toLat - a.fromLat) * e;
+      const lon = a.fromLon + (a.toLon - a.fromLon) * e;
+      applyMarkerCoords(lat, lon);
+      if (t < 1) {
+        a.raf = requestAnimationFrame(tick);
+      } else {
+        a.raf = null;
+      }
+    };
+    anim.raf = requestAnimationFrame(tick);
+
+    // Heading-up camera (API v3). Azimuth belongs on `camera`, not inside `setLocation`.
+    if (followMode && Date.now() >= userNavPauseUntilRef.current) {
+      if (bundle.apiVersion === 3) {
+        const coords = toLonLat(targetLat, targetLon);
+        let zoom = 16;
+        try {
+          if (typeof map.zoom === 'number') zoom = map.zoom;
+          else if (typeof map.location?.zoom === 'number') zoom = map.location.zoom;
+        } catch { /* ignore */ }
         const azimuthRad =
           headingForMap != null && Number.isFinite(headingForMap)
             ? (headingForMap * Math.PI) / 180
             : undefined;
         try {
-          // Keep current zoom if user changed it; only force center + azimuth.
-          let zoom = 16;
-          try {
-            if (typeof map.zoom === 'number') zoom = map.zoom;
-            else if (typeof map.location?.zoom === 'number') zoom = map.location.zoom;
-          } catch { /* ignore */ }
-          const loc: Record<string, unknown> = {
-            center: coords,
-            zoom,
-            duration: 400,
-          };
-          if (azimuthRad != null) loc.azimuth = azimuthRad;
-          map.setLocation(loc);
+          // Preferred: location + camera in one update (JS API 3).
+          map.update({
+            location: {
+              center: coords,
+              zoom,
+              duration: 350,
+            },
+            ...(azimuthRad != null ? { camera: { azimuth: azimuthRad } } : {}),
+          });
         } catch {
           try {
-            if (azimuthRad != null && typeof map.setAzimuth === 'function') {
-              map.setAzimuth(azimuthRad, { duration: 400 });
+            map.setLocation({ center: coords, zoom, duration: 350 });
+          } catch { /* ignore */ }
+          try {
+            if (azimuthRad != null) {
+              map.update?.({ camera: { azimuth: azimuthRad } });
             }
-            if (typeof map.setCenter === 'function') {
-              map.setCenter(coords);
-            } else {
-              (bundle as any).setLocation?.(currentPosition.lat, currentPosition.lon, zoom as any);
-            }
-          } catch {
-            try {
-              (bundle as any).setLocation?.(currentPosition.lat, currentPosition.lon, 16);
-            } catch {
-              /* ignore */
-            }
-          }
+          } catch { /* ignore */ }
         }
-      }
-    } else {
-      const coords: [number, number] = [currentPosition.lat, currentPosition.lon];
-      if (currentPosMarkerRef.current) {
-        currentPosMarkerRef.current.geometry.setCoordinates(coords);
       } else {
-        const ymaps = (bundle as any).ymaps;
-        const m = new ymaps.Placemark(
-          coords,
-          { hintContent: 'Вы здесь' },
-          { preset: 'islands#blueCircleDotIcon', iconColor: '#38bdf8' },
-        );
-        map.geoObjects.add(m);
-        currentPosMarkerRef.current = m;
-      }
-
-      // API 2.1: pan follow. Pause when user interacts; keep user zoom.
-      if (followMode && Date.now() >= userNavPauseUntilRef.current) {
+        // API 2.1 has no reliable programmatic map rotation — pan only.
         try {
           const z = typeof map.getZoom === 'function' ? map.getZoom() : 16;
-          map.setCenter(coords, z, { duration: 300 });
+          map.setCenter([targetLat, targetLon], z, { duration: 300 });
         } catch {
           try {
-            (bundle as any).setLocation?.(currentPosition.lat, currentPosition.lon);
-          } catch {
-            /* ignore */
-          }
+            (bundle as any).setLocation?.(targetLat, targetLon);
+          } catch { /* ignore */ }
         }
       }
     }
+
+    return () => {
+      stopMarkerAnim();
+    };
   }, [mapReady, currentPosition?.lat, currentPosition?.lon, followMode, headingDeg]);
 
   return (
