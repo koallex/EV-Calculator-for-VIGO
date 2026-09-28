@@ -761,11 +761,9 @@ export const HudTab: React.FC<HudTabProps> = ({
         setCurrentSpeed(smoothedSpeed);
       }
 
-      let vehicleHeading = heading;
-      // Prefer device compass when moving; otherwise derive course from GPS track.
-      // Keep last stable heading when stationary so map rotation does not snap to 0.
-      // lastHeadingRef always stores the latest computed course for algorithms / map follow.
-      // React state updates only when heading moves by >= 2° (circular) to cut UI jitter.
+      // Course for map/UI: prefer GPS track bearing (stable while driving).
+      // Device compass is noisy in a car and was spinning the HUD map.
+      // Hold last heading when nearly stopped — do not republish every tick.
       const publishHeadingUi = (nextHeading: number) => {
         const rounded = Math.round(nextHeading);
         lastHeadingRef.current = rounded;
@@ -775,22 +773,15 @@ export const HudTab: React.FC<HudTabProps> = ({
           setGpsHeading(rounded);
           return;
         }
-        // 1° is enough to cut noise but still rotates the HUD map smoothly while driving.
+        // Wider threshold → fewer React updates → less map thrash.
         const delta = Math.abs(((rounded - prevUi + 540) % 360) - 180);
-        if (delta >= 1) {
+        if (delta >= 5) {
           uiGpsPublishedRef.current.heading = rounded;
           setGpsHeading(rounded);
         }
       };
 
-      if (
-        vehicleHeading !== null &&
-        !isNaN(vehicleHeading) &&
-        vehicleHeading >= 0 &&
-        smoothedSpeed >= 3
-      ) {
-        publishHeadingUi(vehicleHeading);
-      } else if (prevPositionRef.current && smoothedSpeed >= 4) {
+      if (prevPositionRef.current && smoothedSpeed >= 8) {
         const bearing = calculateBearing(
           prevPositionRef.current.lat,
           prevPositionRef.current.lon,
@@ -798,10 +789,16 @@ export const HudTab: React.FC<HudTabProps> = ({
           longitude
         );
         publishHeadingUi(bearing);
-      } else if (lastHeadingRef.current != null) {
-        // Hold last heading while stopped / weak GPS — still only publish if UI diverged.
-        publishHeadingUi(lastHeadingRef.current);
+      } else if (
+        heading !== null &&
+        !isNaN(heading) &&
+        heading >= 0 &&
+        smoothedSpeed >= 12
+      ) {
+        // Compass only as fallback at higher speed if track bearing unavailable.
+        publishHeadingUi(heading);
       }
+      // When slow/stopped: keep lastHeadingRef as-is (no continuous republish).
 
       // === ACCUMULATE TRIP DISTANCE (with strict glitch checks) ===
       if (isTracking && prevPositionRef.current && isPlausibleReading) {

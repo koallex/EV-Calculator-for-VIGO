@@ -72,8 +72,12 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     heading: number | null;
   } | null>(null);
   const displayPosRef = useRef<{ lat: number; lon: number } | null>(null);
+  /** Heavily smoothed heading used for camera (deg). */
   const displayHeadingRef = useRef<number | null>(null);
+  /** Last azimuth actually sent to the map (deg, -180..180). */
+  const lastCameraHeadingDegRef = useRef<number | null>(null);
   const lastCameraPushMsRef = useRef(0);
+  const lastCenterPushMsRef = useRef(0);
   const followModeRef = useRef(followMode);
   followModeRef.current = followMode;
 
@@ -634,8 +638,17 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
     };
 
-    const POS_LERP = 0.18; // per frame ~60fps → catches GPS in ~0.3–0.5s without jumps
-    const HEAD_LERP = 0.2;
+    // Position catches GPS in ~0.4s. Heading is MUCH slower — GPS/compass is noisy.
+    const POS_LERP = 0.16;
+    const HEAD_LERP = 0.04; // ~1s time-constant; kills left/right thrashing
+    /** Ignore heading noise smaller than this before chasing (deg). */
+    const HEAD_DEADZONE = 6;
+    /** Only push a new camera azimuth when smoothed heading moved this much (deg). */
+    const CAMERA_HEAD_STEP = 12;
+    /** Min ms between camera rotation commands. */
+    const CAMERA_ROTATE_MS = 400;
+    /** Min ms between map center updates. */
+    const CENTER_MS = 120;
 
     const tick = () => {
       const target = followTargetRef.current;
@@ -653,41 +666,38 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         disp.lon += (target.lon - disp.lon) * POS_LERP;
       }
 
-      // Smooth heading toward target (shortest angle).
+      // Smooth heading toward target (shortest angle), with deadzone + rate limit.
       if (target.heading != null && Number.isFinite(target.heading)) {
         const prev = displayHeadingRef.current;
         if (prev == null) {
           displayHeadingRef.current = target.heading;
         } else {
           const d = normalizeDeg180(target.heading - prev);
-          displayHeadingRef.current = prev + d * HEAD_LERP;
+          if (Math.abs(d) >= HEAD_DEADZONE) {
+            // Cap per-frame turn so a single bad GPS sample cannot spin the map.
+            const maxStep = 2.5; // deg per frame ≈ 150°/s ceiling
+            const step = Math.max(-maxStep, Math.min(maxStep, d * HEAD_LERP));
+            displayHeadingRef.current = prev + step;
+          }
         }
       }
       const headingSmooth = displayHeadingRef.current;
 
-      // Arrow on screen: point in travel direction relative to current map rotation.
-      // If course-up camera works, map.azimuth ≈ heading → arrowDeg ≈ 0 (points up).
-      // If camera did not rotate, arrowDeg ≈ heading (north-up map).
-      let arrowDeg = headingSmooth ?? 0;
-      if (bundle.apiVersion === 3 && followModeRef.current && headingSmooth != null) {
-        try {
-          const mapAzimuthDeg =
-            typeof map.azimuth === 'number' ? (map.azimuth * 180) / Math.PI : 0;
-          arrowDeg = normalizeDeg180(headingSmooth - mapAzimuthDeg);
-        } catch {
-          arrowDeg = 0;
-        }
-      } else if (followModeRef.current && bundle.apiVersion === 3) {
-        arrowDeg = 0;
-      }
+      // Course-up: arrow stays screen-up once camera tracks heading.
+      // Small residual from lag is OK; do not chase map.azimuth every frame (feedback jitter).
+      const arrowDeg =
+        followModeRef.current && bundle.apiVersion === 3
+          ? 0
+          : headingSmooth ?? 0;
 
       ensureMarker(disp.lat, disp.lon, arrowDeg);
 
-      // Camera: course-up + center on smoothed position (throttled to avoid fighting animations).
       if (followModeRef.current && Date.now() >= userNavPauseUntilRef.current) {
         const now = performance.now();
-        if (now - lastCameraPushMsRef.current >= 80) {
-          lastCameraPushMsRef.current = now;
+
+        // Center follows smoothed marker (no duration — we already lerp).
+        if (now - lastCenterPushMsRef.current >= CENTER_MS) {
+          lastCenterPushMsRef.current = now;
           if (bundle.apiVersion === 3) {
             const coords = toLonLat(disp.lat, disp.lon);
             let zoom = 16;
@@ -702,20 +712,6 @@ export const RouteMap: React.FC<RouteMapProps> = ({
                 map.update({ location: { center: coords, zoom, duration: 0 } });
               } catch { /* ignore */ }
             }
-            if (headingSmooth != null && Number.isFinite(headingSmooth)) {
-              const az = headingDegToAzimuthRad(headingSmooth);
-              try {
-                if (typeof map.setCamera === 'function') {
-                  map.setCamera({ azimuth: az, duration: 120 });
-                } else {
-                  map.update({ camera: { azimuth: az, duration: 120 } });
-                }
-              } catch {
-                try {
-                  map.update({ camera: { azimuth: az } });
-                } catch { /* ignore */ }
-              }
-            }
           } else {
             try {
               const z = typeof map.getZoom === 'function' ? map.getZoom() : 16;
@@ -723,6 +719,34 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             } catch {
               try {
                 (bundle as any).setLocation?.(disp.lat, disp.lon);
+              } catch { /* ignore */ }
+            }
+          }
+        }
+
+        // Rotate camera only on meaningful, throttled heading changes.
+        if (
+          bundle.apiVersion === 3 &&
+          headingSmooth != null &&
+          Number.isFinite(headingSmooth) &&
+          now - lastCameraPushMsRef.current >= CAMERA_ROTATE_MS
+        ) {
+          const lastCam = lastCameraHeadingDegRef.current;
+          const deltaCam =
+            lastCam == null ? 999 : Math.abs(normalizeDeg180(headingSmooth - lastCam));
+          if (lastCam == null || deltaCam >= CAMERA_HEAD_STEP) {
+            lastCameraPushMsRef.current = now;
+            lastCameraHeadingDegRef.current = headingSmooth;
+            const az = headingDegToAzimuthRad(headingSmooth);
+            try {
+              if (typeof map.setCamera === 'function') {
+                map.setCamera({ azimuth: az, duration: 450 });
+              } else {
+                map.update({ camera: { azimuth: az, duration: 450 } });
+              }
+            } catch {
+              try {
+                map.update({ camera: { azimuth: az, duration: 450 } });
               } catch { /* ignore */ }
             }
           }
