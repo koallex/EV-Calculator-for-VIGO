@@ -31,6 +31,11 @@ interface RouteMapProps {
   headingDeg?: number | null;
   /** Keep map centered on currentPosition with closer zoom (HUD follow). */
   followMode?: boolean;
+  /**
+   * Ground speed (km/h). Camera yaw freezes below ~10 km/h so stationary
+   * GPS noise cannot spin the map.
+   */
+  moveSpeedKmH?: number | null;
   compact?: boolean;
   fill?: boolean;
   /** Fired when user taps a charging-stop marker on the map. */
@@ -45,6 +50,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   currentPosition = null,
   headingDeg = null,
   followMode = false,
+  moveSpeedKmH = null,
   compact = false,
   fill = false,
   onChargingStopClick,
@@ -80,6 +86,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   const lastCenterPushMsRef = useRef(0);
   const followModeRef = useRef(followMode);
   followModeRef.current = followMode;
+  const moveSpeedRef = useRef(moveSpeedKmH);
+  moveSpeedRef.current = moveSpeedKmH;
 
   const positions = useMemo(
     () => points.map((p) => [p.lat, p.lon] as [number, number]),
@@ -670,8 +678,16 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         disp.lon += (target.lon - disp.lon) * POS_LERP;
       }
 
-      // Soft heading chase toward GPS target (no big jumps).
-      if (target.heading != null && Number.isFinite(target.heading)) {
+      // Soft heading chase only while actually moving. Stationary GPS noise must not yaw the map.
+      const speedNow = moveSpeedRef.current;
+      const isMoving =
+        speedNow != null && Number.isFinite(speedNow) && speedNow >= 10;
+
+      if (
+        isMoving &&
+        target.heading != null &&
+        Number.isFinite(target.heading)
+      ) {
         const prev = displayHeadingRef.current;
         if (prev == null) {
           displayHeadingRef.current = target.heading;
@@ -684,7 +700,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
       const headingSmooth = displayHeadingRef.current;
 
-      // Course-up: arrow fixed screen-up.
+      // Course-up: arrow fixed screen-up while following.
       const arrowDeg =
         followModeRef.current && bundle.apiVersion === 3
           ? 0
@@ -722,8 +738,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           }
         }
 
-        // Continuous rate-limited camera yaw — no step jumps of 12°+.
+        // Camera yaw ONLY while moving — freeze azimuth when stopped.
         if (
+          isMoving &&
           bundle.apiVersion === 3 &&
           headingSmooth != null &&
           Number.isFinite(headingSmooth) &&
@@ -737,7 +754,6 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             const err = normalizeDeg180(headingSmooth - camH);
             const maxStep = MAX_YAW_DEG_PER_SEC * (CAMERA_TICK_MS / 1000);
             const step = Math.max(-maxStep, Math.min(maxStep, err));
-            // Skip tiny residual to avoid micro-jitter when already aligned.
             if (Math.abs(err) < 1.5) {
               camH = headingSmooth;
             } else {
@@ -746,7 +762,6 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           }
           lastCameraHeadingDegRef.current = camH;
           const az = headingDegToAzimuthRad(camH);
-          // duration ≈ tick interval → adjacent updates blend instead of fighting.
           try {
             if (typeof map.setCamera === 'function') {
               map.setCamera({ azimuth: az, duration: CAMERA_TICK_MS });

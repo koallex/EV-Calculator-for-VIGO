@@ -782,37 +782,39 @@ export const HudTab: React.FC<HudTabProps> = ({
         }
       };
 
-      if (prevPositionRef.current && smoothedSpeed >= 8) {
-        const bearing = calculateBearing(
+      // Heading only when clearly moving — standing GPS wander must not spin the map.
+      if (prevPositionRef.current && smoothedSpeed >= 12) {
+        const distKm = calculateDistance(
           prevPositionRef.current.lat,
           prevPositionRef.current.lon,
           latitude,
           longitude
         );
-        const hist = bearingHistoryRef.current;
-        hist.push(bearing);
-        if (hist.length > 5) hist.shift();
-        // Circular mean of recent bearings (more stable than last sample on turns).
-        let sinSum = 0;
-        let cosSum = 0;
-        for (const b of hist) {
-          const r = (b * Math.PI) / 180;
-          sinSum += Math.sin(r);
-          cosSum += Math.cos(r);
+        // Require ~8 m of travel between samples so noise cannot invent a bearing.
+        if (distKm >= 0.008) {
+          const bearing = calculateBearing(
+            prevPositionRef.current.lat,
+            prevPositionRef.current.lon,
+            latitude,
+            longitude
+          );
+          const hist = bearingHistoryRef.current;
+          hist.push(bearing);
+          if (hist.length > 5) hist.shift();
+          let sinSum = 0;
+          let cosSum = 0;
+          for (const b of hist) {
+            const r = (b * Math.PI) / 180;
+            sinSum += Math.sin(r);
+            cosSum += Math.cos(r);
+          }
+          const avg =
+            hist.length > 0
+              ? ((Math.atan2(sinSum / hist.length, cosSum / hist.length) * 180) / Math.PI + 360) % 360
+              : bearing;
+          publishHeadingUi(avg);
         }
-        const avg =
-          hist.length > 0
-            ? ((Math.atan2(sinSum / hist.length, cosSum / hist.length) * 180) / Math.PI + 360) % 360
-            : bearing;
-        publishHeadingUi(avg);
-      } else if (
-        heading !== null &&
-        !isNaN(heading) &&
-        heading >= 0 &&
-        smoothedSpeed >= 15
-      ) {
-        publishHeadingUi(heading);
-      } else if (smoothedSpeed < 5) {
+      } else if (smoothedSpeed < 8) {
         bearingHistoryRef.current = [];
       }
 
@@ -2126,6 +2128,7 @@ export const HudTab: React.FC<HudTabProps> = ({
           currentPosition={isTracking ? mapLivePosition : null}
           followMode={isTracking && !!mapLivePosition}
           headingDeg={isTracking ? (gpsHeading ?? lastHeadingRef.current ?? 0) : null}
+          moveSpeedKmH={isTracking ? currentSpeed : null}
           chargingStops={routeWaypoints
             .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
             .map((w) => ({
