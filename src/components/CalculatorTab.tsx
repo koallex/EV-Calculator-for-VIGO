@@ -714,7 +714,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
       // Multi-stop plan: chain stops until finish SOC is in the acceptable band
       // [FINISH_SOC_MIN … FINISH_SOC_TARGET+], without a micro-stop near B.
-      const MAX_STOPS = 4;
+      // Long routes in heavy conditions (cold, headwind, snow) can need many stops;
+      // the loop still ends as soon as projected finish SOC is acceptable, and each
+      // stop must be >= MIN_GAP_KM further along, so this is only a safety ceiling.
+      const MAX_STOPS = 10;
       const MIN_GAP_KM = 25;
       const plan: typeof candidates = [];
       let cursorKm = 0;
@@ -1795,7 +1798,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   ? 'Ищем станции…'
                   : chargingSuggestionStatus === 'ready' && (chargingStops.length > 0 || chargingSuggestion)
                     ? chargingStops.length > 1
-                      ? `${chargingStops.length} остановки`
+                      ? `${chargingStops.length} ${chargingStops.length < 5 ? 'остановки' : 'остановок'}`
                       : 'Да, одна остановка'
                     : needsCharge
                       ? chargingSuggestionStatus === 'unavailable'

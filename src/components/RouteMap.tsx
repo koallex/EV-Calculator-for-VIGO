@@ -815,7 +815,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
               <i className="route-dot route-dot-end" />Б
             </span>
             {stops.length > 0 && (
-              <span>⚡ {stops.length > 1 ? `${stops.length} остановки` : 'Зарядка'}</span>
+              <span>⚡ {stops.length > 1 ? `${stops.length} ${stops.length < 5 ? 'остановки' : 'остановок'}` : 'Зарядка'}</span>
             )}
           </div>
         )}
