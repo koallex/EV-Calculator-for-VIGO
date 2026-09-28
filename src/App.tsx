@@ -673,6 +673,7 @@ function AppInner() {
             onTrackingChange={setIsHudTracking}
             hudPlan={hudPlan}
             onHudPlanConsumed={() => setHudPlan(null)}
+            onOpenCalculator={() => setActiveTab('calculator')}
           />
         </div>
 
