@@ -1,4 +1,5 @@
 import { UserSettings, TripSession } from '../types';
+import { APP_VERSION } from '../appInfo';
 
 // Single reference point for "average/expected" Dongfeng Vigo consumption (kWh/100km), used
 // everywhere a calculation needs to compare against a baseline — driver-style scoring (both the
@@ -1548,22 +1549,52 @@ export function calculateTripData(
   };
 }
 
+/**
+ * Saves a text file. Plain <a download> on a blob: URL is unreliable inside the Android APK WebView
+ * (Capacitor) — it can silently do nothing. So: try the native share sheet with a real File first
+ * (lets the user pick Drive / Telegram / Files), and fall back to the classic download.
+ */
+export async function saveTextFile(filename: string, mime: string, text: string): Promise<'shared' | 'download'> {
+  try {
+    const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
+    if (typeof File !== 'undefined' && typeof nav.share === 'function' && typeof nav.canShare === 'function') {
+      const file = new File([text], filename, { type: mime });
+      if (nav.canShare({ files: [file] })) {
+        await nav.share({ files: [file], title: filename });
+        return 'shared';
+      }
+    }
+  } catch (err) {
+    // AbortError = user closed the share sheet; anything else → fall through to download.
+    if ((err as DOMException)?.name === 'AbortError') return 'shared';
+  }
+
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoking immediately can cancel the download on some WebViews.
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  return 'download';
+}
+
 export function exportBackupJSON(settings: UserSettings, sessions: TripSession[]): void {
   const data = {
     appName: 'Dongfeng Vigo EV Calculator',
-    version: '1.01',
+    version: APP_VERSION,
     exportDate: new Date().toISOString(),
     settings,
     sessions,
   };
-
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `dongfeng_vigo_ev_history_${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  void saveTextFile(
+    `dongfeng_vigo_ev_history_${new Date().toISOString().slice(0, 10)}.json`,
+    'application/json',
+    JSON.stringify(data, null, 2),
+  );
 }
 
 export function exportSessionsCSV(sessions: TripSession[], currency: string): void {
@@ -1600,11 +1631,9 @@ export function exportSessionsCSV(sessions: TripSession[], currency: string): vo
   ]);
 
   const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `vigo_trips_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  void saveTextFile(
+    `vigo_trips_${new Date().toISOString().slice(0, 10)}.csv`,
+    'text/csv;charset=utf-8;',
+    csvContent,
+  );
 }
