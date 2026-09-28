@@ -195,14 +195,26 @@ function AppInner() {
   // Server-side authentication. No credentials are stored in localStorage.
   // 401/403 → really signed out. Network error / timeout / 5xx → keep working with the last known
   // user (offline mode) instead of bouncing to the login screen, where signing in is impossible anyway.
-  const checkAuth = useCallback(async () => {
+  //
+  // Also polled while the tab is open: a login on another device revokes this session in Redis,
+  // and we must notice without waiting for a full page reload.
+  const checkAuth = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = !!opts?.silent;
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), AUTH_CHECK_TIMEOUT_MS);
     try {
       const response = await fetch('/api/auth/me', { credentials: 'same-origin', signal: controller.signal });
       if (response.status === 401 || response.status === 403) {
+        const wasLoggedIn = !!readCachedUser();
         clearCachedUser();
         setAuthUser(null);
+        setShowAdmin(false);
+        if (wasLoggedIn && silent) {
+          toast({
+            message: 'Сессия завершена: выполнен вход на другом устройстве.',
+            durationMs: 5000,
+          });
+        }
         return;
       }
       if (!response.ok) throw new Error('server-unavailable');
@@ -211,6 +223,8 @@ function AppInner() {
       writeCachedUser(data.user);
       offlineNotifiedRef.current = false;
     } catch {
+      // Silent background checks must not kick the user into offline toast spam.
+      if (silent) return;
       const cached = readCachedUser();
       setAuthUser((prev) => prev ?? cached);
       if (cached && !offlineNotifiedRef.current) {
@@ -219,16 +233,31 @@ function AppInner() {
       }
     } finally {
       window.clearTimeout(timer);
-      setAuthChecking(false);
+      if (!silent) setAuthChecking(false);
     }
   }, [toast]);
 
   useEffect(() => {
     void checkAuth();
-    // When the connection comes back, re-verify (this also signs out users removed by the admin).
-    const onOnline = () => { void checkAuth(); };
+    const onOnline = () => { void checkAuth({ silent: true }); };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void checkAuth({ silent: true });
+    };
+    const onFocus = () => { void checkAuth({ silent: true }); };
+    // Catch single-session revocation while the tab stays open (~every 20s).
+    const pollId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void checkAuth({ silent: true });
+    }, 20_000);
+
     window.addEventListener('online', onOnline);
-    return () => window.removeEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+      window.clearInterval(pollId);
+    };
   }, [checkAuth]);
 
   // Record an app-open event for the admin statistics. Fired once per mount
