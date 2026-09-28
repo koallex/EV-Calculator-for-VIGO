@@ -23,6 +23,7 @@ import {
   ChartNoAxesCombined,
   LocateFixed,
   PlugZap,
+  RotateCcw,
 } from 'lucide-react';
 import { UserSettings, RoadType, TripSession } from '../types';
 import { BatteryVisual } from './BatteryVisual';
@@ -1396,6 +1397,49 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       </section>
 
       {/* Mode: route planning vs. logging a completed trip — two different workflows, kept visually separate instead of one long interleaved scroll */}
+      <div className="flex items-center justify-end -mt-1 mb-0.5">
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic('light', settings.hapticFeedback);
+            setStartSoc(100);
+            setEndSoc(45);
+            setDistanceKm(50);
+            setClimateOn(true);
+            setPassengers(1);
+            setPlannedSpeedKmH(90);
+            setRoadType('city');
+            setStartMode('gps');
+            setStartAddress('');
+            setDestinationAddress('');
+            setStartPin(null);
+            setDestinationPin(null);
+            setRouteElevation(null);
+            setRouteWeather(null);
+            setRouteForecast(null);
+            setRouteError('');
+            setChargingSuggestion(null);
+            setChargingStops([]);
+            setChargingSuggestionStatus('idle');
+            setSelectedRouteStop(null);
+            setStationsFoundAlongRoute(0);
+            setRouteDetailsOpen(false);
+            setChargingSearchForced(false);
+            try { localStorage.removeItem('vigo_calculator_draft_v1'); } catch { /* ignore */ }
+          }}
+          className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold border active:scale-[0.98] ${
+            isDark
+              ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              : 'border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+          }`}
+          title="Сбросить введённые данные"
+          aria-label="Сбросить введённые данные"
+        >
+          <RotateCcw className="w-3 h-3" />
+          Сброс
+        </button>
+      </div>
+
       <LayoutGroup>
         <div className={`relative grid grid-cols-2 rounded-2xl border p-1 gap-1 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
           <button
@@ -1994,6 +2038,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                           destination: destinationAddress.trim(),
                           startSoc,
                           plannedSpeedKmH,
+                          passengers,
+                          climateOn,
                           totalDistanceKm: totalKm,
                           predictedEndSoc: endSoc,
                           energyNeededKwh: energyUsedKwh,

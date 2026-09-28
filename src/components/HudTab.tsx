@@ -123,6 +123,10 @@ export type HudRoutePlan = {
   destination: string;
   startSoc: number;
   plannedSpeedKmH?: number;
+  /** Passengers selected in Calculator — applied on pre-start. */
+  passengers?: number;
+  /** Climate toggle from Calculator — applied on pre-start. */
+  climateOn?: boolean;
   /** Full planned distance A→B (with stops on the way). */
   totalDistanceKm?: number;
   /** Calculator result: predicted SoC at destination (after last charge if any). */
@@ -465,6 +469,12 @@ export const HudTab: React.FC<HudTabProps> = ({
     }
     if (typeof hudPlan.plannedSpeedKmH === 'number' && hudPlan.plannedSpeedKmH > 0) {
       setManualAvgSpeedKmH(Math.min(150, Math.max(5, Math.round(hudPlan.plannedSpeedKmH))));
+    }
+    if (typeof hudPlan.passengers === 'number' && hudPlan.passengers >= 1) {
+      setPassengers(Math.min(5, Math.max(1, Math.round(hudPlan.passengers))));
+    }
+    if (typeof hudPlan.climateOn === 'boolean') {
+      setClimateOn(hudPlan.climateOn);
     }
     if (Array.isArray(hudPlan.waypoints) && hudPlan.waypoints.length > 0) {
       const sorted = [...hudPlan.waypoints].sort(
