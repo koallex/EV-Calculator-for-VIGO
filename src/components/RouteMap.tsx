@@ -681,19 +681,23 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
     };
 
-    // Position: catch GPS in ~0.4s. Heading: very soft (route-based target is already stable).
+    // North-up map: no camera rotation. Only pan + arrow by geographic heading.
     const POS_LERP = 0.14;
-    const HEAD_LERP = 0.03;
-    const HEAD_DEADZONE = 4;
-    /** Max camera rotation rate (°/s) — gentle, no left/right thrash. */
-    const MAX_YAW_DEG_PER_SEC = 18;
-    /** How often we nudge the map camera (ms). */
-    const CAMERA_TICK_MS = 150;
-    /** Don't touch camera when already this close to target (deg). */
-    const CAMERA_LOCK_ZONE = 6;
+    const HEAD_LERP = 0.08;
+    const HEAD_DEADZONE = 3;
     const CENTER_MS = 120;
 
-    let lastTickMs = performance.now();
+    // Ensure map stays north-up if a previous session left azimuth non-zero.
+    if (bundle.apiVersion === 3) {
+      try {
+        if (typeof map.setCamera === 'function') {
+          map.setCamera({ azimuth: 0, duration: 0 });
+        } else {
+          map.update({ camera: { azimuth: 0, duration: 0 } });
+        }
+      } catch { /* ignore */ }
+    }
+    lastCameraHeadingDegRef.current = 0;
 
     const tick = () => {
       const target = followTargetRef.current;
@@ -703,8 +707,6 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
 
       const now = performance.now();
-      const dtSec = Math.min(0.05, Math.max(0.008, (now - lastTickMs) / 1000));
-      lastTickMs = now;
 
       let disp = displayPosRef.current;
       if (!disp) {
@@ -715,10 +717,10 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         disp.lon += (target.lon - disp.lon) * POS_LERP;
       }
 
-      // Soft heading chase only while actually moving. Stationary GPS noise must not yaw the map.
+      // Soft heading for the arrow only (map does not rotate).
       const speedNow = moveSpeedRef.current;
       const isMoving =
-        speedNow != null && Number.isFinite(speedNow) && speedNow >= 10;
+        speedNow != null && Number.isFinite(speedNow) && speedNow >= 8;
 
       if (
         isMoving &&
@@ -737,16 +739,13 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
       const headingSmooth = displayHeadingRef.current;
 
-      // Course-up: arrow fixed screen-up while following.
-      const arrowDeg =
-        followModeRef.current && bundle.apiVersion === 3
-          ? 0
-          : headingSmooth ?? 0;
+      // North-up: arrow rotates by geographic heading (0 = north / up on screen).
+      const arrowDeg = headingSmooth ?? 0;
 
       ensureMarker(disp.lat, disp.lon, arrowDeg);
 
+      // Pan only — never setCamera / azimuth.
       if (followModeRef.current && Date.now() >= userNavPauseUntilRef.current) {
-        // Center on smoothed marker.
         if (now - lastCenterPushMsRef.current >= CENTER_MS) {
           lastCenterPushMsRef.current = now;
           if (bundle.apiVersion === 3) {
@@ -772,44 +771,6 @@ export const RouteMap: React.FC<RouteMapProps> = ({
                 (bundle as any).setLocation?.(disp.lat, disp.lon);
               } catch { /* ignore */ }
             }
-          }
-        }
-
-        // Camera yaw ONLY while moving — freeze when stopped or already aligned.
-        if (
-          isMoving &&
-          bundle.apiVersion === 3 &&
-          headingSmooth != null &&
-          Number.isFinite(headingSmooth) &&
-          now - lastCameraPushMsRef.current >= CAMERA_TICK_MS
-        ) {
-          lastCameraPushMsRef.current = now;
-          let camH = lastCameraHeadingDegRef.current;
-          if (camH == null) {
-            camH = headingSmooth;
-          } else {
-            const err = normalizeDeg180(headingSmooth - camH);
-            // Already facing the road — do not send micro updates (main source of L/R jitter).
-            if (Math.abs(err) < CAMERA_LOCK_ZONE) {
-              followLoopRafRef.current = requestAnimationFrame(tick);
-              return;
-            }
-            const maxStep = MAX_YAW_DEG_PER_SEC * (CAMERA_TICK_MS / 1000);
-            const step = Math.max(-maxStep, Math.min(maxStep, err));
-            camH = camH + step;
-          }
-          lastCameraHeadingDegRef.current = camH;
-          const az = headingDegToAzimuthRad(camH);
-          try {
-            if (typeof map.setCamera === 'function') {
-              map.setCamera({ azimuth: az, duration: CAMERA_TICK_MS + 50 });
-            } else {
-              map.update({ camera: { azimuth: az, duration: CAMERA_TICK_MS + 50 } });
-            }
-          } catch {
-            try {
-              map.update({ camera: { azimuth: az, duration: CAMERA_TICK_MS + 50 } });
-            } catch { /* ignore */ }
           }
         }
       }
