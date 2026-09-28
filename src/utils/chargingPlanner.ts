@@ -64,13 +64,51 @@ export const chargePowerKwAtSoc = (soc: number, connector: ChargeConnector, stat
 
 export interface ChargeSessionEstimate { minutes: number; energyKwh: number; avgPowerKw: number; }
 
-/** Integrates the charge curve in 1%-SoC steps from fromSoc to toSoc. */
+/**
+ * Base temperature correction for an en-route charging stop. The car is assumed to arrive
+ * at the charger after driving, so the battery is partially warmed "from the wheels".
+ * This is deliberately a moderate correction until real Vigo charging logs are available.
+ * Values are the extra charging time versus the warm-weather baseline.
+ */
+export const VIGO_EN_ROUTE_CHARGE_TEMP_POINTS: { temperatureC: number; timeMultiplier: number }[] = [
+  { temperatureC: -20, timeMultiplier: 1.30 },
+  { temperatureC: -15, timeMultiplier: 1.22 },
+  { temperatureC: -10, timeMultiplier: 1.15 },
+  { temperatureC: -5, timeMultiplier: 1.10 },
+  { temperatureC: 0, timeMultiplier: 1.06 },
+  { temperatureC: 5, timeMultiplier: 1.03 },
+  { temperatureC: 15, timeMultiplier: 1.00 },
+  { temperatureC: 30, timeMultiplier: 1.00 },
+  { temperatureC: 35, timeMultiplier: 1.05 },
+];
+
+export const getEnRouteChargeTemperatureMultiplier = (temperatureC?: number): number => {
+  if (!Number.isFinite(temperatureC)) return 1;
+  const t = temperatureC as number;
+  const points = VIGO_EN_ROUTE_CHARGE_TEMP_POINTS;
+  if (t <= points[0].temperatureC) return points[0].timeMultiplier;
+  if (t >= points[points.length - 1].temperatureC) return points[points.length - 1].timeMultiplier;
+  for (let i = 1; i < points.length; i++) {
+    if (t <= points[i].temperatureC) {
+      const a = points[i - 1];
+      const b = points[i];
+      const f = (t - a.temperatureC) / Math.max(0.001, b.temperatureC - a.temperatureC);
+      return a.timeMultiplier + (b.timeMultiplier - a.timeMultiplier) * f;
+    }
+  }
+  return 1;
+};
+
+/** Integrates the charge curve in 1%-SoC steps from fromSoc to toSoc.
+ * `temperatureC` is the outside temperature at the en-route charging stop.
+ */
 export const estimateChargingSession = (
   fromSoc: number,
   toSoc: number,
   batteryCapacityKwh: number,
   connector: ChargeConnector,
   stationMaxPowerKw?: number,
+  temperatureC?: number,
 ): ChargeSessionEstimate => {
   const from = Math.max(0, Math.min(100, fromSoc));
   const to = Math.max(from, Math.min(100, toSoc));
@@ -84,10 +122,12 @@ export const estimateChargingSession = (
     energyKwh += stepEnergyKwh;
     hours += powerKw > 0 ? stepEnergyKwh / powerKw : 0;
   }
+  const temperatureMultiplier = getEnRouteChargeTemperatureMultiplier(temperatureC);
+  const adjustedHours = hours * temperatureMultiplier;
   return {
-    minutes: Math.round(hours * 60),
+    minutes: Math.round(adjustedHours * 60),
     energyKwh: Number(energyKwh.toFixed(2)),
-    avgPowerKw: hours > 0 ? Number((energyKwh / hours).toFixed(1)) : 0,
+    avgPowerKw: adjustedHours > 0 ? Number((energyKwh / adjustedHours).toFixed(1)) : 0,
   };
 };
 
