@@ -88,6 +88,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   followModeRef.current = followMode;
   const moveSpeedRef = useRef(moveSpeedKmH);
   moveSpeedRef.current = moveSpeedKmH;
+  /** Route polyline for stable course-up heading (preferred over noisy GPS). */
+  const positionsRef = useRef(positions);
+  positionsRef.current = positions;
 
   const positions = useMemo(
     () => points.map((p) => [p.lat, p.lon] as [number, number]),
@@ -561,11 +564,46 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       followTargetRef.current = null;
       return;
     }
+
+    // Prefer heading along the planned route (stable). GPS bearing is only a fallback.
+    let routeHeading: number | null = null;
+    const pts = positionsRef.current;
+    if (pts.length >= 2) {
+      let bestIdx = 0;
+      let bestD = Infinity;
+      for (let i = 0; i < pts.length; i++) {
+        const dLat = pts[i][0] - currentPosition.lat;
+        const dLon = pts[i][1] - currentPosition.lon;
+        const d = dLat * dLat + dLon * dLon;
+        if (d < bestD) {
+          bestD = d;
+          bestIdx = i;
+        }
+      }
+      const a = pts[Math.min(bestIdx, pts.length - 2)];
+      const b = pts[Math.min(bestIdx + 1, pts.length - 1)];
+      if (a && b && (a[0] !== b[0] || a[1] !== b[1])) {
+        const dLat = ((b[0] - a[0]) * Math.PI) / 180;
+        const lat1 = (a[0] * Math.PI) / 180;
+        const lat2 = (b[0] * Math.PI) / 180;
+        const dLon = ((b[1] - a[1]) * Math.PI) / 180;
+        const y = Math.sin(dLon) * Math.cos(lat2);
+        const x =
+          Math.cos(lat1) * Math.sin(lat2) -
+          Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+        routeHeading = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+      }
+    }
+
+    const gpsHeading =
+      headingDeg != null && Number.isFinite(headingDeg) ? Number(headingDeg) : null;
+    // Route heading when on a planned path; otherwise GPS.
+    const heading = routeHeading ?? gpsHeading;
+
     followTargetRef.current = {
       lat: currentPosition.lat,
       lon: currentPosition.lon,
-      heading:
-        headingDeg != null && Number.isFinite(headingDeg) ? Number(headingDeg) : null,
+      heading,
     };
     if (!displayPosRef.current) {
       displayPosRef.current = {
@@ -573,14 +611,10 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         lon: currentPosition.lon,
       };
     }
-    if (
-      displayHeadingRef.current == null &&
-      headingDeg != null &&
-      Number.isFinite(headingDeg)
-    ) {
-      displayHeadingRef.current = Number(headingDeg);
+    if (displayHeadingRef.current == null && heading != null) {
+      displayHeadingRef.current = heading;
     }
-  }, [currentPosition?.lat, currentPosition?.lon, headingDeg]);
+  }, [currentPosition?.lat, currentPosition?.lon, headingDeg, positions]);
 
   // Continuous follow loop: smooth marker + course-up camera. Independent of GPS tick rate.
   useEffect(() => {
@@ -646,14 +680,16 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
     };
 
-    // Position: catch GPS in ~0.4s. Heading target: very soft chase (GPS jumps on turns).
+    // Position: catch GPS in ~0.4s. Heading: very soft (route-based target is already stable).
     const POS_LERP = 0.14;
-    const HEAD_LERP = 0.06;
-    const HEAD_DEADZONE = 3; // deg — ignore tiny GPS noise
-    /** Max camera rotation rate (°/s) — feels like nav, not a spin. */
-    const MAX_YAW_DEG_PER_SEC = 40;
+    const HEAD_LERP = 0.03;
+    const HEAD_DEADZONE = 4;
+    /** Max camera rotation rate (°/s) — gentle, no left/right thrash. */
+    const MAX_YAW_DEG_PER_SEC = 18;
     /** How often we nudge the map camera (ms). */
-    const CAMERA_TICK_MS = 100;
+    const CAMERA_TICK_MS = 150;
+    /** Don't touch camera when already this close to target (deg). */
+    const CAMERA_LOCK_ZONE = 6;
     const CENTER_MS = 120;
 
     let lastTickMs = performance.now();
@@ -738,7 +774,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           }
         }
 
-        // Camera yaw ONLY while moving — freeze azimuth when stopped.
+        // Camera yaw ONLY while moving — freeze when stopped or already aligned.
         if (
           isMoving &&
           bundle.apiVersion === 3 &&
@@ -752,25 +788,26 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             camH = headingSmooth;
           } else {
             const err = normalizeDeg180(headingSmooth - camH);
+            // Already facing the road — do not send micro updates (main source of L/R jitter).
+            if (Math.abs(err) < CAMERA_LOCK_ZONE) {
+              followLoopRafRef.current = requestAnimationFrame(tick);
+              return;
+            }
             const maxStep = MAX_YAW_DEG_PER_SEC * (CAMERA_TICK_MS / 1000);
             const step = Math.max(-maxStep, Math.min(maxStep, err));
-            if (Math.abs(err) < 1.5) {
-              camH = headingSmooth;
-            } else {
-              camH = camH + step;
-            }
+            camH = camH + step;
           }
           lastCameraHeadingDegRef.current = camH;
           const az = headingDegToAzimuthRad(camH);
           try {
             if (typeof map.setCamera === 'function') {
-              map.setCamera({ azimuth: az, duration: CAMERA_TICK_MS });
+              map.setCamera({ azimuth: az, duration: CAMERA_TICK_MS + 50 });
             } else {
-              map.update({ camera: { azimuth: az, duration: CAMERA_TICK_MS } });
+              map.update({ camera: { azimuth: az, duration: CAMERA_TICK_MS + 50 } });
             }
           } catch {
             try {
-              map.update({ camera: { azimuth: az, duration: CAMERA_TICK_MS } });
+              map.update({ camera: { azimuth: az, duration: CAMERA_TICK_MS + 50 } });
             } catch { /* ignore */ }
           }
         }
