@@ -261,6 +261,7 @@ function AppInner() {
       setAuthUser(null);
       setShowAdmin(false);
       setActiveTab('calculator');
+      serverPullDoneRef.current = false;
     }
   };
 
@@ -268,6 +269,50 @@ function AppInner() {
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
+
+  // Pull account-backed history/settings once after a successful auth (server is source of truth
+  // when it has data; otherwise keep localStorage as the offline working copy).
+  const serverPullDoneRef = useRef(false);
+  useEffect(() => {
+    if (!authUser?.login || serverPullDoneRef.current) return;
+    serverPullDoneRef.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/user/data', { credentials: 'same-origin' });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (Array.isArray(data.sessions) && data.sessions.length > 0) {
+          setSessions(data.sessions);
+        }
+        if (data.settings && typeof data.settings === 'object') {
+          setSettings((prev) => ({ ...prev, ...data.settings }));
+        }
+      } catch {
+        /* offline — local cache stays */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.login]);
+
+  // Push local data to Redis (debounced) so a new phone / cleared WebView can recover history.
+  useEffect(() => {
+    if (!authUser?.login) return;
+    const t = window.setTimeout(() => {
+      fetch('/api/user/data', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessions, settings }),
+      }).catch(() => {
+        /* best-effort */
+      });
+    }, 2500);
+    return () => window.clearTimeout(t);
+  }, [sessions, settings, authUser?.login]);
 
   // For Belarus, public ЭЗС tariffs (Malanka, Evika, BatteryFly, Zaryadka) are no longer
   // manually edited in Settings — they're taken automatically from the EVRace tariffs feed
@@ -558,7 +603,7 @@ function AppInner() {
           className={isLandscape ? 'h-full' : undefined}
           style={{ display: activeTab === 'charging' ? 'block' : 'none' }}
         >
-          <ChargingTab settings={settings} />
+          <ChargingTab settings={settings} sessions={sessions} />
         </div>
 
         <div
@@ -573,6 +618,10 @@ function AppInner() {
             onUpdateSettings={setSettings}
             onResetData={handleResetData}
             onImportBackup={handleImportBackup}
+            currentUser={authUser ?? undefined}
+            onOpenAdmin={() => setShowAdmin(true)}
+            onLogout={handleLogout}
+            onOpenAbout={() => setShowAbout(true)}
           />
         </div>
         </>
