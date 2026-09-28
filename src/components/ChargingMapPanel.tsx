@@ -25,8 +25,6 @@ import { triggerHaptic } from '../utils/haptics';
 import { findNearbyFreeCcsChargers, type FreeChargerResult } from '../services/nearbyFreeCharging';
 import { useEvraceTariffs, matchEvraceTariff, type EvraceTariff } from '../hooks/useEvraceTariffs';
 
-type ConnFilter = 'ccs2' | 'gbt' | 'type2';
-
 /** Port group: same connector + same power on a location */
 type PortGroup = {
   connector: string;
@@ -357,18 +355,9 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     [settings.vehicleProfileId, settings.connectorOverride],
   );
 
-  const [connFilters, setConnFilters] = useState<ConnFilter[]>(() => {
-    const init: ConnFilter[] = [];
-    if (profileConnectors.includes('ccs2')) init.push('ccs2');
-    if (profileConnectors.includes('gbt')) init.push('gbt');
-    if (profileConnectors.includes('type2')) init.push('type2');
-    return init.length ? init : ['ccs2'];
-  });
   const [onlyFree, setOnlyFree] = useState(false);
   /** Empty = all operators */
   const [operatorFilter, setOperatorFilter] = useState<string[]>([]);
-  /** Max DC day price BYN; null = any */
-  const [maxPrice, setMaxPrice] = useState<number | null>(null);
   /** Min station power kW; null = any */
   const [minPowerKw, setMinPowerKw] = useState<number | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -397,15 +386,6 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   onlyFreeRef.current = onlyFree;
   const refreshLiveRef = useRef<(s: MapStation) => void>(() => {});
 
-  // Sync filters when profile changes
-  useEffect(() => {
-    const next: ConnFilter[] = [];
-    if (profileConnectors.includes('ccs2')) next.push('ccs2');
-    if (profileConnectors.includes('gbt')) next.push('gbt');
-    if (profileConnectors.includes('type2')) next.push('type2');
-    if (next.length) setConnFilters(next);
-  }, [profileConnectors.join(',')]);
-
   const tariff = selected
     ? tariffFromEvrace(
         selected.operator,
@@ -413,26 +393,6 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         selected.hasCcs2 || selected.hasGbt,
       )
     : null;
-
-  const toggleFilter = (f: ConnFilter) => {
-    setConnFilters((prev) => {
-      if (prev.includes(f)) {
-        const next = prev.filter((x) => x !== f);
-        return next.length ? next : prev; // keep at least one
-      }
-      return [...prev, f];
-    });
-    triggerHaptic('light', settings.hapticFeedback);
-  };
-
-  const stationDcDayRate = useCallback(
-    (s: MapStation): number | null => {
-      const t = matchEvraceTariff(s.operator, evraceTariffs);
-      if (!t) return null;
-      return t.dcDay ?? t.acDay ?? null;
-    },
-    [evraceTariffs],
-  );
 
   const stationMaxPowerKw = useCallback((s: MapStation): number => {
     const fromGroups = (s.portGroups || [])
@@ -449,15 +409,11 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const matchesFilters = useCallback(
     (s: MapStation) => {
       const typeOk =
-        (connFilters.includes('ccs2') && s.hasCcs2) ||
-        (connFilters.includes('gbt') && s.hasGbt) ||
-        (connFilters.includes('type2') && s.hasType2);
+        (profileConnectors.includes('ccs2') && s.hasCcs2) ||
+        (profileConnectors.includes('gbt') && s.hasGbt) ||
+        (profileConnectors.includes('type2') && s.hasType2);
       if (!typeOk) return false;
       if (operatorFilter.length && !operatorFilter.includes(s.operatorKey)) return false;
-      if (maxPrice != null) {
-        const rate = stationDcDayRate(s);
-        if (rate == null || rate > maxPrice) return false;
-      }
       if (minPowerKw != null) {
         const pw = stationMaxPowerKw(s);
         // Stations without power metadata stay visible only when filter is off.
@@ -466,14 +422,14 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       if (onlyFree) {
         if (!s.liveChecked) return false;
         const free =
-          (connFilters.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
-          (connFilters.includes('gbt') && (s.freeGbt ?? 0) > 0) ||
-          (connFilters.includes('type2') && (s.freeType2 ?? 0) > 0);
+          (profileConnectors.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
+          (profileConnectors.includes('gbt') && (s.freeGbt ?? 0) > 0) ||
+          (profileConnectors.includes('type2') && (s.freeType2 ?? 0) > 0);
         return free;
       }
       return true;
     },
-    [connFilters, onlyFree, operatorFilter, maxPrice, minPowerKw, stationDcDayRate, stationMaxPowerKw],
+    [profileConnectors, onlyFree, operatorFilter, minPowerKw, stationMaxPowerKw],
   );
 
   const operatorsInView = useMemo(() => {
@@ -848,9 +804,9 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       let border = '#0f172a';
       if (s.liveChecked) {
         const free =
-          (connFilters.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
-          (connFilters.includes('gbt') && (s.freeGbt ?? 0) > 0) ||
-          (connFilters.includes('type2') && (s.freeType2 ?? 0) > 0);
+          (profileConnectors.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
+          (profileConnectors.includes('gbt') && (s.freeGbt ?? 0) > 0) ||
+          (profileConnectors.includes('type2') && (s.freeType2 ?? 0) > 0);
         border = free ? '#ecfdf5' : '#450a0a';
       }
 
@@ -883,7 +839,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         markersLayerRef.current.push(marker);
       }
     }
-  }, [stations, matchesFilters, connFilters, settings.hapticFeedback]);
+  }, [stations, matchesFilters, profileConnectors, settings.hapticFeedback]);
 
   useEffect(() => {
     bundleRef.current?.setTheme(isDark);
@@ -1002,7 +958,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       );
       const { results } = await findNearbyFreeCcsChargers(
         { lat, lon },
-        { radiusKm: 40, limit: 10, vehicleConnectors, connectorFilters: connFilters },
+        { radiusKm: 40, limit: 10, vehicleConnectors },
       );
       setNearestFreeList(results);
       if (!results.length) {
@@ -1133,16 +1089,6 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
             <Filter className="h-3.5 w-3.5" />
             Фильтры
           </button>
-          {connFilters.map((f) => (
-            <span
-              key={f}
-              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                isDark ? 'bg-cyan-950 text-cyan-300' : 'bg-cyan-50 text-cyan-700'
-              }`}
-            >
-              {f === 'ccs2' ? 'CCS' : f === 'gbt' ? 'GB/T' : 'Type2'}
-            </span>
-          ))}
           {onlyFree && (
             <span className="rounded-full bg-emerald-600/90 px-2 py-0.5 text-[10px] font-semibold text-white">
               свободные
@@ -1270,32 +1216,9 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
             isDark ? 'bg-slate-950/95 border border-slate-700' : 'bg-white/95 border border-slate-200 shadow-lg'
           } left-2 right-2 top-14 landscape:left-2 landscape:right-auto landscape:w-[min(20rem,42vw)] landscape:top-14`}
         >
-          <p className={`mb-2 text-[11px] font-bold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            Разъём
-          </p>
-          <div className="mb-3 flex flex-wrap gap-2">
-            {(
-              [
-                ['ccs2', 'CCS2'],
-                ['gbt', 'GB/T'],
-                ['type2', 'Type2'],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => toggleFilter(id)}
-                className={`rounded-full px-3 py-1.5 text-[12px] font-semibold ${
-                  connFilters.includes(id)
-                    ? 'bg-cyan-600 text-white'
-                    : isDark
-                      ? 'bg-slate-800 text-slate-300'
-                      : 'bg-slate-100 text-slate-600'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className={`mb-3 rounded-xl px-3 py-2 text-[11px] ${isDark ? 'bg-slate-900 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+            <span className="font-semibold">Разъёмы:</span>{' '}
+            {profileConnectors.map((c) => c === 'ccs2' ? 'CCS2' : c === 'gbt' ? 'GB/T' : 'Type2').join(' + ') || 'из профиля авто'}
           </div>
 
           <p className={`mb-1.5 text-[11px] font-bold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -1402,39 +1325,8 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
             })}
           </div>
 
-          <p className={`mt-3 text-[10px] font-bold uppercase tracking-wide ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-            Макс. тариф DC день (BYN/кВт⋅ч)
-          </p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {[
-              { v: null as number | null, label: 'Любая' },
-              { v: 0.45, label: '≤ 0,45' },
-              { v: 0.55, label: '≤ 0,55' },
-              { v: 0.65, label: '≤ 0,65' },
-              { v: 0.8, label: '≤ 0,80' },
-            ].map((opt) => (
-              <button
-                key={String(opt.v)}
-                type="button"
-                onClick={() => {
-                  setMaxPrice(opt.v);
-                  triggerHaptic('light', settings.hapticFeedback);
-                }}
-                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                  maxPrice === opt.v
-                    ? 'bg-cyan-600 text-white'
-                    : isDark
-                      ? 'bg-slate-800 text-slate-300'
-                      : 'bg-slate-100 text-slate-600'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
           <p className={`mt-2 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-            Порты — из профиля авто. Цвет маркера = оператор.
+            Разъёмы — из профиля авто. Цвет маркера = оператор.
             {minPowerKw != null ? ` · Мощность ≥ ${minPowerKw} кВт` : ''}
           </p>
         </div>
