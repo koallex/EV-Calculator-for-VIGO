@@ -10,12 +10,16 @@ function dataKey(login: string) {
   return `vigo:userdata:${login.trim().toLowerCase()}`;
 }
 
+function fingerprint(s: any) {
+  return `${s?.date}|${s?.distanceKm}|${s?.startSoc}|${s?.endSoc}|${s?.title || ''}`;
+}
+
 /**
  * Authenticated user data (sessions + settings) stored in Redis.
  * LocalStorage remains the offline cache; this is the durable account copy.
  *
  * GET  → { sessions, settings, updatedAt }
- * PUT  → body { sessions?, settings? } merges into stored blob
+ * PUT  → body { sessions?, settings? } merges sessions by id/fingerprint
  */
 export default async function handler(req: any, res: any) {
   if (req.method !== 'GET' && req.method !== 'PUT') {
@@ -41,7 +45,7 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // PUT
+    // PUT — merge sessions by id (and fingerprint for id-less rows).
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
     const prevRaw = await redis.get(key);
     const prev =
@@ -51,14 +55,43 @@ export default async function handler(req: any, res: any) {
           ? JSON.parse(prevRaw)
           : prevRaw;
 
+    let sessions = prev.sessions ?? null;
+    if (Array.isArray(body.sessions)) {
+      const byId = new Map<string, any>();
+      const prints = new Set<string>();
+      for (const s of Array.isArray(prev.sessions) ? prev.sessions : []) {
+        if (s?.id) byId.set(String(s.id), s);
+        prints.add(fingerprint(s));
+      }
+      for (const s of body.sessions) {
+        if (!s || typeof s !== 'object') continue;
+        if (s.id && byId.has(String(s.id))) {
+          const old = byId.get(String(s.id));
+          const newer =
+            (s.createdAt || 0) >= (old?.createdAt || 0) ? { ...old, ...s } : { ...s, ...old };
+          byId.set(String(s.id), newer);
+        } else if (s.id) {
+          byId.set(String(s.id), s);
+          prints.add(fingerprint(s));
+        } else if (!prints.has(fingerprint(s))) {
+          byId.set(`srv-${Date.now()}-${byId.size}`, { ...s, id: `srv-${Date.now()}-${byId.size}` });
+          prints.add(fingerprint(s));
+        }
+      }
+      sessions = Array.from(byId.values()).sort(
+        (a, b) => (b?.createdAt || 0) - (a?.createdAt || 0),
+      );
+    }
+
     const next = {
-      sessions: Array.isArray(body.sessions) ? body.sessions : prev.sessions ?? null,
+      sessions,
       settings:
-        body.settings && typeof body.settings === 'object' ? body.settings : prev.settings ?? null,
+        body.settings && typeof body.settings === 'object'
+          ? { ...(prev.settings || {}), ...body.settings }
+          : prev.settings ?? null,
       updatedAt: new Date().toISOString(),
     };
 
-    // Soft size guard — history is the bulk of the payload.
     const encoded = JSON.stringify(next);
     if (encoded.length > 1_500_000) {
       return res.status(413).json({ error: 'Слишком большой объём данных.' });
