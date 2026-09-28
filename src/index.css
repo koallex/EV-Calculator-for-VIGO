@@ -453,6 +453,25 @@ html {
     padding-bottom: var(--ui-btn-py) !important;
   }
 
+  /*
+   * Don't stretch primary action buttons edge-to-edge in landscape.
+   * Keep full width in portrait. Skip list rows (text-left / justify-between).
+   */
+  button.w-full.rounded-xl:not(.text-left):not([class*="justify-between"]),
+  button.w-full.rounded-2xl:not(.text-left):not([class*="justify-between"]),
+  button.w-full.rounded-lg:not(.text-left):not([class*="justify-between"]),
+  a.block.w-full.rounded-xl,
+  a.block.w-full.rounded-lg,
+  a.w-full.rounded-xl.text-center {
+    width: fit-content !important;
+    min-width: min(14rem, 100%);
+    max-width: min(20rem, 100%);
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1.5rem !important;
+    padding-right: 1.5rem !important;
+  }
+
   #calculator-tab-container input,
   #settings-tab-container input,
   #history-tab-container input,
