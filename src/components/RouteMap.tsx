@@ -88,14 +88,15 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   followModeRef.current = followMode;
   const moveSpeedRef = useRef(moveSpeedKmH);
   moveSpeedRef.current = moveSpeedKmH;
-  /** Route polyline for stable course-up heading (preferred over noisy GPS). */
-  const positionsRef = useRef(positions);
-  positionsRef.current = positions;
 
   const positions = useMemo(
     () => points.map((p) => [p.lat, p.lon] as [number, number]),
     [points],
   );
+  /** Route polyline for stable course-up heading (preferred over noisy GPS). */
+  const positionsRef = useRef(positions);
+  positionsRef.current = positions;
+
   const start = positions[0];
   const end = positions[positions.length - 1];
   const stops =
