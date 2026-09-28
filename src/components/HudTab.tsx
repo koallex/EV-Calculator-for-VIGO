@@ -34,6 +34,7 @@ import {
   PlugZap,
   X,
   SkipForward,
+  Calculator,
 } from 'lucide-react';
 import { UserSettings, TripSession } from '../types';
 import {
@@ -145,6 +146,8 @@ interface HudTabProps {
   /** Plan transferred from Calculator — prefill destination + start SoC */
   hudPlan?: HudRoutePlan | null;
   onHudPlanConsumed?: () => void;
+  /** Open Calculator tab to plan a route (empty HUD CTA). */
+  onOpenCalculator?: () => void;
 }
 
 interface GpsWeather {
@@ -189,6 +192,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   onTrackingChange,
   hudPlan,
   onHudPlanConsumed,
+  onOpenCalculator,
 }) => {
   // Tracking state
   const [isTracking, setIsTracking] = useState(false);
@@ -2186,25 +2190,18 @@ export const HudTab: React.FC<HudTabProps> = ({
   // Shared fullscreen map layer (pre-start + driving)
   // Prefer planned route geometry; if the user started tracking without a plan, still show
   // a map centered on the live (or last) GPS fix so portrait HUD is never a blank panel.
+  // Empty HUD / free-track: center on live GPS or Minsk so the map is never a blank panel.
+  const MINSK_FALLBACK = { lat: 53.9006, lon: 27.5590 };
   const mapPointsForHud =
     hudRoutePoints.length >= 2
       ? hudRoutePoints
-      : mapLivePosition
-        ? [
-            {
-              lat: mapLivePosition.lat,
-              lon: mapLivePosition.lon,
-              elevationM: 0,
-              distanceFromStartKm: 0,
-            },
-            {
-              lat: mapLivePosition.lat + 0.0008,
-              lon: mapLivePosition.lon + 0.0008,
-              elevationM: 0,
-              distanceFromStartKm: 0.1,
-            },
-          ]
-        : [];
+      : (() => {
+          const c = mapLivePosition || MINSK_FALLBACK;
+          return [
+            { lat: c.lat, lon: c.lon, elevationM: 0, distanceFromStartKm: 0 },
+            { lat: c.lat + 0.0008, lon: c.lon + 0.0008, elevationM: 0, distanceFromStartKm: 0.1 },
+          ];
+        })();
 
 
   // Live free slots for the EVSE card opened from the map
@@ -3102,813 +3099,105 @@ export const HudTab: React.FC<HudTabProps> = ({
     );
   }
 
+  // ── Empty HUD (no plan from Calculator): map-first, same language as pre-start ──
   return (
     <div
       id="hud-tab-container"
-      className={`relative flex flex-col overflow-hidden select-none transition-all duration-200 ${
+      className={`relative overflow-hidden select-none ${
         isLandscape
-          ? 'h-[100dvh] min-h-0 max-h-none rounded-none'
+          ? 'h-[100dvh] min-h-0 max-h-none rounded-none border-0'
           : 'h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] rounded-3xl'
-      } ${
-        isDark
-          ? 'bg-slate-950 text-white border border-slate-800/90 shadow-2xl'
-          : 'bg-white text-slate-900 border border-slate-200 shadow-xl'
-      }`}
+      } ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'}`}
     >
-      {/* Scrollable body — map and cards live here; STOP stays in sticky footer */}
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-3 pb-2 [-webkit-overflow-scrolling:touch]">
-      {/* 1. Status */}
-      <div
-        className={`flex items-center justify-between gap-2 border-b pb-1.5 shrink-0 ${
-          isDark ? 'border-slate-800/80' : 'border-slate-200'
-        }`}
-      >
-        <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-          <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] border shrink-0 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
-            <span className={`w-2 h-2 rounded-full ${gpsAccuracy !== null && gpsAccuracy <= 15 ? 'bg-cyan-400 animate-pulse' : gpsAccuracy !== null ? 'bg-amber-400' : 'bg-rose-500'}`} />
-            <span className={`font-mono font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-              {gpsAccuracy !== null ? `±${gpsAccuracy}м` : 'GPS…'}
-            </span>
-          </div>
-          <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-mono border shrink-0 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
-            <Thermometer className="w-3.5 h-3.5 text-cyan-500" />
-            <span className={isDark ? 'text-cyan-300' : 'text-cyan-700'}>
-              {weather.isLoaded ? `${weather.temperature > 0 ? '+' : ''}${weather.temperature}°` : '—'}
-            </span>
-          </div>
-          <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-mono border shrink-0 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-slate-100 border-slate-200'}`}>
-            <Wind className="w-3.5 h-3.5 text-sky-500" />
-            <span className={isDark ? 'text-sky-300' : 'text-sky-700'}>
-              {weather.isLoaded ? `${windSpeedMs}` : '—'}
-            </span>
-            <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>м/с</span>
-          </div>
-          {isTracking && (
-            <span className="text-[11px] font-bold text-cyan-400 shrink-0">● LIVE</span>
-          )}
-        </div>
-        {hudRoutePoints.length >= 2 && (
-          <button
-            type="button"
-            onClick={() => {
-              setHudMapOpen((v) => !v);
-              triggerHaptic('light', settings.hapticFeedback);
-            }}
-            title={hudMapOpen ? 'Скрыть карту' : 'Показать карту'}
-            className={`p-2 rounded-xl border shrink-0 ${
-              hudMapOpen
-                ? 'bg-cyan-600 text-white border-cyan-500'
-                : isDark
-                  ? 'bg-slate-800 text-slate-300 border-slate-700'
-                  : 'bg-slate-100 text-slate-700 border-slate-300'
-            }`}
-          >
-            <Navigation className="w-4 h-4" />
-          </button>
-        )}
-      </div>
+      {mapLayer}
+      {hudEvseCard}
+      {completedTripModal}
 
-      {/* 2. Speed */}
-      <div className="flex items-end justify-center gap-2.5 shrink-0 leading-none py-0.5">
-        <span
-          className={`text-6xl font-black font-mono tracking-tighter tabular-nums ${
-            isDark
-              ? 'text-transparent bg-clip-text bg-gradient-to-b from-white via-slate-100 to-slate-300'
-              : 'text-slate-900'
-          }`}
-        >
-          {currentSpeed}
-        </span>
-        <div className="flex flex-col items-start pb-1">
-          <span className={`text-sm font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>км/ч</span>
-          {gpsHeading !== null && (
-            <span className={`text-[11px] font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-              {gpsHeading}°
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* 3. Start SOC */}
       <div
-        className={`rounded-2xl border px-3.5 py-2.5 shrink-0 ${
-          isDark ? 'bg-slate-900/95 border-slate-700/80' : 'bg-white border-slate-200 shadow-xs'
-        }`}
+        className="pointer-events-none absolute inset-x-0 z-20 px-2.5 pt-2 flex justify-center"
+        style={{ bottom: 'calc(4.75rem + env(safe-area-inset-bottom, 0px))' }}
       >
-        <div className="flex items-center justify-between gap-3">
+        <div className={`pointer-events-auto w-full max-w-md sm:max-w-sm landscape:max-w-[22rem] rounded-2xl border p-3.5 space-y-3 shadow-xl ${glass}`}>
           <div className="min-w-0">
-            <span className={`block text-[11px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              {isTracking ? 'SOC сейчас' : 'SOC на старте'}
-            </span>
-            <span
-              className={`font-mono font-black text-3xl leading-none tabular-nums ${
-                (isTracking ? liveDynamicSoc : startTripSoc) < 20
-                  ? 'text-rose-500'
-                  : (isTracking ? liveDynamicSoc : startTripSoc) < 40
-                  ? 'text-amber-500'
-                  : isDark
-                  ? 'text-cyan-400'
-                  : 'text-cyan-600'
+            <div className="text-[10px] font-bold uppercase tracking-wider opacity-60">Поездка</div>
+            <div className={`text-[15px] font-bold leading-snug ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              Нет маршрута из калькулятора
+            </div>
+            <p className={`mt-1 text-[11px] leading-snug ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              Спланируйте путь в Калькуляторе — с прогнозом SoC и зарядками — или просто запишите поездку без плана.
+            </p>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-bold opacity-70">SOC на старте</span>
+              <span className="text-sm font-black font-mono tabular-nums">{startTripSoc}%</span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={100}
+              value={startTripSoc}
+              onChange={(e) => setStartTripSoc(Number(e.target.value))}
+              className="w-full accent-cyan-500 h-1.5"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 rounded-xl border border-white/10 px-1.5 py-1">
+              <button type="button" onClick={() => setPassengers((p) => Math.max(1, p - 1))} className="w-8 h-8 rounded-lg font-bold text-sm">−</button>
+              <span className="text-[12px] font-bold min-w-[3rem] text-center">👥 {passengers}</span>
+              <button type="button" onClick={() => setPassengers((p) => Math.min(5, p + 1))} className="w-8 h-8 rounded-lg font-bold text-sm">+</button>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('light', settings.hapticFeedback);
+                setClimateOn((v) => !v);
+              }}
+              className={`rounded-xl border border-white/10 px-3 py-2 text-[12px] font-bold ${
+                climateOn ? 'ring-1 ring-cyan-400/50' : 'opacity-70'
               }`}
             >
-              {Math.round(isTracking ? liveDynamicSoc : startTripSoc)}%
-            </span>
+              {climateOn ? 'Климат вкл' : 'Климат выкл'}
+            </button>
           </div>
-          {!isTracking ? (
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => setStartTripSoc((prev) => Math.max(1, prev - 5))}
-                className={`w-10 h-10 rounded-xl border text-lg font-bold active:scale-95 ${
-                  isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
-                }`}
-              >
-                −
-              </button>
-              <button
-                type="button"
-                onClick={() => setStartTripSoc((prev) => Math.min(100, prev + 5))}
-                className={`w-10 h-10 rounded-xl border text-lg font-bold active:scale-95 ${
-                  isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
-                }`}
-              >
-                +
-              </button>
-            </div>
-          ) : (
-            <div className={`w-28 h-2.5 rounded-full overflow-hidden ${isDark ? 'bg-slate-950' : 'bg-slate-200'}`}>
-              <div
-                className={`h-full transition-all duration-300 ${
-                  liveDynamicSoc < 20 ? 'bg-rose-500' : liveDynamicSoc < 40 ? 'bg-amber-500' : 'bg-cyan-500'
-                }`}
-                style={{ width: `${Math.min(100, Math.max(0, liveDynamicSoc))}%` }}
-              />
-            </div>
-          )}
-        </div>
-        {!isTracking && (
-          <input
-            type="range"
-            min={1}
-            max={100}
-            step={1}
-            value={startTripSoc}
-            onChange={(e) => setStartTripSoc(Number(e.target.value))}
-            className="w-full h-2 mt-2 accent-cyan-500 cursor-pointer touch-pan-x"
-            aria-label="SOC на старте поездки"
-          />
-        )}
-      </div>
 
-      {/* Route map — separate compact block (collapsed by default on first load after plan) */}
-      {hudRoutePoints.length >= 2 && (
-        <div
-          className={`rounded-2xl border overflow-hidden shrink-0 ${
-            isDark ? 'bg-slate-900/95 border-slate-700/80' : 'bg-white border-slate-200'
-          }`}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setHudMapOpen((v) => !v);
-              triggerHaptic('light', settings.hapticFeedback);
-            }}
-            className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left ${
-              isDark ? 'text-slate-200' : 'text-slate-800'
-            }`}
-          >
-            <span className="flex items-center gap-2 text-[12px] font-bold">
-              <Navigation className={`w-4 h-4 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
-              Карта маршрута
-              {routeWaypoints.filter((w) => w.kind === 'charge').length > 0
-                ? ` · ${routeWaypoints.filter((w) => w.kind === 'charge').length} ⚡`
-                : ''}
-            </span>
-            <ChevronDown
-              className={`w-4 h-4 shrink-0 transition-transform ${hudMapOpen ? 'rotate-180' : ''} ${
-                isDark ? 'text-slate-500' : 'text-slate-400'
-              }`}
-            />
-          </button>
-          {hudMapOpen && (
-            <RouteMap
-              points={hudRoutePoints}
-              isDark={isDark}
-              compact
-              currentPosition={isTracking ? mapLivePosition : null}
-              chargingStops={routeWaypoints
-                .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
-                .map((w) => ({
-                  id: w.stationId || `${w.lat},${w.lon}`,
-                  lat: w.lat!,
-                  lon: w.lon!,
-                  name: w.name,
-                  address: w.address,
-                }))}
-              onChargingStopClick={(stop) => {
-                triggerHaptic('light', settings.hapticFeedback);
-                const match = routeWaypoints.find(
-                  (w) =>
-                    w.kind === 'charge' &&
-                    ((w.stationId && w.stationId === stop.id) ||
-                      (Math.abs((w.lat ?? 0) - stop.lat) < 1e-5 && Math.abs((w.lon ?? 0) - stop.lon) < 1e-5)),
-                );
-                setSelectedMapStop(
-                  match || {
-                    kind: 'charge',
-                    name: stop.name,
-                    distanceAlongRouteKm: 0,
-                    lat: stop.lat,
-                    lon: stop.lon,
-                    address: stop.address,
-                    stationId: stop.id,
-                  },
-                );
-              }}
-            />
-          )}
-        </div>
-      )}
-
-      {/* Multi-stop plan from Calculator: next charge / next leg */}
-      {activeWaypoint && (
-        <div
-          className={`rounded-2xl border px-3.5 py-2.5 shrink-0 ${
-            isDark ? 'bg-slate-900/95 border-amber-800/50' : 'bg-amber-50/70 border-amber-200'
-          }`}
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              {activeWaypoint.kind === 'charge' ? (
-                <PlugZap className={`w-5 h-5 shrink-0 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
-              ) : (
-                <Flag className={`w-5 h-5 shrink-0 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
-              )}
-              <div className="min-w-0">
-                <span className={`block text-[11px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                  {activeWaypoint.kind === 'charge' ? 'До зарядки' : 'До финиша'}
-                  {routeWaypoints.length > 1
-                    ? ` · ${Math.min(activeWaypointIndex + 1, routeWaypoints.length)}/${routeWaypoints.length}`
-                    : ''}
-                </span>
-                <span className={`block text-[12px] font-medium truncate ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                  {activeWaypoint.name}
-                  {activeWaypoint.connectorLabel ? ` · ${activeWaypoint.connectorLabel}` : ''}
-                </span>
-              </div>
-            </div>
-            <div className="text-right shrink-0">
-              {liveSocAtActiveWaypoint != null ? (
-                <span
-                  className={`font-mono font-black text-3xl leading-none tabular-nums ${
-                    liveSocAtActiveWaypoint < 10
-                      ? 'text-rose-500'
-                      : liveSocAtActiveWaypoint < 20
-                        ? 'text-amber-500'
-                        : isDark
-                          ? 'text-amber-300'
-                          : 'text-amber-700'
-                  }`}
-                >
-                  {Math.round(liveSocAtActiveWaypoint)}%
-                </span>
-              ) : (
-                <span className={`text-2xl font-bold tabular-nums ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>—</span>
-              )}
-              {remainingKmToActiveWaypoint != null && (
-                <span className={`block text-[11px] font-mono mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                  {remainingKmToActiveWaypoint < 1
-                    ? `${Math.round(remainingKmToActiveWaypoint * 1000)} м`
-                    : `${remainingKmToActiveWaypoint.toFixed(1)} км`}
-                </span>
-              )}
-            </div>
-          </div>
-          {activeWaypoint.kind === 'charge' && (
-            <p className={`mt-1.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-              План: приезд ~{activeWaypoint.plannedArrivalSoc != null ? Math.round(activeWaypoint.plannedArrivalSoc) : '—'}%
-              {activeWaypoint.chargeTargetSoc != null
-                ? ` → заряд до ~${Math.round(activeWaypoint.chargeTargetSoc)}%`
-                : ''}
-            </p>
-          )}
-          <div className="mt-2 flex gap-2">
-            {activeWaypointIndex < routeWaypoints.length - 1 && (
+          <div className="flex flex-col gap-2">
+            {onOpenCalculator && (
               <button
                 type="button"
                 onClick={() => {
-                  setActiveWaypointIndex((i) => Math.min(i + 1, routeWaypoints.length - 1));
                   triggerHaptic('light', settings.hapticFeedback);
+                  onOpenCalculator();
                 }}
-                className={`flex-1 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold flex items-center justify-center gap-1 border ${
+                className={`w-full rounded-xl py-3 text-[13px] font-bold flex items-center justify-center gap-2 border active:scale-[0.98] ${
                   isDark
-                    ? 'bg-slate-950 border-slate-700 text-slate-300'
-                    : 'bg-white border-slate-200 text-slate-700'
+                    ? 'bg-slate-900/80 border-cyan-700/50 text-cyan-300 hover:bg-slate-900'
+                    : 'bg-white border-cyan-300 text-cyan-800 hover:bg-cyan-50'
                 }`}
               >
-                <SkipForward className="w-3.5 h-3.5" />
-                Следующая точка
+                <Calculator className="w-4 h-4" />
+                Спланировать в Калькуляторе
               </button>
             )}
             <button
               type="button"
               onClick={() => {
-                setRouteWaypoints([]);
-                setActiveWaypointIndex(0);
-                setRouteTotalDistanceKm(null);
-                setHudRoutePoints([]);
-                triggerHaptic('light', settings.hapticFeedback);
+                triggerHaptic('success', settings.hapticFeedback);
+                handleStartTracking();
               }}
-              className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold border ${
-                isDark
-                  ? 'bg-slate-950 border-slate-700 text-slate-400'
-                  : 'bg-white border-slate-200 text-slate-500'
-              }`}
+              className="w-full rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-black text-[14px] py-3.5 flex items-center justify-center gap-2 active:scale-[0.98] shadow-lg shadow-cyan-900/30"
             >
-              Сбросить план
+              <Play className="w-4 h-4 fill-current" />
+              Старт без маршрута
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* 4. Destination + result details */}
-      <div
-        className={`rounded-2xl border px-3.5 py-2.5 shrink-0 ${
-          isDark ? 'bg-slate-900/95 border-cyan-900/50' : 'bg-cyan-50/60 border-cyan-200'
-        }`}
-      >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Flag className={`w-5 h-5 shrink-0 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
-            <div className="min-w-0">
-              <span className={`block text-[11px] font-extrabold uppercase tracking-wider ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                SOC на финише
-              </span>
-              <span className={`block text-[12px] font-medium truncate ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                {destinationResult?.name || 'Укажите адрес назначения'}
-              </span>
-            </div>
-          </div>
-          {destinationResult && livePredictedSoc != null ? (
-            <RangeGauge
-              percent={livePredictedSoc}
-              size={76}
-              strokeWidth={7}
-              isDark={isDark}
-              subValue={isTracking ? `сейчас ${Math.round(liveDynamicSoc)}%` : undefined}
-            />
-          ) : (
-            <span className={`text-2xl font-bold tabular-nums ${isDark ? 'text-slate-600' : 'text-slate-300'}`}>—</span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-1.5 mt-2">
-          <div className="relative flex-1 min-w-0">
-            <MapPin className={`absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
-            <input
-              type="text"
-              inputMode="text"
-              value={destinationQuery}
-              onChange={(e) => {
-                const next = e.target.value;
-                setDestinationQuery(next);
-                // Clear cached geo when the user edits the destination so the next
-                // calculation (manual or live) will re-geocode the new address.
-                if (cachedDestRef.current) {
-                  cachedDestRef.current = null;
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleCalculateDestination();
-              }}
-              placeholder="Город, улица, дом…"
-              className={`w-full pl-9 pr-3 py-2.5 rounded-xl border text-[14px] ${
-                isDark
-                  ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600'
-                  : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'
-              }`}
-            />
-          </div>
-          {!isTracking ? (
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => void handleCalculateDestination()}
-                disabled={destinationBusy || !destinationQuery.trim()}
-                className={`px-3 py-2.5 rounded-xl border text-[12px] font-bold disabled:opacity-50 ${
-                  isDark ? 'bg-slate-950 border-slate-700 text-slate-200' : 'bg-white border-slate-300 text-slate-700'
-                }`}
-              >
-                {destinationBusy ? '…' : 'Расчёт'}
-              </button>
-              <button
-                type="button"
-                onClick={handleStartWithLiveForecast}
-                disabled={destinationBusy}
-                className="px-3.5 py-2.5 rounded-xl bg-cyan-600 active:bg-cyan-500 text-white text-[12px] font-black disabled:opacity-60"
-              >
-                СТАРТ
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void handleCalculateDestination()}
-              disabled={destinationBusy || !destinationQuery.trim()}
-              className={`px-3.5 py-2.5 rounded-xl border text-[12px] font-bold shrink-0 disabled:opacity-50 ${
-                isDark ? 'bg-slate-950 border-cyan-800 text-cyan-300' : 'bg-white border-cyan-300 text-cyan-700'
-              }`}
-            >
-              {destinationBusy ? '…' : 'Обновить'}
-            </button>
-          )}
-        </div>
-
-        {/* Expanded API result block */}
-        {destinationResult && (
-          <div
-            className={`mt-2.5 rounded-xl border px-3 py-2 space-y-1.5 ${
-              isDark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'
-            }`}
-          >
-            <div className={`text-[13px] font-semibold leading-snug ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-              {destinationResult.name}
-            </div>
-
-            <div className={`grid grid-cols-3 gap-1.5 text-center ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-              <div className={`rounded-lg px-1.5 py-1.5 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-                <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Дистанция</span>
-                <span className="font-mono font-bold text-[15px] tabular-nums">{destinationResult.distanceKm} км</span>
-              </div>
-              <div className={`rounded-lg px-1.5 py-1.5 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-                <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>ETA</span>
-                <span className="font-mono font-bold text-[15px] tabular-nums">
-                  {destinationResult.arrivalTimeLabel
-                    || (destinationResult.etaMinutes != null ? `~${destinationResult.etaMinutes}м` : '—')}
-                </span>
-              </div>
-              <div className={`rounded-lg px-1.5 py-1.5 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-                <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Энергия</span>
-                <span className="font-mono font-bold text-[15px] tabular-nums">{destinationResult.energyNeededKwh.toFixed(1)} кВт⋅ч</span>
-              </div>
-            </div>
-
-            <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              <span className="font-mono tabular-nums">{destinationResult.predictedConsumption.toFixed(1)} кВт⋅ч/100</span>
-              {(destinationResult.gainM > 0 || destinationResult.lossM > 0) && (
-                <span className="inline-flex items-center gap-1">
-                  <Mountain className="w-3.5 h-3.5 shrink-0" />
-                  <span className="font-mono tabular-nums">
-                    <span className={isDark ? 'text-amber-300' : 'text-amber-700'}>↑{Math.round(destinationResult.gainM)}м</span>
-                    {' / '}
-                    <span className={isDark ? 'text-sky-300' : 'text-sky-700'}>↓{Math.round(destinationResult.lossM)}м</span>
-                  </span>
-                </span>
-              )}
-              {destinationResult.regenEnergyKwh != null && destinationResult.regenEnergyKwh > 0 && (
-                <span className={`font-mono tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
-                  рекуп. {destinationResult.regenEnergyKwh.toFixed(2)} кВт⋅ч
-                </span>
-              )}
-            </div>
-
-            {(destinationResult.forecastUsed || destinationResult.forecastTemperature != null) && (
-              <div className={`flex flex-wrap items-center gap-x-2.5 gap-y-0.5 pt-0.5 border-t text-[12px] ${
-                isDark ? 'border-slate-800 text-slate-300' : 'border-slate-200 text-slate-600'
-              }`}>
-                <span className="inline-flex items-center gap-1 font-semibold shrink-0">
-                  <CloudRain className={`w-3.5 h-3.5 ${isDark ? 'text-sky-400' : 'text-sky-600'}`} />
-                  По маршруту
-                </span>
-                <span className="font-mono tabular-nums">
-                  {destinationResult.forecastTemperature != null
-                    ? `${destinationResult.forecastTemperature > 0 ? '+' : ''}${Math.round(destinationResult.forecastTemperature)}°`
-                    : '—'}
-                </span>
-                {destinationResult.forecastWindSpeed != null && (
-                  <span className="font-mono tabular-nums inline-flex items-center gap-0.5">
-                    <Wind className="w-3.5 h-3.5" />
-                    {(destinationResult.forecastWindSpeed / 3.6).toFixed(1)} м/с
-                  </span>
-                )}
-                {destinationResult.forecastPrecipLabel && (
-                  <span className="truncate">{destinationResult.forecastPrecipLabel}</span>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {destinationError && (
-          <div className="mt-1.5 text-[12px] text-amber-500">{destinationError}</div>
-        )}
-      </div>
-
-      {/* 5. Passengers + climate + wind */}
-      <div
-        className={`rounded-2xl border px-2.5 py-1.5 flex items-center gap-2 shrink-0 ${
-          isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-slate-50 border-slate-200'
-        }`}
-      >
-        <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
-          <div
-            className={`w-8 h-8 rounded-full border flex items-center justify-center shrink-0 ${
-              isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'
-            }`}
-          >
-            <ArrowDown
-              className={`w-4 h-4 ${windInfo.color}`}
-              style={{ transform: `rotate(${windInfo.arrowRotation}deg)` }}
-            />
-          </div>
-          <span className={`text-[12px] font-bold truncate ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
-            {weather.isLoaded ? windInfo.label : 'Ветер…'}
-          </span>
-        </div>
-
-        <div
-          className={`flex items-center gap-0.5 shrink-0 rounded-xl border px-1 ${
-            isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'
-          }`}
-        >
-          <button
-            type="button"
-            onClick={() => setPassengers((p) => Math.max(1, p - 1))}
-            className={`w-9 h-9 text-lg font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-            aria-label="Меньше пассажиров"
-          >
-            −
-          </button>
-          <span className={`text-[13px] font-bold min-w-[2.5rem] text-center tabular-nums ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
-            👤{passengers}
-          </span>
-          <button
-            type="button"
-            onClick={() => setPassengers((p) => Math.min(5, p + 1))}
-            className={`w-9 h-9 text-lg font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-            aria-label="Больше пассажиров"
-          >
-            +
-          </button>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setClimateOn(!climateOn)}
-          className={`px-3 py-2 rounded-xl border text-[12px] font-bold shrink-0 ${
-            climateOn
-              ? outdoorTemp < 19
-                ? 'bg-amber-950/70 text-amber-300 border-amber-800'
-                : 'bg-cyan-950/70 text-cyan-300 border-cyan-800'
-              : isDark
-              ? 'bg-slate-950 text-slate-400 border-slate-800'
-              : 'bg-white text-slate-600 border-slate-200'
-          }`}
-        >
-          {climateOn ? (outdoorTemp < 19 ? `🔥 +${liveClimate.impactPct}%` : `❄️ +${liveClimate.impactPct}%`) : '🍃 ЭКО'}
-        </button>
-      </div>
-
-      </div>
-      {/* end scrollable body */}
-
-      {/* Sticky footer: always on screen (STOP / telemetry) */}
-      <div
-        className={`shrink-0 space-y-2 border-t px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] ${
-          isDark ? 'border-slate-800/80 bg-slate-950' : 'border-slate-200 bg-white'
-        }`}
-      >
-        {/* 6. Controls */}
-        <div className="grid grid-cols-2 gap-2">
-          {isTracking ? (
-            <>
-              <button
-                type="button"
-                onClick={handleStopPress}
-                className={`py-3 rounded-xl bg-rose-600 text-white font-black text-[14px] flex items-center justify-center gap-2 active:scale-[0.98] shadow-lg shadow-rose-900/40 ${armedAction === 'stop' ? 'ring-2 ring-white animate-pulse' : ''}`}
-              >
-                <Square className="w-4 h-4 fill-current" /> {armedAction === 'stop' ? 'ЕЩЁ РАЗ — ЗАВЕРШИТЬ' : 'СТОП'}
-              </button>
-              <button
-                type="button"
-                onClick={handleResetPress}
-                className={`py-3 rounded-xl border font-bold text-[14px] flex items-center justify-center gap-2 active:scale-[0.98] ${
-                  armedAction === 'reset'
-                    ? 'bg-amber-500 text-slate-950 border-amber-300 ring-2 ring-amber-300 animate-pulse'
-                    : isDark
-                    ? 'bg-slate-800 text-slate-200 border-slate-700'
-                    : 'bg-slate-100 text-slate-700 border-slate-300'
-                }`}
-              >
-                <RotateCcw className="w-4 h-4" /> {armedAction === 'reset' ? 'СТЕРЕТЬ ТРЕК?' : 'СБРОС'}
-              </button>
-            </>
-          ) : (
-            <div className={`col-span-2 text-center py-1 text-[12px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-              {trackingStopMessage || 'Введите адрес и SOC → Расчёт / СТАРТ'}
-            </div>
-          )}
-        </div>
-
-        {/* 7. Telemetry */}
-        <div
-          className={`rounded-xl border grid grid-cols-3 divide-x ${
-            isDark ? 'bg-slate-900/70 border-slate-800 divide-slate-800' : 'bg-slate-50 border-slate-200 divide-slate-200'
-          }`}
-        >
-          <div className="py-1.5 text-center">
-            <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Дистанция</span>
-            <b className={`font-mono text-base tabular-nums ${isDark ? 'text-cyan-300' : 'text-cyan-600'}`}>
-              {tripDistanceKm.toFixed(1)}
-              <small className="text-[10px]"> км</small>
-            </b>
-          </div>
-          <div className="py-1.5 text-center">
-            <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>В пути</span>
-            <b className={`font-mono text-base tabular-nums ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-              {formatTime(elapsedSeconds)}
-            </b>
-          </div>
-          <div className="py-1.5 text-center">
-            <span className={`block text-[10px] uppercase font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Средняя</span>
-            <b className={`font-mono text-base tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
-              {avgTripSpeedKmH}
-              <small className="text-[10px]"> км/ч</small>
-            </b>
+            <p className={`text-[10px] text-center leading-snug ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              GPS · километраж · расход · запись в историю
+            </p>
           </div>
         </div>
       </div>
-
-      {/* Completed Trip Summary Modal (legacy form branch) */}
-      {completedTripSummary && (
-        <div
-          className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center px-4 pt-4"
-          style={{
-            paddingBottom: 'calc(5.75rem + env(safe-area-inset-bottom, 0px))',
-          }}
-        >
-          <div className={`border rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl text-left max-h-[min(78dvh,calc(100dvh-7.5rem))] overflow-y-auto overscroll-contain ${
-            isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
-          }`}>
-            <div className={`flex items-center justify-between border-b pb-3 ${
-              isDark ? 'border-slate-800' : 'border-slate-200'
-            }`}>
-              <div className="flex items-center gap-2">
-                <div className={`p-2 rounded-xl ${
-                  isDark ? 'bg-cyan-500/20 text-cyan-400' : 'bg-cyan-100 text-cyan-700'
-                }`}>
-                  <Check className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className={`text-base font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                    Поездка завершена
-                  </h3>
-                  <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Данные по GPS треку (SoC: {Math.round(completedTripSummary.startSoc)}% → {Math.round(completedTripSummary.endSoc)}%)
-                  </span>
-                </div>
-              </div>
-              <button
-                onClick={() => setCompletedTripSummary(null)}
-                className={`text-sm ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className={`border rounded-xl p-3 ${
-                isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
-              }`}>
-                <span className={`text-[10px] block font-semibold uppercase ${
-                  isDark ? 'text-slate-400' : 'text-slate-500'
-                }`}>
-                  Дистанция
-                </span>
-                <span className={`text-xl font-bold font-mono ${
-                  isDark ? 'text-cyan-400' : 'text-cyan-600'
-                }`}>
-                  {completedTripSummary.distanceKm} км
-                </span>
-              </div>
-
-              <div className={`border rounded-xl p-3 ${
-                isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
-              }`}>
-                <span className={`text-[10px] block font-semibold uppercase ${
-                  isDark ? 'text-slate-400' : 'text-slate-500'
-                }`}>
-                  Средняя скорость
-                </span>
-                <span className={`text-xl font-bold font-mono ${
-                  isDark ? 'text-cyan-400' : 'text-cyan-600'
-                }`}>
-                  {completedTripSummary.avgSpeedKmH} км/ч
-                </span>
-              </div>
-
-              <div className={`border rounded-xl p-3 ${
-                isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
-              }`}>
-                <span className={`text-[10px] block font-semibold uppercase ${
-                  isDark ? 'text-slate-400' : 'text-slate-500'
-                }`}>
-                  Время в пути
-                </span>
-                <span className={`text-xl font-bold font-mono ${
-                  isDark ? 'text-slate-200' : 'text-slate-800'
-                }`}>
-                  {completedTripSummary.durationMinutes} мин
-                </span>
-              </div>
-
-              <div className={`border rounded-xl p-3 ${
-                isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
-              }`}>
-                <span className={`text-[10px] block font-semibold uppercase ${
-                  isDark ? 'text-slate-400' : 'text-slate-500'
-                }`}>
-                  Расход (кВт⋅ч/100)
-                </span>
-                <span className={`text-xl font-bold font-mono ${
-                  isDark ? 'text-amber-400' : 'text-amber-600'
-                }`}>
-                  {completedTripSummary.estimatedCons}
-                </span>
-              </div>
-            </div>
-
-            <div className={`p-2.5 border rounded-xl text-xs space-y-1 ${
-              isDark ? 'bg-slate-950/70 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
-            }`}>
-              <div className="flex justify-between">
-                <span>Расход энергии:</span>
-                <span className={`font-bold font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                  {completedTripSummary.energyUsedKwh} кВт⋅ч (SoC: {Math.round(completedTripSummary.startSoc)}% → {Math.round(completedTripSummary.endSoc)}%)
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Температура воздуха:</span>
-                <span className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                  {completedTripSummary.temp > 0 ? `+${completedTripSummary.temp}` : completedTripSummary.temp}°C
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Максимальная скорость:</span>
-                <span className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                  {completedTripSummary.maxSpeedKmH} км/ч
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Стиль поездки (трек):</span>
-                <span className={`font-bold ${
-                  (completedTripSummary.styleFactor ?? 1) > 1.05
-                    ? 'text-rose-400'
-                    : (completedTripSummary.styleFactor ?? 1) < 0.95
-                    ? 'text-cyan-400'
-                    : isDark ? 'text-white' : 'text-slate-900'
-                }`}>
-                  x{(completedTripSummary.styleFactor ?? 1).toFixed(2)} ({completedTripSummary.styleLabel || 'Сбалансированный'})
-                </span>
-              </div>
-              {completedTripSummary.windStatus && (
-                <div className={`flex justify-between ${isDark ? 'text-cyan-300' : 'text-cyan-700'}`}>
-                  <span>Ветер во время поездки:</span>
-                  <span className="font-semibold">{completedTripSummary.windStatus}</span>
-                </div>
-              )}
-              {completedTripSummary.precipitationStatus && (
-                <div className={`flex justify-between ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
-                  <span>Покрытие дороги / Осадки:</span>
-                  <span className="font-semibold">{completedTripSummary.roadSurface || completedTripSummary.precipitationStatus}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex gap-2 pt-2">
-              <button
-                onClick={handleSaveTrackedTrip}
-                className="flex-1 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md shadow-cyan-600/30 active:scale-95 transition-all flex items-center justify-center gap-1.5"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>Записать в журнал</span>
-              </button>
-
-              <button
-                onClick={() => setCompletedTripSummary(null)}
-                className={`py-3 px-4 rounded-xl font-semibold text-xs border ${
-                  isDark
-                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-                }`}
-              >
-                Закрыть
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
