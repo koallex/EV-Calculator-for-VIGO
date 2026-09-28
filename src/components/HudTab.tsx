@@ -698,8 +698,8 @@ export const HudTab: React.FC<HudTabProps> = ({
           lon: prev ? prev.lon * (1 - alpha) + longitude * alpha : longitude,
         };
         smoothMapPosRef.current = smoothed;
-        // ~2.5 Hz map marker feed — RouteMap interpolates between samples for smooth motion.
-        if (now - lastMapPosUpdateRef.current > 400) {
+        // ~4 Hz map feed — RouteMap continuously lerps marker toward this target.
+        if (now - lastMapPosUpdateRef.current > 250) {
           lastMapPosUpdateRef.current = now;
           setMapLivePosition(smoothed);
         }

@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { RoutePoint } from '../services/routeElevation';
 import {
   createBestMap,
+  headingDegToAzimuthRad,
   makeDotMarkerEl,
   makeLabelMarkerEl,
   makeNavArrowEl,
+  normalizeDeg180,
   scrubYandexOpenMapsPromo,
   toLonLat,
   type AnyMapBundle,
@@ -60,20 +62,20 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   const [mapReady, setMapReady] = useState(false);
   /** After user pans/zooms, pause GPS follow so gestures are not fought. */
   const userNavPauseUntilRef = useRef(0);
-  const lastAppliedHeadingRef = useRef<number | null>(null);
   /** Last route progress index applied to polylines — skip redraw when unchanged. */
   const lastProgressIdxRef = useRef(-1);
-  /** Smooth marker interpolation between sparse GPS samples. */
-  const markerAnimRef = useRef<{
-    fromLat: number;
-    fromLon: number;
-    toLat: number;
-    toLon: number;
-    startMs: number;
-    durationMs: number;
-    raf: number | null;
+  /** Continuous follow loop (does not restart on every GPS tick). */
+  const followLoopRafRef = useRef<number | null>(null);
+  const followTargetRef = useRef<{
+    lat: number;
+    lon: number;
+    heading: number | null;
   } | null>(null);
   const displayPosRef = useRef<{ lat: number; lon: number } | null>(null);
+  const displayHeadingRef = useRef<number | null>(null);
+  const lastCameraPushMsRef = useRef(0);
+  const followModeRef = useRef(followMode);
+  followModeRef.current = followMode;
 
   const positions = useMemo(
     () => points.map((p) => [p.lat, p.lon] as [number, number]),
@@ -537,93 +539,85 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, JSON.stringify(stops), onChargingStopClick]);
 
-  // Live position marker + heading-up camera. Marker moves via rAF interpolation; track is separate.
+  // Push latest GPS sample into follow target (does not restart the render loop).
   useEffect(() => {
-    const bundle = bundleRef.current;
-    if (!bundle || !mapReady) return;
-    const map = (bundle as any).map;
-
-    const stopMarkerAnim = () => {
-      const anim = markerAnimRef.current;
-      if (anim?.raf != null) {
-        cancelAnimationFrame(anim.raf);
-        anim.raf = null;
-      }
-      markerAnimRef.current = null;
-    };
-
     if (
       !currentPosition ||
       !Number.isFinite(currentPosition.lat) ||
       !Number.isFinite(currentPosition.lon)
     ) {
-      stopMarkerAnim();
+      followTargetRef.current = null;
+      return;
+    }
+    followTargetRef.current = {
+      lat: currentPosition.lat,
+      lon: currentPosition.lon,
+      heading:
+        headingDeg != null && Number.isFinite(headingDeg) ? Number(headingDeg) : null,
+    };
+    if (!displayPosRef.current) {
+      displayPosRef.current = {
+        lat: currentPosition.lat,
+        lon: currentPosition.lon,
+      };
+    }
+    if (
+      displayHeadingRef.current == null &&
+      headingDeg != null &&
+      Number.isFinite(headingDeg)
+    ) {
+      displayHeadingRef.current = Number(headingDeg);
+    }
+  }, [currentPosition?.lat, currentPosition?.lon, headingDeg]);
+
+  // Continuous follow loop: smooth marker + course-up camera. Independent of GPS tick rate.
+  useEffect(() => {
+    const bundle = bundleRef.current;
+    if (!bundle || !mapReady) return;
+    const map = (bundle as any).map;
+
+    const stopLoop = () => {
+      if (followLoopRafRef.current != null) {
+        cancelAnimationFrame(followLoopRafRef.current);
+        followLoopRafRef.current = null;
+      }
+    };
+
+    if (!followMode && !currentPosition) {
+      stopLoop();
       displayPosRef.current = null;
+      displayHeadingRef.current = null;
       removeObj(bundle, currentPosMarkerRef.current);
       currentPosMarkerRef.current = null;
       return;
     }
 
-    const targetLat = currentPosition.lat;
-    const targetLon = currentPosition.lon;
-
-    // Smooth heading for map camera (EMA on circular degrees).
-    const hasHeading = headingDeg != null && Number.isFinite(headingDeg);
-    let headingForMap = hasHeading ? Number(headingDeg) : lastAppliedHeadingRef.current;
-    if (headingForMap != null && Number.isFinite(headingForMap)) {
-      const prev = lastAppliedHeadingRef.current;
-      if (prev != null) {
-        const d = ((headingForMap - prev + 540) % 360) - 180;
-        headingForMap = (prev + d * 0.4 + 360) % 360;
-      }
-      lastAppliedHeadingRef.current = headingForMap;
-    }
-
-    /**
-     * Arrow orientation on screen:
-     * - API v3 + followMode: map camera azimuth = heading → travel direction is screen-up → arrow stays at 0°.
-     * - API 2.1 / no follow: north-up map → arrow rotates by geographic heading.
-     */
-    const arrowScreenDeg =
-      followMode && bundle.apiVersion === 3
-        ? 0
-        : headingForMap != null && Number.isFinite(headingForMap)
-          ? headingForMap
-          : 0;
-
-    const applyMarkerCoords = (lat: number, lon: number) => {
-      displayPosRef.current = { lat, lon };
+    const ensureMarker = (lat: number, lon: number, arrowDeg: number) => {
       if (bundle.apiVersion === 3) {
         const coords = toLonLat(lat, lon);
-        if (currentPosMarkerRef.current) {
-          try {
-            currentPosMarkerRef.current.update({ coordinates: coords });
-          } catch { /* ignore */ }
-          try {
-            const root =
-              currentPosMarkerRef.current?.element ||
-              currentPosMarkerRef.current?._element;
-            const arrow = root?.querySelector?.('[data-vigo-nav-arrow]') as HTMLElement | null;
-            if (arrow) {
-              arrow.style.transform = `translate(-50%,-50%) rotate(${arrowScreenDeg}deg)`;
-            }
-          } catch { /* ignore */ }
-        } else {
+        if (!currentPosMarkerRef.current) {
           const { YMapMarker } = (bundle as any).ymaps3;
-          const el = followMode
-            ? makeNavArrowEl('#38bdf8', arrowScreenDeg)
+          const el = followModeRef.current
+            ? makeNavArrowEl('#38bdf8', arrowDeg)
             : makeDotMarkerEl('#38bdf8', 14, '#fff');
           const m = new YMapMarker({ coordinates: coords }, el);
           map.addChild(m);
           currentPosMarkerRef.current = m;
+        } else {
+          try {
+            currentPosMarkerRef.current.update({ coordinates: coords });
+          } catch { /* ignore */ }
         }
+        try {
+          const root =
+            currentPosMarkerRef.current?.element ||
+            currentPosMarkerRef.current?._element;
+          const arrow = root?.querySelector?.('[data-vigo-nav-arrow]') as HTMLElement | null;
+          if (arrow) arrow.style.transform = `rotate(${arrowDeg}deg)`;
+        } catch { /* ignore */ }
       } else {
         const coords: [number, number] = [lat, lon];
-        if (currentPosMarkerRef.current) {
-          try {
-            currentPosMarkerRef.current.geometry.setCoordinates(coords);
-          } catch { /* ignore */ }
-        } else {
+        if (!currentPosMarkerRef.current) {
           const ymaps = (bundle as any).ymaps;
           const m = new ymaps.Placemark(
             coords,
@@ -632,92 +626,121 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           );
           map.geoObjects.add(m);
           currentPosMarkerRef.current = m;
+        } else {
+          try {
+            currentPosMarkerRef.current.geometry.setCoordinates(coords);
+          } catch { /* ignore */ }
         }
       }
     };
 
-    // Start / continue interpolation toward the latest GPS sample.
-    const from = displayPosRef.current ?? { lat: targetLat, lon: targetLon };
-    stopMarkerAnim();
-    const durationMs = followMode ? 420 : 200;
-    const anim = {
-      fromLat: from.lat,
-      fromLon: from.lon,
-      toLat: targetLat,
-      toLon: targetLon,
-      startMs: performance.now(),
-      durationMs,
-      raf: null as number | null,
-    };
-    markerAnimRef.current = anim;
+    const POS_LERP = 0.18; // per frame ~60fps → catches GPS in ~0.3–0.5s without jumps
+    const HEAD_LERP = 0.2;
 
-    const tick = (now: number) => {
-      const a = markerAnimRef.current;
-      if (!a) return;
-      const t = Math.min(1, (now - a.startMs) / a.durationMs);
-      // ease-out for less overshoot feel
-      const e = 1 - (1 - t) * (1 - t);
-      const lat = a.fromLat + (a.toLat - a.fromLat) * e;
-      const lon = a.fromLon + (a.toLon - a.fromLon) * e;
-      applyMarkerCoords(lat, lon);
-      if (t < 1) {
-        a.raf = requestAnimationFrame(tick);
-      } else {
-        a.raf = null;
+    const tick = () => {
+      const target = followTargetRef.current;
+      if (!target) {
+        followLoopRafRef.current = requestAnimationFrame(tick);
+        return;
       }
-    };
-    anim.raf = requestAnimationFrame(tick);
 
-    // Heading-up camera (API v3). Azimuth belongs on `camera`, not inside `setLocation`.
-    if (followMode && Date.now() >= userNavPauseUntilRef.current) {
-      if (bundle.apiVersion === 3) {
-        const coords = toLonLat(targetLat, targetLon);
-        let zoom = 16;
+      let disp = displayPosRef.current;
+      if (!disp) {
+        disp = { lat: target.lat, lon: target.lon };
+        displayPosRef.current = disp;
+      } else {
+        disp.lat += (target.lat - disp.lat) * POS_LERP;
+        disp.lon += (target.lon - disp.lon) * POS_LERP;
+      }
+
+      // Smooth heading toward target (shortest angle).
+      if (target.heading != null && Number.isFinite(target.heading)) {
+        const prev = displayHeadingRef.current;
+        if (prev == null) {
+          displayHeadingRef.current = target.heading;
+        } else {
+          const d = normalizeDeg180(target.heading - prev);
+          displayHeadingRef.current = prev + d * HEAD_LERP;
+        }
+      }
+      const headingSmooth = displayHeadingRef.current;
+
+      // Arrow on screen: point in travel direction relative to current map rotation.
+      // If course-up camera works, map.azimuth ≈ heading → arrowDeg ≈ 0 (points up).
+      // If camera did not rotate, arrowDeg ≈ heading (north-up map).
+      let arrowDeg = headingSmooth ?? 0;
+      if (bundle.apiVersion === 3 && followModeRef.current && headingSmooth != null) {
         try {
-          if (typeof map.zoom === 'number') zoom = map.zoom;
-          else if (typeof map.location?.zoom === 'number') zoom = map.location.zoom;
-        } catch { /* ignore */ }
-        const azimuthRad =
-          headingForMap != null && Number.isFinite(headingForMap)
-            ? (headingForMap * Math.PI) / 180
-            : undefined;
-        try {
-          // Preferred: location + camera in one update (JS API 3).
-          map.update({
-            location: {
-              center: coords,
-              zoom,
-              duration: 350,
-            },
-            ...(azimuthRad != null ? { camera: { azimuth: azimuthRad } } : {}),
-          });
+          const mapAzimuthDeg =
+            typeof map.azimuth === 'number' ? (map.azimuth * 180) / Math.PI : 0;
+          arrowDeg = normalizeDeg180(headingSmooth - mapAzimuthDeg);
         } catch {
-          try {
-            map.setLocation({ center: coords, zoom, duration: 350 });
-          } catch { /* ignore */ }
-          try {
-            if (azimuthRad != null) {
-              map.update?.({ camera: { azimuth: azimuthRad } });
+          arrowDeg = 0;
+        }
+      } else if (followModeRef.current && bundle.apiVersion === 3) {
+        arrowDeg = 0;
+      }
+
+      ensureMarker(disp.lat, disp.lon, arrowDeg);
+
+      // Camera: course-up + center on smoothed position (throttled to avoid fighting animations).
+      if (followModeRef.current && Date.now() >= userNavPauseUntilRef.current) {
+        const now = performance.now();
+        if (now - lastCameraPushMsRef.current >= 80) {
+          lastCameraPushMsRef.current = now;
+          if (bundle.apiVersion === 3) {
+            const coords = toLonLat(disp.lat, disp.lon);
+            let zoom = 16;
+            try {
+              if (typeof map.zoom === 'number') zoom = map.zoom;
+              else if (typeof map.location?.zoom === 'number') zoom = map.location.zoom;
+            } catch { /* ignore */ }
+            try {
+              map.setLocation({ center: coords, zoom, duration: 0 });
+            } catch {
+              try {
+                map.update({ location: { center: coords, zoom, duration: 0 } });
+              } catch { /* ignore */ }
             }
-          } catch { /* ignore */ }
-        }
-      } else {
-        // API 2.1 has no reliable programmatic map rotation — pan only.
-        try {
-          const z = typeof map.getZoom === 'function' ? map.getZoom() : 16;
-          map.setCenter([targetLat, targetLon], z, { duration: 300 });
-        } catch {
-          try {
-            (bundle as any).setLocation?.(targetLat, targetLon);
-          } catch { /* ignore */ }
+            if (headingSmooth != null && Number.isFinite(headingSmooth)) {
+              const az = headingDegToAzimuthRad(headingSmooth);
+              try {
+                if (typeof map.setCamera === 'function') {
+                  map.setCamera({ azimuth: az, duration: 120 });
+                } else {
+                  map.update({ camera: { azimuth: az, duration: 120 } });
+                }
+              } catch {
+                try {
+                  map.update({ camera: { azimuth: az } });
+                } catch { /* ignore */ }
+              }
+            }
+          } else {
+            try {
+              const z = typeof map.getZoom === 'function' ? map.getZoom() : 16;
+              map.setCenter([disp.lat, disp.lon], z, { duration: 0 });
+            } catch {
+              try {
+                (bundle as any).setLocation?.(disp.lat, disp.lon);
+              } catch { /* ignore */ }
+            }
+          }
         }
       }
-    }
+
+      followLoopRafRef.current = requestAnimationFrame(tick);
+    };
+
+    stopLoop();
+    followLoopRafRef.current = requestAnimationFrame(tick);
 
     return () => {
-      stopMarkerAnim();
+      stopLoop();
     };
-  }, [mapReady, currentPosition?.lat, currentPosition?.lon, followMode, headingDeg]);
+    // Restart loop only when map readiness / follow mode flips — not on every GPS sample.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, followMode, !!currentPosition]);
 
   return (
     <div
