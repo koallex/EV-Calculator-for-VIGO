@@ -5,6 +5,7 @@ import {
   type ChargingStation,
   type VehicleConnector,
 } from './chargingStations';
+import { matchEvraceTariff, type EvraceTariff } from '../hooks/useEvraceTariffs';
 
 const LIVE_OPERATORS = ['forevo', 'malanka', 'zaryadka', 'batteryfly', 'evika'] as const;
 type LiveOperator = (typeof LIVE_OPERATORS)[number];
@@ -199,6 +200,24 @@ function groupToStation(group: any, index: number): ChargingStation | null {
   };
 }
 
+function normalizeOperatorKey(op: string): string {
+  const o = op.toLowerCase().replace(/\s+/g, '').replace(/[«»"']/g, '');
+  if (!o) return 'other';
+  if (o.includes('malanka') || o.includes('маланка')) return 'malanka';
+  if (o.includes('zaryad') || o.includes('заряд')) return 'zaryadka';
+  if (o.includes('battery') || o.includes('батар')) return 'batteryfly';
+  if (o.includes('forevo')) return 'forevo';
+  if (o.includes('evika') || o.includes('белтелеком')) return 'evika';
+  if (o.includes('united')) return 'united';
+  if (o.includes('csms') || o.includes('цсмс')) return 'csms';
+  if (o.includes('evon')) return 'evon';
+  if (o.includes('orange')) return 'orange';
+  if (o.includes('skat')) return 'skat';
+  if (o.includes('prizma')) return 'prizma';
+  if (o.includes('gto') || o.includes('белтех')) return 'gto';
+  return o.slice(0, 16);
+}
+
 export async function findNearbyFreeCcsChargers(
   origin: { lat: number; lon: number },
   options: {
@@ -206,6 +225,12 @@ export async function findNearbyFreeCcsChargers(
     limit?: number;
     /** Active vehicle ports; default CCS2 (Vigo). */
     vehicleConnectors?: VehicleConnector[];
+    /** Installed map filters. These constrain which stations may enter the nearest-free search. */
+    filterConnectors?: VehicleConnector[];
+    operatorKeys?: string[];
+    minPowerKw?: number | null;
+    maxPrice?: number | null;
+    tariffs?: EvraceTariff[];
   } = {},
 ): Promise<{ results: FreeChargerResult[]; searched: number; liveChecked: number }> {
   const radiusKm = options.radiusKm ?? 40;
@@ -213,6 +238,13 @@ export async function findNearbyFreeCcsChargers(
   const vehicleConnectors: VehicleConnector[] = options.vehicleConnectors?.length
     ? options.vehicleConnectors
     : ['ccs2', 'type2'];
+  const filterConnectors: VehicleConnector[] = options.filterConnectors?.length
+    ? options.filterConnectors
+    : vehicleConnectors;
+  const operatorKeys = options.operatorKeys ?? [];
+  const minPowerKw = options.minPowerKw ?? null;
+  const maxPrice = options.maxPrice ?? null;
+  const tariffs = options.tariffs ?? [];
   const wantsDc =
     vehicleConnectors.includes('ccs2') || vehicleConnectors.includes('gbt');
   const pad = radiusKm / 111;
@@ -235,7 +267,33 @@ export async function findNearbyFreeCcsChargers(
     const s = groupToStation(g, i) as any;
     if (!s) return;
     if (!stationSupportsConnectors(s, vehicleConnectors)) return;
-    // Nearby "free DC" search requires a DC port the car can use
+
+    // Apply the same map filters that the visible station layer uses. The nearest-free
+    // search is a separate data path, so without this explicit check it could return a
+    // station excluded by the user's connector/operator/power/price filters.
+    const hasFilteredConnector =
+      (filterConnectors.includes('ccs2') && s.hasCcs2) ||
+      (filterConnectors.includes('gbt') && s.hasGbt) ||
+      (filterConnectors.includes('type2') && s.hasType2);
+    if (!hasFilteredConnector) return;
+
+    const operatorKey = normalizeOperatorKey(String(s.operator || ''));
+    if (operatorKeys.length && !operatorKeys.includes(operatorKey)) return;
+
+    const stationPowerKw = Math.max(
+      s.ccs2PowerKw ?? 0,
+      s.gbtPowerKw ?? 0,
+      s.type2PowerKw ?? 0,
+    );
+    if (minPowerKw != null && (stationPowerKw <= 0 || stationPowerKw < minPowerKw)) return;
+
+    if (maxPrice != null) {
+      const tariff = matchEvraceTariff(String(s.operator || ''), tariffs);
+      const rate = tariff?.dcDay ?? tariff?.acDay ?? null;
+      if (rate == null || rate > maxPrice) return;
+    }
+
+    // Nearby "free DC" search requires a DC port the car can use.
     if (wantsDc) {
       const hasDc =
         (vehicleConnectors.includes('ccs2') && s.hasCcs2) ||
