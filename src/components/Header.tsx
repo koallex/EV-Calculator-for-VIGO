@@ -1,36 +1,28 @@
 import React from 'react';
-import { Car, Moon, Sun, Plus, ShieldCheck, LogOut, Info } from 'lucide-react';
+import { Car, Plus } from 'lucide-react';
 import { UserSettings } from '../types';
 import { triggerHaptic } from '../utils/haptics';
 import { getVehicleProfile } from '../data/vehicleProfiles';
-
-interface CurrentUser { login: string; role: 'admin' | 'user'; }
 
 interface HeaderProps {
   settings: UserSettings;
   onUpdateSettings: (newSettings: UserSettings) => void;
   onOpenAddTrip: () => void;
-  currentUser?: CurrentUser;
+  currentUser?: { login: string; role: 'admin' | 'user' };
   onOpenAdmin?: () => void;
   onLogout?: () => void;
   onOpenAbout?: () => void;
 }
 
+/**
+ * Slim header: brand + primary CTA only.
+ * Theme, About, Admin, Logout live under Settings («Ещё») so landscape
+ * (where this header is hidden) still has a path via the bottom nav.
+ */
 export const Header: React.FC<HeaderProps> = ({
   settings,
-  onUpdateSettings,
   onOpenAddTrip,
-  currentUser,
-  onOpenAdmin,
-  onLogout,
-  onOpenAbout,
 }) => {
-  const toggleTheme = () => {
-    triggerHaptic('light', settings.hapticFeedback);
-    const nextTheme = settings.theme === 'dark' ? 'light' : 'dark';
-    onUpdateSettings({ ...settings, theme: nextTheme });
-  };
-
   const isDark = settings.theme !== 'light';
   const profile = getVehicleProfile(settings.vehicleProfileId);
   const carTitle = profile.isCustom ? 'Свой автомобиль' : profile.displayName;
@@ -45,7 +37,6 @@ export const Header: React.FC<HeaderProps> = ({
       }`}
     >
       <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
-        {/* Brand & Car Model */}
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-cyan-500 to-teal-600 flex items-center justify-center shadow-sm shadow-cyan-500/20 text-white shrink-0">
             <Car className="w-4 h-4" />
@@ -55,11 +46,13 @@ export const Header: React.FC<HeaderProps> = ({
               <h1 className={`text-sm font-bold tracking-tight truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
                 {carTitle}
               </h1>
-              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md border shrink-0 ${
-                isDark 
-                  ? 'bg-cyan-950/60 text-cyan-400 border-cyan-800/50' 
-                  : 'bg-cyan-50 text-cyan-700 border-cyan-200'
-              }`}>
+              <span
+                className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md border shrink-0 ${
+                  isDark
+                    ? 'bg-cyan-950/60 text-cyan-400 border-cyan-800/50'
+                    : 'bg-cyan-50 text-cyan-700 border-cyan-200'
+                }`}
+              >
                 {settings.batteryCapacityKwh} кВт⋅ч
               </span>
             </div>
@@ -69,79 +62,19 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Action buttons */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Theme toggle */}
-          <button
-            id="theme-toggle-button"
-            onClick={toggleTheme}
-            aria-label={isDark ? 'Включить светлую тему' : 'Включить тёмную тему'}
-            title={isDark ? 'Включить светлую тему' : 'Включить темную тему'}
-            className={`w-9 h-9 rounded-xl flex items-center justify-center active:scale-95 transition-all border ${
-              isDark
-                ? 'bg-slate-900/90 hover:bg-slate-800 text-amber-400 border-slate-800'
-                : 'bg-slate-100 hover:bg-slate-200 text-amber-600 border-slate-200'
-            }`}
-          >
-            {isDark ? (
-              <Sun className="w-4 h-4" />
-            ) : (
-              <Moon className="w-4 h-4 text-slate-700" />
-            )}
-          </button>
-
-          {/* About project */}
-          <button
-            id="about-project-button"
-            onClick={onOpenAbout}
-            aria-label="О проекте"
-            title="О проекте"
-            className={`w-9 h-9 rounded-xl flex items-center justify-center border active:scale-95 ${
-              isDark ? 'bg-slate-900/90 border-slate-800 text-slate-400 hover:text-cyan-400' : 'bg-slate-100 border-slate-200 text-slate-500 hover:text-cyan-600'
-            }`}
-          >
-            <Info className="w-4 h-4" />
-          </button>
-
-          {/* Quick Add Trip (Primary CTA) */}
-          <button
-            id="quick-add-trip-button"
-            onClick={() => {
-              triggerHaptic('medium', settings.hapticFeedback);
-              onOpenAddTrip();
-            }}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold active:scale-95 transition-all shadow-sm shadow-cyan-600/20"
-          >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>Запись</span>
-          </button>
-
-          {currentUser?.role === 'admin' && (
-            <button
-              id="admin-panel-button"
-              onClick={onOpenAdmin}
-              aria-label="Админ-панель"
-              title="Админ-панель"
-              className={`w-9 h-9 rounded-xl flex items-center justify-center border active:scale-95 ${
-                isDark ? 'bg-slate-900/90 border-slate-800 text-cyan-400' : 'bg-slate-100 border-slate-200 text-cyan-600'
-              }`}
-            >
-              <ShieldCheck className="w-4 h-4" />
-            </button>
-          )}
-
-          <button
-            id="logout-button"
-            onClick={onLogout}
-            aria-label={`Выйти из аккаунта${currentUser?.login ? ` (${currentUser.login})` : ''}`}
-            title={`Выйти (${currentUser?.login ?? ''})`}
-            className={`w-9 h-9 rounded-xl flex items-center justify-center border active:scale-95 ${
-              isDark ? 'bg-slate-900/90 border-slate-800 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-500'
-            }`}
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
+        <button
+          id="quick-add-trip-button"
+          type="button"
+          onClick={() => {
+            triggerHaptic('medium', settings.hapticFeedback);
+            onOpenAddTrip();
+          }}
+          aria-label="Добавить поездку"
+          className="flex items-center gap-1.5 h-9 min-h-[44px] px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold active:scale-95 transition-all shadow-sm shadow-cyan-600/20"
+        >
+          <Plus className="w-4 h-4 stroke-[2.5]" />
+          <span>Добавить</span>
+        </button>
       </div>
     </header>
   );

@@ -8,8 +8,8 @@ import {
   Map as MapIcon,
   Calculator,
 } from 'lucide-react';
-import { UserSettings } from '../types';
-import { getOperatorLabel } from '../utils/storage';
+import { UserSettings, TripSession } from '../types';
+import { getOperatorLabel, getPersonalBenchmarkKwh100, BENCHMARK_CONSUMPTION_KWH_100KM } from '../utils/storage';
 import { BatteryVisual } from './BatteryVisual';
 import { DecimalInput } from './DecimalInput';
 import { triggerHaptic } from '../utils/haptics';
@@ -17,9 +17,10 @@ import { ChargingMapPanel } from './ChargingMapPanel';
 
 interface ChargingTabProps {
   settings: UserSettings;
+  sessions?: TripSession[];
 }
 
-export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
+export const ChargingTab: React.FC<ChargingTabProps> = ({ settings, sessions = [] }) => {
   const [view, setView] = useState<'map' | 'calc'>('map');
   const [calcMode, setCalcMode] = useState<'soc' | 'kwh'>('soc');
   const [currentSoc, setCurrentSoc] = useState<number>(20);
@@ -70,8 +71,9 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
   const netCost = Number((netEnergyKwh * activeTariffRate).toFixed(2));
   const lossCost = Number((lossKwh * activeTariffRate).toFixed(2));
 
-  // Est range added (assuming ~15.0 kWh/100km)
-  const estRangeAddedKm = netEnergyKwh > 0 ? (netEnergyKwh / 15.0) * 100 : 0;
+  const refConsumption =
+    sessions.length >= 3 ? getPersonalBenchmarkKwh100(sessions) : BENCHMARK_CONSUMPTION_KWH_100KM;
+  const estRangeAddedKm = netEnergyKwh > 0 ? (netEnergyKwh / refConsumption) * 100 : 0;
 
   const isDark = settings.theme !== 'light';
 
@@ -269,7 +271,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings }) => {
             <div>
               <div className="text-xs font-bold">Прибавит к запасу хода:</div>
               <div className={`text-[10px] ${isDark ? 'text-cyan-400/80' : 'text-cyan-700'}`}>
-                при среднем расходе ~15.0 кВт⋅ч/100км
+                при среднем расходе ~{refConsumption} кВт⋅ч/100км
               </div>
             </div>
           </div>

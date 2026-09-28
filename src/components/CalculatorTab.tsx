@@ -83,12 +83,40 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   onOpenAddModalWithData,
   onSendToHud,
 }) => {
-  // Input states
-  const [startSoc, setStartSoc] = useState<number>(100);
-  const [endSoc, setEndSoc] = useState<number>(45);
-  const [distanceKm, setDistanceKm] = useState<number>(180);
+  // Input states (restored from last session when available)
+  const [startSoc, setStartSoc] = useState<number>(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('vigo_calculator_draft_v1') || '{}');
+      return typeof d.startSoc === 'number' ? d.startSoc : 100;
+    } catch {
+      return 100;
+    }
+  });
+  const [endSoc, setEndSoc] = useState<number>(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('vigo_calculator_draft_v1') || '{}');
+      return typeof d.endSoc === 'number' ? d.endSoc : 45;
+    } catch {
+      return 45;
+    }
+  });
+  const [distanceKm, setDistanceKm] = useState<number>(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('vigo_calculator_draft_v1') || '{}');
+      return typeof d.distanceKm === 'number' ? d.distanceKm : 180;
+    } catch {
+      return 180;
+    }
+  });
   const [roadType, setRoadType] = useState<RoadType>('city');
-  const [climateOn, setClimateOn] = useState(true);
+  const [climateOn, setClimateOn] = useState(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('vigo_calculator_draft_v1') || '{}');
+      return typeof d.climateOn === 'boolean' ? d.climateOn : true;
+    } catch {
+      return true;
+    }
+  });
   // Weather mode: live API for trips now, or manual conditions for long-term planning.
   const [weatherMode, setWeatherMode] = useState<'current' | 'planning'>('current');
   const [manualTemperature, setManualTemperature] = useState(20);
@@ -100,16 +128,37 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   // the same non-linear resistance model instead of one fixed value per precipitation type.
   const [manualPrecipitationIntensity, setManualPrecipitationIntensity] = useState<'light' | 'moderate' | 'heavy'>('moderate');
   const [chargingType, setChargingType] = useState<TripSession['chargingType']>('malanka_dc');
-  const [passengers, setPassengers] = useState(1);
+  const [passengers, setPassengers] = useState(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('vigo_calculator_draft_v1') || '{}');
+      return typeof d.passengers === 'number' ? d.passengers : 1;
+    } catch {
+      return 1;
+    }
+  });
   // Two distinct workflows used to live interleaved on one long scroll (route planning vs.
   // logging a completed trip by hand) with no visual separation between them. This just
   // groups the existing sections under a switcher; nothing about how each section works changes.
-  const [calculatorMode, setCalculatorMode] = useState<'route' | 'manual'>('route');
+  const [calculatorMode, setCalculatorMode] = useState<'route' | 'manual'>(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('vigo_calculator_draft_v1') || '{}');
+      return d.calculatorMode === 'manual' ? 'manual' : 'route';
+    } catch {
+      return 'route';
+    }
+  });
 
   // Planned route: current GPS point A -> selected destination B -> detailed elevation profile.
   const [startMode, setStartMode] = useState<'gps' | 'address'>('gps');
   const [startAddress, setStartAddress] = useState('');
-  const [destinationAddress, setDestinationAddress] = useState('');
+  const [destinationAddress, setDestinationAddress] = useState(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('vigo_calculator_draft_v1') || '{}');
+      return typeof d.destinationAddress === 'string' ? d.destinationAddress : '';
+    } catch {
+      return '';
+    }
+  });
   // Exact coordinates when A/B was picked by tapping the interactive map, rather than typed
   // as free-text. When set, these are used directly instead of re-geocoding the text — a tap
   // is already precise, so routing through Nominatim's text search again could drift to a
@@ -121,8 +170,54 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [routeElevation, setRouteElevation] = useState<RouteElevationData | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState('');
-  const [plannedSpeedKmH, setPlannedSpeedKmH] = useState(70);
-  const [plannedMaxSpeedKmH, setPlannedMaxSpeedKmH] = useState(120);
+  const [plannedSpeedKmH, setPlannedSpeedKmH] = useState(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('vigo_calculator_draft_v1') || '{}');
+      return typeof d.plannedSpeedKmH === 'number' ? d.plannedSpeedKmH : 70;
+    } catch {
+      return 70;
+    }
+  });
+  const [plannedMaxSpeedKmH, setPlannedMaxSpeedKmH] = useState(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('vigo_calculator_draft_v1') || '{}');
+      return typeof d.plannedMaxSpeedKmH === 'number' ? d.plannedMaxSpeedKmH : 120;
+    } catch {
+      return 120;
+    }
+  });
+
+  // Persist last calculator inputs so a reload does not reset to 100/45/180.
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'vigo_calculator_draft_v1',
+        JSON.stringify({
+          startSoc,
+          endSoc,
+          distanceKm,
+          climateOn,
+          passengers,
+          destinationAddress,
+          plannedSpeedKmH,
+          plannedMaxSpeedKmH,
+          calculatorMode,
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [
+    startSoc,
+    endSoc,
+    distanceKm,
+    climateOn,
+    passengers,
+    destinationAddress,
+    plannedSpeedKmH,
+    plannedMaxSpeedKmH,
+    calculatorMode,
+  ]);
   const [routeWeather, setRouteWeather] = useState<{ temperature:number; windSpeed:number; windDirection:number; weatherCode:number; precipitation:number; routeBearing:number; etaMinutes:number; arrivalDate: Date; samples: RouteWeatherSample[] } | null>(null);
   const [routeForecast, setRouteForecast] = useState<{ consumption:number; energyKwh:number; arrivalSoc:number; windLabel:string; weatherLabel:string; precipitationLabel:string; relativeWindAngle:number; driverStyleFactor:number; driverStyleSource:string; climateLabel:string; climateImpactPct:number; climateDeltaKwh100:number; speedImpactPct:number; breakdown?: any } | null>(null);
   // Mid-route charging suggestion — computed whenever the forecast arrival SoC drops under 20%.

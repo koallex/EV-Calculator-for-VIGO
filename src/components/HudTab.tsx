@@ -43,6 +43,10 @@ import {
   calculatePrecipitationImpact,
   computeFlatRoadConsumptionRate,
   ConsumptionForecast,
+  loadHudCheckpoint,
+  saveHudCheckpoint,
+  clearHudCheckpoint,
+  type HudTripCheckpoint,
 } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
 import { consumeMatchingRouteForecast } from '../utils/routeForecastBridge';
@@ -188,6 +192,10 @@ export const HudTab: React.FC<HudTabProps> = ({
 }) => {
   // Tracking state
   const [isTracking, setIsTracking] = useState(false);
+  // Offer to resume a trip that survived a WebView kill / page reload.
+  const [pendingCheckpoint, setPendingCheckpoint] = useState<HudTripCheckpoint | null>(() =>
+    loadHudCheckpoint(),
+  );
   // Two-tap safety for the destructive controls (СТОП / СБРОС): the first tap "arms" the button for
   // a few seconds, the second tap performs the action. Prevents accidental taps while driving.
   const [armedAction, setArmedAction] = useState<'stop' | 'reset' | null>(null);
@@ -1522,10 +1530,115 @@ export const HudTab: React.FC<HudTabProps> = ({
     (forecast.estimatedConsumption / forecast.baseConsumption).toFixed(2)
   );
 
+  // Persist live trip so a WebView kill / reload does not erase it.
+  const writeCheckpoint = useCallback(() => {
+    if (!isTracking || !tripStartTime) return;
+    saveHudCheckpoint({
+      v: 1,
+      savedAt: Date.now(),
+      tripStartTime,
+      elapsedSeconds,
+      tripDistanceKm,
+      maxSpeed,
+      startTripSoc,
+      climateOn,
+      passengers,
+      elevationGainM,
+      elevationLossM,
+      altitudeAvailable,
+      distanceKm: distanceRef.current,
+      segmentEnergyKwh: segmentEnergyKwhRef.current,
+      elevationEnergyKwh: elevationEnergyKwhRef.current,
+      climateEnergyKwh: climateEnergyKwhRef.current,
+      speedHistory: speedHistoryRef.current.slice(-200),
+      windLog: windLogRef.current as Array<Record<string, unknown>>,
+      lastWindLogDistanceKm: lastWindLogDistanceKmRef.current,
+      destinationQuery: destinationQuery || undefined,
+      destinationMode,
+      manualAvgSpeedKmH,
+    });
+  }, [
+    isTracking,
+    tripStartTime,
+    elapsedSeconds,
+    tripDistanceKm,
+    maxSpeed,
+    startTripSoc,
+    climateOn,
+    passengers,
+    elevationGainM,
+    elevationLossM,
+    altitudeAvailable,
+    destinationQuery,
+    destinationMode,
+    manualAvgSpeedKmH,
+  ]);
+
+  useEffect(() => {
+    if (!isTracking) return;
+    writeCheckpoint();
+    const id = window.setInterval(writeCheckpoint, 12_000);
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') writeCheckpoint();
+    };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', writeCheckpoint);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', writeCheckpoint);
+    };
+  }, [isTracking, writeCheckpoint]);
+
+  const applyCheckpoint = useCallback(
+    (cp: HudTripCheckpoint) => {
+      requestWakeLock();
+      setIsTracking(true);
+      setTripStartTime(cp.tripStartTime);
+      setElapsedSeconds(
+        Math.max(cp.elapsedSeconds, Math.floor((Date.now() - cp.tripStartTime) / 1000)),
+      );
+      setTripDistanceKm(cp.tripDistanceKm);
+      setMaxSpeed(cp.maxSpeed);
+      setStartTripSoc(cp.startTripSoc);
+      setClimateOn(cp.climateOn);
+      setPassengers(cp.passengers);
+      setElevationGainM(cp.elevationGainM);
+      setElevationLossM(cp.elevationLossM);
+      setAltitudeAvailable(cp.altitudeAvailable);
+      distanceRef.current = cp.distanceKm;
+      segmentEnergyKwhRef.current = cp.segmentEnergyKwh;
+      elevationEnergyKwhRef.current = cp.elevationEnergyKwh;
+      climateEnergyKwhRef.current = cp.climateEnergyKwh;
+      speedHistoryRef.current = Array.isArray(cp.speedHistory) ? [...cp.speedHistory] : [];
+      windLogRef.current = Array.isArray(cp.windLog) ? [...(cp.windLog as any[])] : [];
+      lastWindLogDistanceKmRef.current = cp.lastWindLogDistanceKm || 0;
+      setLiveSegmentEnergyKwh(Number(cp.segmentEnergyKwh.toFixed(3)));
+      if (cp.destinationQuery) setDestinationQuery(cp.destinationQuery);
+      if (cp.destinationMode) setDestinationMode(cp.destinationMode);
+      if (cp.manualAvgSpeedKmH) setManualAvgSpeedKmH(cp.manualAvgSpeedKmH);
+      setCompletedTripSummary(null);
+      setTrackingStopMessage('');
+      setPendingCheckpoint(null);
+      uiGpsPublishedRef.current = {
+        ...uiGpsPublishedRef.current,
+        distanceKm: Number(cp.distanceKm.toFixed(2)),
+        segmentEnergyKwh: Number(cp.segmentEnergyKwh.toFixed(3)),
+        elevationGainM: cp.elevationGainM,
+        elevationLossM: cp.elevationLossM,
+        altitudeAvailable: cp.altitudeAvailable,
+        maxSpeed: cp.maxSpeed,
+      };
+    },
+    [requestWakeLock],
+  );
+
   // START tracking
   const handleStartTracking = () => {
     triggerHaptic('success', settings.hapticFeedback);
     requestWakeLock();
+    clearHudCheckpoint();
+    setPendingCheckpoint(null);
     setIsTracking(true);
     setTripStartTime(Date.now());
     setElapsedSeconds(0);
@@ -1599,6 +1712,7 @@ export const HudTab: React.FC<HudTabProps> = ({
 
   const handleStopTracking = () => {
     triggerHaptic('medium', settings.hapticFeedback);
+    writeCheckpoint(); // keep until user saves or discards summary
     setIsTracking(false);
     setDestinationResult(null);
     setDestinationError(null);
@@ -1649,6 +1763,8 @@ export const HudTab: React.FC<HudTabProps> = ({
   // RESET tracking
   const handleResetTracking = () => {
     triggerHaptic('light', settings.hapticFeedback);
+    clearHudCheckpoint();
+    setPendingCheckpoint(null);
     setIsTracking(false);
     setTrackingStopMessage('');
     setTripStartTime(null);
@@ -1729,6 +1845,8 @@ export const HudTab: React.FC<HudTabProps> = ({
       ? ` | Состав: сегмент=${completedTripSummary.segmentEnergyKwhAtStop}, рельеф=${completedTripSummary.elevationEnergyKwhAtStop}, климат=${completedTripSummary.climateEnergyKwhAtStop} кВт⋅ч (мощность климата=${completedTripSummary.climatePowerKwAtStop} кВт при t=${completedTripSummary.temp}°C)`
       : '';
 
+    clearHudCheckpoint();
+    setPendingCheckpoint(null);
     onSaveToHistory({
       date: new Date().toISOString().split('T')[0],
       title: `GPS Трек: ${completedTripSummary.distanceKm} км (${completedTripSummary.avgSpeedKmH} км/ч)`,
@@ -2434,6 +2552,127 @@ export const HudTab: React.FC<HudTabProps> = ({
       </div>
     </div>
   ) : null;
+
+  // ── Resume unfinished trip after WebView kill / reload ────────────────
+  if (pendingCheckpoint && !isTracking && !completedTripSummary) {
+    const cp = pendingCheckpoint;
+    const mins = Math.max(1, Math.round(cp.elapsedSeconds / 60));
+    const agoMin = Math.max(1, Math.round((Date.now() - cp.savedAt) / 60_000));
+    return (
+      <div
+        id="hud-tab-container"
+        className={`relative flex flex-col items-center justify-center gap-4 p-5 select-none ${
+          isLandscape ? 'h-[100dvh]' : 'h-[calc(100dvh-7.5rem)] min-h-[420px]'
+        } ${isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}
+      >
+        <div
+          className={`w-full max-w-sm rounded-2xl border p-4 shadow-xl ${
+            isDark ? 'border-cyan-800/50 bg-slate-900' : 'border-cyan-200 bg-white'
+          }`}
+        >
+          <p className="text-[11px] font-bold uppercase tracking-wide text-cyan-500 mb-1">
+            Незавершённая поездка
+          </p>
+          <p className={`text-sm font-semibold mb-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+            {cp.tripDistanceKm.toFixed(1)} км · {mins} мин · старт {cp.startTripSoc}% SoC
+          </p>
+          <p className={`text-[12px] mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Сохранено ~{agoMin} мин назад. Продолжить трекинг, сохранить в историю или удалить?
+          </p>
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('success', settings.hapticFeedback);
+                applyCheckpoint(cp);
+              }}
+              className="w-full rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-sm py-3"
+            >
+              Продолжить
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('medium', settings.hapticFeedback);
+                const finalDistance = Number((cp.distanceKm || cp.tripDistanceKm).toFixed(1));
+                const finalMinutes = Math.max(1, Math.round(cp.elapsedSeconds / 60));
+                const finalEnergy = Number(
+                  (
+                    (cp.segmentEnergyKwh || 0) +
+                    (cp.elevationEnergyKwh || 0) +
+                    (cp.climateEnergyKwh || 0)
+                  ).toFixed(2),
+                );
+                const finalEndSoc = Math.max(
+                  0,
+                  Math.round(
+                    cp.startTripSoc -
+                      (finalEnergy / (settings.batteryCapacityKwh || 51.87)) * 100,
+                  ),
+                );
+                distanceRef.current = cp.distanceKm;
+                segmentEnergyKwhRef.current = cp.segmentEnergyKwh;
+                elevationEnergyKwhRef.current = cp.elevationEnergyKwh;
+                climateEnergyKwhRef.current = cp.climateEnergyKwh;
+                windLogRef.current = Array.isArray(cp.windLog) ? [...(cp.windLog as any[])] : [];
+                setStartTripSoc(cp.startTripSoc);
+                setClimateOn(cp.climateOn);
+                setPassengers(cp.passengers);
+                setCompletedTripSummary({
+                  distanceKm: finalDistance,
+                  avgSpeedKmH:
+                    finalMinutes > 0
+                      ? Math.min(160, Math.round((finalDistance / finalMinutes) * 60))
+                      : cp.maxSpeed,
+                  maxSpeedKmH: cp.maxSpeed,
+                  durationMinutes: finalMinutes,
+                  estimatedCons:
+                    finalDistance > 0.1
+                      ? Number(((finalEnergy / finalDistance) * 100).toFixed(1))
+                      : 0,
+                  temp: outdoorTempRef.current,
+                  windStatus: '',
+                  precipitationStatus: '',
+                  roadSurface: '',
+                  startSoc: cp.startTripSoc,
+                  endSoc: finalEndSoc,
+                  energyUsedKwh: finalEnergy,
+                  styleFactor: 1,
+                  styleLabel: 'Восстановлено',
+                  segmentEnergyKwhAtStop: Number((cp.segmentEnergyKwh || 0).toFixed(3)),
+                  elevationEnergyKwhAtStop: Number((cp.elevationEnergyKwh || 0).toFixed(3)),
+                  climateEnergyKwhAtStop: Number((cp.climateEnergyKwh || 0).toFixed(3)),
+                  climatePowerKwAtStop: 0,
+                });
+                clearHudCheckpoint();
+                setPendingCheckpoint(null);
+              }}
+              className={`w-full rounded-xl border font-semibold text-sm py-2.5 ${
+                isDark
+                  ? 'border-slate-600 text-slate-200 hover:bg-slate-800'
+                  : 'border-slate-200 text-slate-800 hover:bg-slate-50'
+              }`}
+            >
+              Сохранить в историю
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('light', settings.hapticFeedback);
+                clearHudCheckpoint();
+                setPendingCheckpoint(null);
+              }}
+              className={`w-full rounded-xl text-sm py-2 ${
+                isDark ? 'text-slate-500 hover:text-rose-400' : 'text-slate-400 hover:text-rose-600'
+              }`}
+            >
+              Удалить
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── Pre-start: route from Calculator, map + compact controls ────────────
   // Prefer map-first pre-start whenever a plan destination or geometry exists

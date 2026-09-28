@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Settings,
   Battery,
@@ -11,6 +11,11 @@ import {
   Check,
   Sparkles,
   MapPin,
+  Moon,
+  Sun,
+  Info,
+  LogOut,
+  ShieldCheck,
 } from 'lucide-react';
 import { UserSettings, TripSession } from '../types';
 import {
@@ -45,6 +50,10 @@ interface SettingsTabProps {
   onUpdateSettings: (newSettings: UserSettings) => void;
   onResetData: () => void;
   onImportBackup: (sessions: TripSession[], newSettings: UserSettings | undefined, mode: ImportMode) => void;
+  currentUser?: { login: string; role: 'admin' | 'user' };
+  onOpenAdmin?: () => void;
+  onLogout?: () => void;
+  onOpenAbout?: () => void;
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
@@ -53,11 +62,38 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   onUpdateSettings,
   onResetData,
   onImportBackup,
+  currentUser,
+  onOpenAdmin,
+  onLogout,
+  onOpenAbout,
 }) => {
   const { ask } = useFeedback();
   const [form, setForm] = useState<UserSettings>(settings);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [autoSaved, setAutoSaved] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const autoSaveTimer = useRef<number | null>(null);
+  const formRef = useRef(form);
+  formRef.current = form;
+
+  // Keep form in sync when parent resets/imports settings.
+  useEffect(() => {
+    setForm(settings);
+  }, [settings]);
+
+  // Autosave ~800ms after last change (App already writes localStorage on settings change).
+  useEffect(() => {
+    if (JSON.stringify(form) === JSON.stringify(settings)) return;
+    if (autoSaveTimer.current != null) window.clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = window.setTimeout(() => {
+      onUpdateSettings(formRef.current);
+      setAutoSaved(true);
+      window.setTimeout(() => setAutoSaved(false), 1800);
+    }, 800);
+    return () => {
+      if (autoSaveTimer.current != null) window.clearTimeout(autoSaveTimer.current);
+    };
+  }, [form]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isDark = form.theme !== 'light';
 
@@ -136,6 +172,94 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
           Регион, тарифы ЭЗС и параметры автомобиля. Валюта подставляется из региона.
         </p>
+      </div>
+
+      {/* Account / actions previously in the header — available in landscape via «Ещё» */}
+      <div
+        className={`border rounded-2xl p-3 space-y-2 ${
+          isDark ? 'bg-slate-900/60 border-slate-800/80' : 'bg-white border-slate-200/80 shadow-xs'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Аккаунт и интерфейс
+          </p>
+          {currentUser?.login && (
+            <span className={`text-[11px] font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-700'}`}>
+              {currentUser.login}
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic('light', form.hapticFeedback);
+              const next = form.theme === 'dark' ? 'light' : 'dark';
+              setForm({ ...form, theme: next });
+            }}
+            className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-xs font-semibold min-h-[44px] ${
+              isDark
+                ? 'bg-slate-950 border-slate-800 text-amber-400'
+                : 'bg-slate-50 border-slate-200 text-amber-600'
+            }`}
+          >
+            {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            {isDark ? 'Светлая' : 'Тёмная'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic('light', form.hapticFeedback);
+              onOpenAbout?.();
+            }}
+            className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-xs font-semibold min-h-[44px] ${
+              isDark
+                ? 'bg-slate-950 border-slate-800 text-slate-300'
+                : 'bg-slate-50 border-slate-200 text-slate-700'
+            }`}
+          >
+            <Info className="w-4 h-4" />
+            О проекте
+          </button>
+          {currentUser?.role === 'admin' && (
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('light', form.hapticFeedback);
+                onOpenAdmin?.();
+              }}
+              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-xs font-semibold min-h-[44px] ${
+                isDark
+                  ? 'bg-slate-950 border-slate-800 text-cyan-400'
+                  : 'bg-slate-50 border-slate-200 text-cyan-700'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4" />
+              Админ
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic('medium', form.hapticFeedback);
+              onLogout?.();
+            }}
+            className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-xs font-semibold min-h-[44px] ${
+              isDark
+                ? 'bg-slate-950 border-slate-800 text-rose-300'
+                : 'bg-rose-50 border-rose-200 text-rose-700'
+            }`}
+          >
+            <LogOut className="w-4 h-4" />
+            Выйти
+          </button>
+        </div>
+        {(autoSaved || savedSuccess) && (
+          <p className={`text-[11px] text-center ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+            {savedSuccess ? 'Сохранено' : 'Автосохранение…'}
+          </p>
+        )}
       </div>
 
       <form onSubmit={handleSave} className="space-y-4">

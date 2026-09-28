@@ -38,6 +38,7 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { TripSession, UserSettings, RoadType } from '../types';
+import { getPersonalBenchmarkKwh100 } from '../utils/storage';
 import { exportBackupJSON, exportSessionsCSV, calculateHistoricalDriverStyle, deriveDrivingStyleFactor, getDrivingStyleLabel, getOperatorLabel } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
 import { useBackupImport, type ImportMode } from '../hooks/useBackupImport';
@@ -127,6 +128,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
       highwayAvg,
     };
   }, [sessions]);
+
+  const personalBenchmark = useMemo(() => getPersonalBenchmarkKwh100(sessions), [sessions]);
 
   // Historical Driving Style calculation across all recorded sessions
   const driverStyle = useMemo(() => {
@@ -449,7 +452,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               <span className={`text-[11px] px-2 py-0.5 rounded-md border font-mono ${
                 isDark ? 'bg-slate-950 text-slate-400 border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'
               }`}>
-                Эталон: 14.5 кВт⋅ч
+                Эталон: {personalBenchmark} кВт⋅ч
               </span>
             </div>
           </div>
@@ -521,12 +524,12 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                   }}
                 />
                 <ReferenceLine
-                  y={14.5}
+                  y={personalBenchmark}
                   stroke="#22d3ee"
                   strokeDasharray="4 4"
                   strokeWidth={1.5}
                   label={{
-                    value: '14.5 эталон',
+                    value: `${personalBenchmark} эталон`,
                     position: 'insideTopRight',
                     fill: isDark ? '#22d3ee' : '#06b6d4',
                     fontSize: 10,
