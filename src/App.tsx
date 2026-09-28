@@ -299,49 +299,134 @@ function AppInner() {
     saveSettings(settings);
   }, [settings]);
 
-  // Pull account-backed history/settings once after a successful auth (server is source of truth
-  // when it has data; otherwise keep localStorage as the offline working copy).
+  // Account cloud sync: localStorage is the offline working copy; Redis holds the durable
+  // account copy. Pull merges (never replaces). Push is debounced and can be forced from Settings.
+  type CloudSyncStatus = 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>('idle');
+  const [cloudSyncedAt, setCloudSyncedAt] = useState<string | null>(null);
+  const [cloudSyncDetail, setCloudSyncDetail] = useState('');
   const serverPullDoneRef = useRef(false);
+  const skipNextPushRef = useRef(false);
+  const sessionsRef = useRef(sessions);
+  const settingsRef = useRef(settings);
+  sessionsRef.current = sessions;
+  settingsRef.current = settings;
+
+  /** Drop bulky debug trails before upload — keeps Redis payloads small. */
+  const sessionsForCloud = useCallback((list: TripSession[]) => {
+    return list.map((s) => {
+      if (!s.hudWindLog || s.hudWindLog.length < 4000) return s;
+      const { hudWindLog: _drop, ...rest } = s;
+      return rest as TripSession;
+    });
+  }, []);
+
+  const pushToCloud = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!authUser?.login) return false;
+      if (!opts?.silent) setCloudSyncStatus('syncing');
+      try {
+        const res = await fetch('/api/user/data', {
+          method: 'PUT',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessions: sessionsForCloud(sessionsRef.current),
+            settings: settingsRef.current,
+          }),
+        });
+        if (res.status === 401 || res.status === 403) {
+          setCloudSyncStatus('error');
+          setCloudSyncDetail('Нужен повторный вход');
+          return false;
+        }
+        if (!res.ok) throw new Error('push-failed');
+        const data = await res.json().catch(() => ({}));
+        setCloudSyncStatus('synced');
+        setCloudSyncedAt(data.updatedAt || new Date().toISOString());
+        setCloudSyncDetail('');
+        return true;
+      } catch {
+        setCloudSyncStatus(navigator.onLine === false ? 'offline' : 'error');
+        setCloudSyncDetail(navigator.onLine === false ? 'Нет сети' : 'Не удалось выгрузить');
+        return false;
+      }
+    },
+    [authUser?.login, sessionsForCloud],
+  );
+
+  const pullFromCloud = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!authUser?.login) return;
+      if (!opts?.silent) setCloudSyncStatus('syncing');
+      try {
+        const res = await fetch('/api/user/data', { credentials: 'same-origin' });
+        if (res.status === 401 || res.status === 403) {
+          setCloudSyncStatus('error');
+          setCloudSyncDetail('Нужен повторный вход');
+          return;
+        }
+        if (!res.ok) throw new Error('pull-failed');
+        const data = await res.json();
+        const serverSessions: TripSession[] = Array.isArray(data.sessions) ? data.sessions : [];
+        const local = sessionsRef.current;
+        // Union by id/fingerprint — never wipe local trips with a partial server copy.
+        const { merged, added } = mergeSessions(local, serverSessions);
+        // Also pick up trips that only exist locally is already in `merged`.
+        // If server was empty and local has data, still push so the account is seeded.
+        skipNextPushRef.current = true;
+        if (added > 0 || (serverSessions.length > 0 && merged.length !== local.length)) {
+          setSessions(merged);
+        } else if (serverSessions.length > 0 && local.length === 0) {
+          setSessions(serverSessions);
+        }
+        // Settings: fill only keys the local copy is still on defaults for? Prefer local for
+        // interactive prefs; take server battery/vehicle when local looks untouched is complex.
+        // Practical rule: merge server under local so current device wins on conflict.
+        if (data.settings && typeof data.settings === 'object') {
+          setSettings((prev) => ({ ...data.settings, ...prev }));
+        }
+        setCloudSyncedAt(data.updatedAt || new Date().toISOString());
+        setCloudSyncStatus('synced');
+        setCloudSyncDetail(
+          added > 0 ? `Подтянуто ещё ${pluralTrips(added)} с аккаунта` : '',
+        );
+        // After merge, ensure server has the full union (device B trips + device A trips).
+        skipNextPushRef.current = false;
+        await pushToCloud({ silent: true });
+      } catch {
+        setCloudSyncStatus(navigator.onLine === false ? 'offline' : 'error');
+        setCloudSyncDetail(navigator.onLine === false ? 'Нет сети' : 'Не удалось загрузить');
+      }
+    },
+    [authUser?.login, pushToCloud],
+  );
+
   useEffect(() => {
     if (!authUser?.login || serverPullDoneRef.current) return;
     serverPullDoneRef.current = true;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/user/data', { credentials: 'same-origin' });
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (cancelled) return;
-        if (Array.isArray(data.sessions) && data.sessions.length > 0) {
-          setSessions(data.sessions);
-        }
-        if (data.settings && typeof data.settings === 'object') {
-          setSettings((prev) => ({ ...prev, ...data.settings }));
-        }
-      } catch {
-        /* offline — local cache stays */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [authUser?.login]);
+    void pullFromCloud({ silent: true });
+  }, [authUser?.login, pullFromCloud]);
 
-  // Push local data to Redis (debounced) so a new phone / cleared WebView can recover history.
+  // Debounced auto-push after local edits (skipped right after a pull-driven setState).
   useEffect(() => {
     if (!authUser?.login) return;
+    if (skipNextPushRef.current) {
+      skipNextPushRef.current = false;
+      return;
+    }
     const t = window.setTimeout(() => {
-      fetch('/api/user/data', {
-        method: 'PUT',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessions, settings }),
-      }).catch(() => {
-        /* best-effort */
-      });
+      void pushToCloud({ silent: true });
     }, 2500);
     return () => window.clearTimeout(t);
-  }, [sessions, settings, authUser?.login]);
+  }, [sessions, settings, authUser?.login, pushToCloud]);
+
+  const handleCloudSyncNow = useCallback(async () => {
+    setCloudSyncStatus('syncing');
+    setCloudSyncDetail('');
+    await pullFromCloud();
+    toast({ message: 'Синхронизация с аккаунтом завершена', durationMs: 2500 });
+  }, [pullFromCloud, toast]);
 
   // For Belarus, public ЭЗС tariffs (Malanka, Evika, BatteryFly, Zaryadka) are no longer
   // manually edited in Settings — they're taken automatically from the EVRace tariffs feed
@@ -651,6 +736,10 @@ function AppInner() {
             onOpenAdmin={() => setShowAdmin(true)}
             onLogout={handleLogout}
             onOpenAbout={() => setShowAbout(true)}
+            cloudSyncStatus={cloudSyncStatus}
+            cloudSyncedAt={cloudSyncedAt}
+            cloudSyncDetail={cloudSyncDetail}
+            onCloudSyncNow={handleCloudSyncNow}
           />
         </div>
         </>
