@@ -9,6 +9,8 @@ const redis = new Redis({
 const SESSION_TTL = 60 * 60 * 24 * 7;
 const USERS_KEY = 'vigo:users';
 const SESS_PREFIX = 'vigo:session:';
+/** Maps normalized login → current session token. One active device per account. */
+const USER_ACTIVE_SESS_PREFIX = 'vigo:user_active_session:';
 
 // Brute-force protection for /api/auth/login. Keyed by IP + attempted login so a single
 // attacker can't rotate logins to dodge the limit, and one user's mistyped password can't
@@ -286,9 +288,30 @@ export async function authenticate(login, password) {
   return { login: record.login, role: 'user' };
 }
 
+/**
+ * Create a new session and revoke any previous one for this login.
+ * Logging in on device B invalidates the session cookie still held by device A.
+ */
 export async function createSession(user) {
   const token = crypto.randomBytes(32).toString('base64url');
-  await redis.set(`${SESS_PREFIX}${token}`, user, { ex: SESSION_TTL });
+  const loginKey = (user?.login || '').trim().toLowerCase();
+
+  if (loginKey) {
+    const activeKey = `${USER_ACTIVE_SESS_PREFIX}${loginKey}`;
+    try {
+      const previousToken = await redis.get(activeKey);
+      if (previousToken && typeof previousToken === 'string' && previousToken !== token) {
+        await redis.del(`${SESS_PREFIX}${previousToken}`);
+      }
+    } catch (err) {
+      console.error('Failed to revoke previous session:', err);
+    }
+    await redis.set(`${SESS_PREFIX}${token}`, user, { ex: SESSION_TTL });
+    await redis.set(activeKey, token, { ex: SESSION_TTL });
+  } else {
+    await redis.set(`${SESS_PREFIX}${token}`, user, { ex: SESSION_TTL });
+  }
+
   return token;
 }
 
@@ -296,7 +319,23 @@ export async function getSession(req) {
   const raw = req.headers.cookie || '';
   const match = raw.match(/(?:^|;\s*)vigo_session=([^;]+)/);
   if (!match) return null;
-  try { return await redis.get(`${SESS_PREFIX}${match[1]}`); } catch { return null; }
+  const token = match[1];
+  try {
+    const user = await redis.get(`${SESS_PREFIX}${token}`);
+    if (!user) return null;
+    // Extra guard: if this token is no longer the user's active one, treat as logged out.
+    const loginKey = (user.login || '').trim().toLowerCase();
+    if (loginKey) {
+      const active = await redis.get(`${USER_ACTIVE_SESS_PREFIX}${loginKey}`);
+      if (active && active !== token) {
+        await redis.del(`${SESS_PREFIX}${token}`);
+        return null;
+      }
+    }
+    return user;
+  } catch {
+    return null;
+  }
 }
 
 export function setSessionCookie(res, user) {
@@ -308,7 +347,21 @@ export function setSessionCookie(res, user) {
 export async function clearSession(req, res) {
   const raw = req.headers.cookie || '';
   const match = raw.match(/(?:^|;\s*)vigo_session=([^;]+)/);
-  if (match) await redis.del(`${SESS_PREFIX}${match[1]}`);
+  if (match) {
+    const token = match[1];
+    try {
+      const user = await redis.get(`${SESS_PREFIX}${token}`);
+      await redis.del(`${SESS_PREFIX}${token}`);
+      const loginKey = (user?.login || '').trim().toLowerCase();
+      if (loginKey) {
+        const activeKey = `${USER_ACTIVE_SESS_PREFIX}${loginKey}`;
+        const active = await redis.get(activeKey);
+        if (active === token) await redis.del(activeKey);
+      }
+    } catch {
+      await redis.del(`${SESS_PREFIX}${token}`);
+    }
+  }
   res.setHeader('Set-Cookie', `vigo_session=; ${cookieOptions(0)}`);
 }
 
