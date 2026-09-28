@@ -327,6 +327,8 @@ export const HudTab: React.FC<HudTabProps> = ({
   const distanceRef = useRef<number>(0);
   const smoothSpeedBufferRef = useRef<number[]>([]);
   const lastHeadingRef = useRef<number>(0);
+  /** Rolling GPS track bearings — median-smoothed before publishing to the map. */
+  const bearingHistoryRef = useRef<number[]>([]);
   // Last values pushed to React state from the GPS callback. Algorithms still write full-precision
   // data into the refs above on every tick; these mirrors only avoid redundant setState when the
   // UI-visible number did not change (or heading jitter is below a small threshold).
@@ -761,8 +763,7 @@ export const HudTab: React.FC<HudTabProps> = ({
         setCurrentSpeed(smoothedSpeed);
       }
 
-      // Course for map/UI: prefer GPS track bearing (stable while driving).
-      // Device compass is noisy in a car and was spinning the HUD map.
+      // Course for map/UI: GPS track bearing with short median filter (kills turn jitter).
       // Hold last heading when nearly stopped — do not republish every tick.
       const publishHeadingUi = (nextHeading: number) => {
         const rounded = Math.round(nextHeading);
@@ -773,9 +774,9 @@ export const HudTab: React.FC<HudTabProps> = ({
           setGpsHeading(rounded);
           return;
         }
-        // Wider threshold → fewer React updates → less map thrash.
         const delta = Math.abs(((rounded - prevUi + 540) % 360) - 180);
-        if (delta >= 5) {
+        // Publish often enough for smooth chase, but skip sub-degree noise.
+        if (delta >= 3) {
           uiGpsPublishedRef.current.heading = rounded;
           setGpsHeading(rounded);
         }
@@ -788,17 +789,32 @@ export const HudTab: React.FC<HudTabProps> = ({
           latitude,
           longitude
         );
-        publishHeadingUi(bearing);
+        const hist = bearingHistoryRef.current;
+        hist.push(bearing);
+        if (hist.length > 5) hist.shift();
+        // Circular mean of recent bearings (more stable than last sample on turns).
+        let sinSum = 0;
+        let cosSum = 0;
+        for (const b of hist) {
+          const r = (b * Math.PI) / 180;
+          sinSum += Math.sin(r);
+          cosSum += Math.cos(r);
+        }
+        const avg =
+          hist.length > 0
+            ? ((Math.atan2(sinSum / hist.length, cosSum / hist.length) * 180) / Math.PI + 360) % 360
+            : bearing;
+        publishHeadingUi(avg);
       } else if (
         heading !== null &&
         !isNaN(heading) &&
         heading >= 0 &&
-        smoothedSpeed >= 12
+        smoothedSpeed >= 15
       ) {
-        // Compass only as fallback at higher speed if track bearing unavailable.
         publishHeadingUi(heading);
+      } else if (smoothedSpeed < 5) {
+        bearingHistoryRef.current = [];
       }
-      // When slow/stopped: keep lastHeadingRef as-is (no continuous republish).
 
       // === ACCUMULATE TRIP DISTANCE (with strict glitch checks) ===
       if (isTracking && prevPositionRef.current && isPlausibleReading) {
@@ -1511,6 +1527,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     setMaxSpeed(0);
     distanceRef.current = 0;
     speedHistoryRef.current = [];
+    bearingHistoryRef.current = [];
     smoothSpeedBufferRef.current = [];
     smoothedAltitudeRef.current = null;
     lastCountedAltitudeRef.current = null;
@@ -1606,6 +1623,7 @@ export const HudTab: React.FC<HudTabProps> = ({
     setMaxSpeed(0);
     distanceRef.current = 0;
     speedHistoryRef.current = [];
+    bearingHistoryRef.current = [];
     smoothSpeedBufferRef.current = [];
     smoothedAltitudeRef.current = null;
     lastCountedAltitudeRef.current = null;

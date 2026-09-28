@@ -638,17 +638,17 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
     };
 
-    // Position catches GPS in ~0.4s. Heading is MUCH slower — GPS/compass is noisy.
-    const POS_LERP = 0.16;
-    const HEAD_LERP = 0.04; // ~1s time-constant; kills left/right thrashing
-    /** Ignore heading noise smaller than this before chasing (deg). */
-    const HEAD_DEADZONE = 6;
-    /** Only push a new camera azimuth when smoothed heading moved this much (deg). */
-    const CAMERA_HEAD_STEP = 12;
-    /** Min ms between camera rotation commands. */
-    const CAMERA_ROTATE_MS = 400;
-    /** Min ms between map center updates. */
+    // Position: catch GPS in ~0.4s. Heading target: very soft chase (GPS jumps on turns).
+    const POS_LERP = 0.14;
+    const HEAD_LERP = 0.06;
+    const HEAD_DEADZONE = 3; // deg — ignore tiny GPS noise
+    /** Max camera rotation rate (°/s) — feels like nav, not a spin. */
+    const MAX_YAW_DEG_PER_SEC = 40;
+    /** How often we nudge the map camera (ms). */
+    const CAMERA_TICK_MS = 100;
     const CENTER_MS = 120;
+
+    let lastTickMs = performance.now();
 
     const tick = () => {
       const target = followTargetRef.current;
@@ -656,6 +656,10 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         followLoopRafRef.current = requestAnimationFrame(tick);
         return;
       }
+
+      const now = performance.now();
+      const dtSec = Math.min(0.05, Math.max(0.008, (now - lastTickMs) / 1000));
+      lastTickMs = now;
 
       let disp = displayPosRef.current;
       if (!disp) {
@@ -666,7 +670,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         disp.lon += (target.lon - disp.lon) * POS_LERP;
       }
 
-      // Smooth heading toward target (shortest angle), with deadzone + rate limit.
+      // Soft heading chase toward GPS target (no big jumps).
       if (target.heading != null && Number.isFinite(target.heading)) {
         const prev = displayHeadingRef.current;
         if (prev == null) {
@@ -674,17 +678,13 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         } else {
           const d = normalizeDeg180(target.heading - prev);
           if (Math.abs(d) >= HEAD_DEADZONE) {
-            // Cap per-frame turn so a single bad GPS sample cannot spin the map.
-            const maxStep = 2.5; // deg per frame ≈ 150°/s ceiling
-            const step = Math.max(-maxStep, Math.min(maxStep, d * HEAD_LERP));
-            displayHeadingRef.current = prev + step;
+            displayHeadingRef.current = prev + d * HEAD_LERP;
           }
         }
       }
       const headingSmooth = displayHeadingRef.current;
 
-      // Course-up: arrow stays screen-up once camera tracks heading.
-      // Small residual from lag is OK; do not chase map.azimuth every frame (feedback jitter).
+      // Course-up: arrow fixed screen-up.
       const arrowDeg =
         followModeRef.current && bundle.apiVersion === 3
           ? 0
@@ -693,9 +693,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       ensureMarker(disp.lat, disp.lon, arrowDeg);
 
       if (followModeRef.current && Date.now() >= userNavPauseUntilRef.current) {
-        const now = performance.now();
-
-        // Center follows smoothed marker (no duration — we already lerp).
+        // Center on smoothed marker.
         if (now - lastCenterPushMsRef.current >= CENTER_MS) {
           lastCenterPushMsRef.current = now;
           if (bundle.apiVersion === 3) {
@@ -724,31 +722,41 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           }
         }
 
-        // Rotate camera only on meaningful, throttled heading changes.
+        // Continuous rate-limited camera yaw — no step jumps of 12°+.
         if (
           bundle.apiVersion === 3 &&
           headingSmooth != null &&
           Number.isFinite(headingSmooth) &&
-          now - lastCameraPushMsRef.current >= CAMERA_ROTATE_MS
+          now - lastCameraPushMsRef.current >= CAMERA_TICK_MS
         ) {
-          const lastCam = lastCameraHeadingDegRef.current;
-          const deltaCam =
-            lastCam == null ? 999 : Math.abs(normalizeDeg180(headingSmooth - lastCam));
-          if (lastCam == null || deltaCam >= CAMERA_HEAD_STEP) {
-            lastCameraPushMsRef.current = now;
-            lastCameraHeadingDegRef.current = headingSmooth;
-            const az = headingDegToAzimuthRad(headingSmooth);
-            try {
-              if (typeof map.setCamera === 'function') {
-                map.setCamera({ azimuth: az, duration: 450 });
-              } else {
-                map.update({ camera: { azimuth: az, duration: 450 } });
-              }
-            } catch {
-              try {
-                map.update({ camera: { azimuth: az, duration: 450 } });
-              } catch { /* ignore */ }
+          lastCameraPushMsRef.current = now;
+          let camH = lastCameraHeadingDegRef.current;
+          if (camH == null) {
+            camH = headingSmooth;
+          } else {
+            const err = normalizeDeg180(headingSmooth - camH);
+            const maxStep = MAX_YAW_DEG_PER_SEC * (CAMERA_TICK_MS / 1000);
+            const step = Math.max(-maxStep, Math.min(maxStep, err));
+            // Skip tiny residual to avoid micro-jitter when already aligned.
+            if (Math.abs(err) < 1.5) {
+              camH = headingSmooth;
+            } else {
+              camH = camH + step;
             }
+          }
+          lastCameraHeadingDegRef.current = camH;
+          const az = headingDegToAzimuthRad(camH);
+          // duration ≈ tick interval → adjacent updates blend instead of fighting.
+          try {
+            if (typeof map.setCamera === 'function') {
+              map.setCamera({ azimuth: az, duration: CAMERA_TICK_MS });
+            } else {
+              map.update({ camera: { azimuth: az, duration: CAMERA_TICK_MS } });
+            }
+          } catch {
+            try {
+              map.update({ camera: { azimuth: az, duration: CAMERA_TICK_MS } });
+            } catch { /* ignore */ }
           }
         }
       }
