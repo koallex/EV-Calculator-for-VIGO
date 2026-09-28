@@ -603,18 +603,23 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           return b.chargeAddedSoc - a.chargeAddedSoc;
         });
 
-      // Optional search with high finish SOC: if strict window found nothing, take the
-      // best mid-route VIGO station with any positive charge session.
-      if (!candidates.length && (!mustCharge || force)) {
+      // Soft fallback when strict comfort filters found nothing.
+      // Previously this ran only when !mustCharge — so "нужна зарядка" + empty list
+      // was a common dead-end (e.g. arrival 15–19% with stations only in the route tail).
+      if (!candidates.length) {
         candidates = vigoStations
           .map((station) => {
             const socAtStation = socAtDistance(station.distanceAlongRouteKm);
             const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
-            if (socAtStation < 10 || socAtStation > 88) return null;
-            if (remainingKm < 10) return null;
+            // Reachable stop with room after it; slightly looser than comfort window.
+            if (socAtStation < 8 || socAtStation > 90) return null;
+            if (remainingKm < 12) return null;
             if (station.distanceAlongRouteKm < 5) return null;
             const remainingEnergyKwh = totalEnergyKwh * (remainingKm / Math.max(0.001, totalDistanceKm));
-            const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + ARRIVAL_RESERVE_SOC);
+            const minRequiredSoc = Math.min(
+              95,
+              (remainingEnergyKwh / batteryCap) * 100 + (mustCharge ? FINISH_SOC_TARGET : ARRIVAL_RESERVE_SOC),
+            );
             const connector: ChargeConnector = (() => {
               if (vehicleConnectors.includes('gbt') && station.hasGbt) return 'gbt';
               if (vehicleConnectors.includes('ccs2') && (station.hasCcs2 || station.connectorTypeUnknown)) return 'ccs2';
@@ -632,7 +637,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             const stationMaxPowerKw = rawStationMaxPowerKw ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
             const desiredTarget = Math.min(
               90,
-              Math.max(socAtStation + 5, minRequiredSoc),
+              Math.max(socAtStation + (mustCharge ? 8 : 5), minRequiredSoc),
             );
             const targetSoc = findOptimalChargeTargetSoc(
               socAtStation,
@@ -645,7 +650,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               },
             );
             const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
-            if (chargeAddedSoc < 3) return null;
+            // When we must charge, even a 5% top-up is better than "no plan".
+            if (chargeAddedSoc < (mustCharge ? 5 : 3)) return null;
             const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw);
             if (session.minutes <= 0) return null;
             const finishSocAfterCharge = Math.max(
@@ -715,6 +721,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       let socCursor = startSoc;
       const energyPerKm = totalEnergyKwh / Math.max(0.001, totalDistanceKm);
 
+      // When mustCharge and the only stations sit near the end, allow a shorter tail
+      // rather than returning an empty plan (was a common Minsk→north-west failure mode).
+      const effectiveMinTailKm = mustCharge ? Math.min(MIN_TAIL_KM, 18) : MIN_TAIL_KM;
+
       const buildStopCandidate = (
         station: (typeof vigoStations)[0],
         socAtStation: number,
@@ -722,7 +732,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       ) => {
         const remainingKm = Math.max(0, totalDistanceKm - station.distanceAlongRouteKm);
         const remainingEnergyKwh = energyPerKm * remainingKm;
-        if (remainingKm < MIN_TAIL_KM) return null; // no stop in the tail of the route
+        if (remainingKm < effectiveMinTailKm) return null;
         const minRequiredSoc = Math.min(95, (remainingEnergyKwh / batteryCap) * 100 + reserveAtB);
         const connector: ChargeConnector = (() => {
           if (vehicleConnectors.includes('gbt') && station.hasGbt) return 'gbt';
@@ -849,7 +859,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         }
       }
 
-      // If single (or last) stop still ends below MIN only slightly, leave it — band is soft.
+      // Planner produced nothing (e.g. all candidates in the hard tail) but the
+      // ranked list still has usable stops — take the best one rather than "unavailable".
+      if (!plan.length && candidates.length) {
+        plan.push(candidates[0]);
+      }
+
       if (!plan.length) {
         setChargingSuggestion(null);
         setChargingStops([]);
