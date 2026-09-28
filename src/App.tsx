@@ -26,12 +26,35 @@ import { LoginScreen, AuthUser } from './components/LoginScreen';
 import { AdminPanel } from './components/AdminPanel';
 import { AboutProject } from './components/AboutProject';
 import { useEvraceTariffs, deriveOperatorSettingsFromEvrace } from './hooks/useEvraceTariffs';
+import { FeedbackProvider, useFeedback } from './components/ui/Feedback';
+import { mergeSessions, pluralTrips } from './utils/backup';
+import type { ImportMode } from './hooks/useBackupImport';
 
-export default function App() {
+// Last successfully verified user. Used ONLY to let the app open when the server can't be reached
+// (no signal on the road). It holds no credentials; every API call is still checked by the server.
+const LAST_USER_KEY = 'vigo_last_user_v1';
+const readCachedUser = (): AuthUser | null => {
+  try {
+    const raw = localStorage.getItem(LAST_USER_KEY);
+    if (!raw) return null;
+    const u = JSON.parse(raw);
+    return u && typeof u.login === 'string' && (u.role === 'admin' || u.role === 'user') ? u : null;
+  } catch { return null; }
+};
+const writeCachedUser = (u: AuthUser) => { try { localStorage.setItem(LAST_USER_KEY, JSON.stringify(u)); } catch { /* ignore */ } };
+const clearCachedUser = () => { try { localStorage.removeItem(LAST_USER_KEY); } catch { /* ignore */ } };
+const AUTH_CHECK_TIMEOUT_MS = 8000;
+
+function AppInner() {
+  const { toast } = useFeedback();
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  // Bumped when settings are replaced from outside the Settings form (reset / import / undo),
+  // so the form remounts with fresh values instead of showing — and later re-saving — stale ones.
+  const [settingsFormKey, setSettingsFormKey] = useState(0);
+  const offlineNotifiedRef = useRef(false);
   const [settings, setSettings] = useState<UserSettings>(loadSettings);
   const [sessions, setSessions] = useState<TripSession[]>(loadSessions);
   const [activeTab, setActiveTab] = useState<TabType>('calculator');
@@ -170,16 +193,43 @@ export default function App() {
   }, [activeTab]);
 
   // Server-side authentication. No credentials are stored in localStorage.
+  // 401/403 → really signed out. Network error / timeout / 5xx → keep working with the last known
+  // user (offline mode) instead of bouncing to the login screen, where signing in is impossible anyway.
+  const checkAuth = useCallback(async () => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), AUTH_CHECK_TIMEOUT_MS);
+    try {
+      const response = await fetch('/api/auth/me', { credentials: 'same-origin', signal: controller.signal });
+      if (response.status === 401 || response.status === 403) {
+        clearCachedUser();
+        setAuthUser(null);
+        return;
+      }
+      if (!response.ok) throw new Error('server-unavailable');
+      const data = await response.json();
+      setAuthUser(data.user);
+      writeCachedUser(data.user);
+      offlineNotifiedRef.current = false;
+    } catch {
+      const cached = readCachedUser();
+      setAuthUser((prev) => prev ?? cached);
+      if (cached && !offlineNotifiedRef.current) {
+        offlineNotifiedRef.current = true;
+        toast({ message: 'Нет связи с сервером. Приложение открыто без проверки входа.', durationMs: 4500 });
+      }
+    } finally {
+      window.clearTimeout(timer);
+      setAuthChecking(false);
+    }
+  }, [toast]);
+
   useEffect(() => {
-    fetch('/api/auth/me', { credentials: 'same-origin' })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('unauthorized');
-        const data = await response.json();
-        setAuthUser(data.user);
-      })
-      .catch(() => setAuthUser(null))
-      .finally(() => setAuthChecking(false));
-  }, []);
+    void checkAuth();
+    // When the connection comes back, re-verify (this also signs out users removed by the admin).
+    const onOnline = () => { void checkAuth(); };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [checkAuth]);
 
   // Record an app-open event for the admin statistics. Fired once per mount
   // (i.e. once per real app open), independent of auth state, and never
@@ -199,6 +249,7 @@ export default function App() {
   // session exists, so this open is attributed to the user in the admin stats.
   const handleLogin = (user: AuthUser) => {
     setAuthUser(user);
+    writeCachedUser(user);
     recordVisit();
   };
 
@@ -206,6 +257,7 @@ export default function App() {
     try {
       await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
     } finally {
+      clearCachedUser();
       setAuthUser(null);
       setShowAdmin(false);
       setActiveTab('calculator');
@@ -281,7 +333,20 @@ export default function App() {
   };
 
   const handleDeleteSession = (id: string) => {
+    const index = sessions.findIndex((s) => s.id === id);
+    if (index < 0) return;
+    const removed = sessions[index];
     setSessions((prev) => prev.filter((s) => s.id !== id));
+    toast({
+      message: 'Запись удалена',
+      actionLabel: 'Отменить',
+      onAction: () =>
+        setSessions((prev) =>
+          prev.some((s) => s.id === removed.id)
+            ? prev
+            : [...prev.slice(0, index), removed, ...prev.slice(index)],
+        ),
+    });
   };
 
   const handleUpdateSessionEndSoc = (id: string, endSoc: number) => {
@@ -321,20 +386,59 @@ export default function App() {
   };
 
   const handleResetData = () => {
+    const prevSettings = settings;
+    const prevSessions = sessions;
     setSettings(DEFAULT_SETTINGS);
     setSessions(INITIAL_SESSIONS);
+    setSettingsFormKey((k) => k + 1);
+    toast({
+      message: 'Данные сброшены',
+      actionLabel: 'Вернуть',
+      durationMs: 10000,
+      onAction: () => {
+        setSettings(prevSettings);
+        setSessions(prevSessions);
+        setSettingsFormKey((k) => k + 1);
+      },
+    });
   };
 
   const handleImportBackup = (
     importedSessions: TripSession[],
-    importedSettings?: UserSettings
+    importedSettings?: UserSettings,
+    mode: ImportMode = 'replace'
   ) => {
-    if (Array.isArray(importedSessions)) {
+    if (!Array.isArray(importedSessions)) return;
+    const prevSessions = sessions;
+    const prevSettings = settings;
+    let message: string;
+
+    if (mode === 'merge') {
+      const { merged, added } = mergeSessions(sessions, importedSessions);
+      if (added === 0) {
+        toast({ message: 'Новых записей нет — всё из файла уже есть в истории.' });
+        return;
+      }
+      setSessions(merged);
+      message = `Добавлено: ${pluralTrips(added)}`;
+    } else {
       setSessions(importedSessions);
+      // Fill anything missing in older backups from defaults so no setting ends up undefined.
+      if (importedSettings) setSettings({ ...DEFAULT_SETTINGS, ...importedSettings });
+      message = `Загружено: ${pluralTrips(importedSessions.length)}`;
     }
-    if (importedSettings) {
-      setSettings(importedSettings);
-    }
+
+    setSettingsFormKey((k) => k + 1);
+    toast({
+      message,
+      actionLabel: 'Отменить',
+      durationMs: 10000,
+      onAction: () => {
+        setSessions(prevSessions);
+        setSettings(prevSettings);
+        setSettingsFormKey((k) => k + 1);
+      },
+    });
   };
 
   const openAddModalWithData = (data: Partial<TripSession>) => {
@@ -463,6 +567,7 @@ export default function App() {
           style={{ display: activeTab === 'settings' ? 'block' : 'none' }}
         >
           <SettingsTab
+            key={settingsFormKey}
             settings={settings}
             sessions={sessions}
             onUpdateSettings={setSettings}
@@ -503,5 +608,13 @@ export default function App() {
         initialData={addTripInitialData}
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <FeedbackProvider>
+      <AppInner />
+    </FeedbackProvider>
   );
 }
