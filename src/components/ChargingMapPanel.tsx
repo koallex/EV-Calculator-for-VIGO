@@ -1002,7 +1002,16 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       );
       const { results } = await findNearbyFreeCcsChargers(
         { lat, lon },
-        { radiusKm: 40, limit: 10, vehicleConnectors },
+        {
+          radiusKm: 40,
+          limit: 10,
+          vehicleConnectors,
+          filterConnectors: connFilters,
+          operatorKeys: operatorFilter,
+          minPowerKw,
+          maxPrice,
+          tariffs: evraceTariffs,
+        },
       );
       setNearestFreeList(results);
       if (!results.length) {
