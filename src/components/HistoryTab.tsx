@@ -40,6 +40,7 @@ import {
 import { TripSession, UserSettings, RoadType } from '../types';
 import { exportBackupJSON, exportSessionsCSV, calculateHistoricalDriverStyle, deriveDrivingStyleFactor, getDrivingStyleLabel, getOperatorLabel } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
+import { useBackupImport, type ImportMode } from '../hooks/useBackupImport';
 
 interface HistoryTabProps {
   sessions: TripSession[];
@@ -47,7 +48,7 @@ interface HistoryTabProps {
   onDeleteSession: (id: string) => void;
   onUpdateSessionEndSoc: (id: string, endSoc: number) => void;
   onOpenAddModal: () => void;
-  onImportBackup: (importedSessions: TripSession[], importedSettings?: UserSettings) => void;
+  onImportBackup: (importedSessions: TripSession[], importedSettings: UserSettings | undefined, mode: ImportMode) => void;
 }
 
 export const HistoryTab: React.FC<HistoryTabProps> = ({
@@ -168,29 +169,8 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
     });
   }, [sessions, filterRoad, searchQuery]);
 
-  // Handle Import
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const content = event.target?.result as string;
-        const parsed = JSON.parse(content);
-        if (parsed.sessions && Array.isArray(parsed.sessions)) {
-          onImportBackup(parsed.sessions, parsed.settings);
-          triggerHaptic('success', settings.hapticFeedback);
-        } else if (Array.isArray(parsed)) {
-          onImportBackup(parsed);
-          triggerHaptic('success', settings.hapticFeedback);
-        }
-      } catch {
-        alert('Ошибка при чтении файла бэкапа. Убедитесь, что это JSON файл.');
-      }
-    };
-    reader.readAsText(file);
-  };
+  // Handle Import (validation + replace/merge choice live in useBackupImport)
+  const handleFileChange = useBackupImport(onImportBackup, sessions.length, settings.hapticFeedback);
 
   const getChargingTypeLabel = (type: TripSession['chargingType']) => {
     const region = settings.regionPreset;
@@ -654,6 +634,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               exportSessionsCSV(sessions, settings.currency);
             }}
             title="Экспорт в Excel / CSV"
+            aria-label="Экспорт в CSV"
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold active:scale-95 transition-all ${
               isDark
                 ? 'bg-slate-900 hover:bg-slate-800 text-cyan-400 border-slate-800'
@@ -670,6 +651,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               exportBackupJSON(settings, sessions);
             }}
             title="Скачать JSON бэкап"
+            aria-label="Скачать резервную копию"
             className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold active:scale-95 transition-all ${
               isDark
                 ? 'bg-slate-900 hover:bg-slate-800 text-cyan-400 border-slate-800'
@@ -691,6 +673,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
           <button
             onClick={() => fileInputRef.current?.click()}
             title="Восстановить из JSON бэкапа"
+            aria-label="Восстановить из резервной копии"
             className={`p-1.5 rounded-lg border active:scale-95 transition-all ${
               isDark
                 ? 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
@@ -966,10 +949,9 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (confirm('Удалить эту запись из истории?')) {
-                            triggerHaptic('medium', settings.hapticFeedback);
-                            onDeleteSession(trip.id);
-                          }
+                          // No confirm(): deletion is undoable via the toast shown by App.
+                          triggerHaptic('medium', settings.hapticFeedback);
+                          onDeleteSession(trip.id);
                         }}
                         className="flex items-center gap-1 text-rose-500 hover:text-rose-600 text-xs font-semibold py-1 px-2 rounded-lg hover:bg-rose-500/10 transition-all"
                       >

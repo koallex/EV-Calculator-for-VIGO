@@ -75,6 +75,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="theme-toggle-button"
             onClick={toggleTheme}
+            aria-label={isDark ? 'Включить светлую тему' : 'Включить тёмную тему'}
             title={isDark ? 'Включить светлую тему' : 'Включить темную тему'}
             className={`w-9 h-9 rounded-xl flex items-center justify-center active:scale-95 transition-all border ${
               isDark
@@ -93,6 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="about-project-button"
             onClick={onOpenAbout}
+            aria-label="О проекте"
             title="О проекте"
             className={`w-9 h-9 rounded-xl flex items-center justify-center border active:scale-95 ${
               isDark ? 'bg-slate-900/90 border-slate-800 text-slate-400 hover:text-cyan-400' : 'bg-slate-100 border-slate-200 text-slate-500 hover:text-cyan-600'
@@ -118,6 +120,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="admin-panel-button"
               onClick={onOpenAdmin}
+              aria-label="Админ-панель"
               title="Админ-панель"
               className={`w-9 h-9 rounded-xl flex items-center justify-center border active:scale-95 ${
                 isDark ? 'bg-slate-900/90 border-slate-800 text-cyan-400' : 'bg-slate-100 border-slate-200 text-cyan-600'
@@ -130,6 +133,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="logout-button"
             onClick={onLogout}
+            aria-label={`Выйти из аккаунта${currentUser?.login ? ` (${currentUser.login})` : ''}`}
             title={`Выйти (${currentUser?.login ?? ''})`}
             className={`w-9 h-9 rounded-xl flex items-center justify-center border active:scale-95 ${
               isDark ? 'bg-slate-900/90 border-slate-800 text-slate-400' : 'bg-slate-100 border-slate-200 text-slate-500'

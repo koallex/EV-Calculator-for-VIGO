@@ -34,13 +34,17 @@ import {
 } from '../data/vehicleProfiles';
 import { DecimalInput } from './DecimalInput';
 import { triggerHaptic } from '../utils/haptics';
+import { useBackupImport, type ImportMode } from '../hooks/useBackupImport';
+import { useFeedback } from './ui/Feedback';
+import { pluralTrips } from '../utils/backup';
+import { APP_VERSION } from '../appInfo';
 
 interface SettingsTabProps {
   settings: UserSettings;
   sessions: TripSession[];
   onUpdateSettings: (newSettings: UserSettings) => void;
   onResetData: () => void;
-  onImportBackup: (sessions: TripSession[], newSettings?: UserSettings) => void;
+  onImportBackup: (sessions: TripSession[], newSettings: UserSettings | undefined, mode: ImportMode) => void;
 }
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({
@@ -50,6 +54,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   onResetData,
   onImportBackup,
 }) => {
+  const { ask } = useFeedback();
   const [form, setForm] = useState<UserSettings>(settings);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -82,29 +87,28 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Validation + replace/merge choice live in useBackupImport (shared with History).
+  const handleFileChange = useBackupImport(onImportBackup, sessions.length, settings.hapticFeedback);
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const content = event.target?.result as string;
-        const parsed = JSON.parse(content);
-        if (parsed.sessions && Array.isArray(parsed.sessions)) {
-          onImportBackup(parsed.sessions, parsed.settings);
-          triggerHaptic('success', settings.hapticFeedback);
-          alert('Данные успешно импортированы!');
-        } else if (Array.isArray(parsed)) {
-          onImportBackup(parsed);
-          triggerHaptic('success', settings.hapticFeedback);
-          alert('Поездки успешно импортированы!');
-        }
-      } catch {
-        alert('Ошибка импорта. Проверьте правильность JSON файла.');
-      }
-    };
-    reader.readAsText(file);
+  const handleResetClick = async () => {
+    const choice = await ask({
+      title: 'Сбросить все данные?',
+      message: (
+        <div className="space-y-1.5">
+          <div>Будут удалены <b>{pluralTrips(sessions.length)}</b> и все настройки — вернутся значения по умолчанию.</div>
+          <div className="opacity-80">Сразу после сброса будет доступна кнопка «Вернуть» (10 секунд).</div>
+        </div>
+      ),
+      actions: [
+        { id: 'backup', label: 'Скачать бэкап и сбросить', tone: 'primary' },
+        { id: 'reset', label: 'Сбросить без бэкапа', tone: 'danger' },
+        { id: 'cancel', label: 'Отмена', tone: 'neutral' },
+      ],
+    });
+    if (choice !== 'backup' && choice !== 'reset') return;
+    if (choice === 'backup') exportBackupJSON(settings, sessions);
+    onResetData();
+    setForm(DEFAULT_SETTINGS);
   };
 
   return (
@@ -799,7 +803,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         </button>
       </form>
 
-      <div className={`text-center text-[9px] ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>Версия 1.01</div>
+      <div className={`text-center text-[9px] ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>Версия {APP_VERSION}</div>
 
       {/* 5. Backup & Data Management */}
       <div
@@ -872,12 +876,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
           <button
             type="button"
-            onClick={() => {
-              if (confirm('Сбросить все поездки и настройки к начальным значениям?')) {
-                onResetData();
-                setForm(DEFAULT_SETTINGS);
-              }
-            }}
+            onClick={handleResetClick}
             className={`py-2 px-3 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1.5 active:scale-95 transition-all ${
               isDark
                 ? 'bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-900/60'

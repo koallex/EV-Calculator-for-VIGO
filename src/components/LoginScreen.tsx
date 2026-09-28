@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LockKeyhole, LogIn, Loader2, Zap, UserPlus } from 'lucide-react';
+import { LockKeyhole, LogIn, Loader2, Zap, UserPlus, Eye, EyeOff } from 'lucide-react';
 
 export interface AuthUser {
   login: string;
@@ -19,6 +19,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -123,14 +124,23 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
               <LockKeyhole className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
               <input
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 py-2.5 text-sm outline-none focus:border-cyan-500"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-11 py-2.5 text-sm outline-none focus:border-cyan-500"
                 placeholder={mode === 'login' ? 'Введите пароль' : 'Минимум 8 символов'}
                 minLength={mode === 'register' ? 8 : undefined}
                 required
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+                aria-pressed={showPassword}
+                className="absolute right-0 top-0 h-full w-11 flex items-center justify-center text-slate-500 hover:text-slate-300"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
           </label>
 
@@ -141,7 +151,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
                 <LockKeyhole className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
                 <input
                   autoComplete="new-password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={passwordConfirm}
                   onChange={(e) => setPasswordConfirm(e.target.value)}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 pl-9 pr-3 py-2.5 text-sm outline-none focus:border-cyan-500"
@@ -176,12 +186,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
         </button>
 
         {mode === 'login' && (
-          <p className="mt-3 text-center text-[11px] text-slate-500">
-            Нет аккаунта?{' '}
-            <button type="button" onClick={() => switchMode('register')} className="text-cyan-400 font-semibold hover:underline">
-              Зарегистрироваться
-            </button>
-          </p>
+          <div className="mt-3 space-y-1 text-center text-xs text-slate-400">
+            <p>
+              Нет аккаунта?{' '}
+              <button type="button" onClick={() => switchMode('register')} className="text-cyan-400 font-semibold hover:underline">
+                Зарегистрироваться
+              </button>
+            </p>
+            <p className="text-slate-500">Забыли пароль? Обратитесь к администратору — он создаст новый доступ.</p>
+          </div>
         )}
       </form>
     </div>

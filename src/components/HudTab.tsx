@@ -188,6 +188,10 @@ export const HudTab: React.FC<HudTabProps> = ({
 }) => {
   // Tracking state
   const [isTracking, setIsTracking] = useState(false);
+  // Two-tap safety for the destructive controls (СТОП / СБРОС): the first tap "arms" the button for
+  // a few seconds, the second tap performs the action. Prevents accidental taps while driving.
+  const [armedAction, setArmedAction] = useState<'stop' | 'reset' | null>(null);
+  const armTimerRef = useRef<number | null>(null);
   const [tripStartTime, setTripStartTime] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -1565,6 +1569,34 @@ export const HudTab: React.FC<HudTabProps> = ({
   };
 
   // STOP tracking
+  const disarmAction = () => {
+    if (armTimerRef.current != null) window.clearTimeout(armTimerRef.current);
+    armTimerRef.current = null;
+    setArmedAction(null);
+  };
+
+  const pressGuarded = (action: 'stop' | 'reset', run: () => void) => {
+    if (armedAction === action) {
+      disarmAction();
+      run();
+      return;
+    }
+    triggerHaptic('heavy', settings.hapticFeedback);
+    if (armTimerRef.current != null) window.clearTimeout(armTimerRef.current);
+    setArmedAction(action);
+    armTimerRef.current = window.setTimeout(() => {
+      armTimerRef.current = null;
+      setArmedAction(null);
+    }, 3000);
+  };
+
+  const handleStopPress = () => pressGuarded('stop', () => handleStopTracking());
+  const handleResetPress = () => pressGuarded('reset', () => handleResetTracking());
+
+  useEffect(() => () => {
+    if (armTimerRef.current != null) window.clearTimeout(armTimerRef.current);
+  }, []);
+
   const handleStopTracking = () => {
     triggerHaptic('medium', settings.hapticFeedback);
     setIsTracking(false);
@@ -2608,10 +2640,10 @@ export const HudTab: React.FC<HudTabProps> = ({
         </button>
         <button
           type="button"
-          onClick={handleStopTracking}
-          className="ml-auto shrink-0 rounded-xl bg-rose-600 text-white font-black text-[12px] px-3 py-2 flex items-center justify-center gap-1 shadow-lg shadow-rose-900/40 active:scale-[0.98]"
+          onClick={handleStopPress}
+          className={`ml-auto shrink-0 rounded-xl bg-rose-600 text-white font-black text-[12px] px-3 py-2 flex items-center justify-center gap-1 shadow-lg shadow-rose-900/40 active:scale-[0.98] ${armedAction === 'stop' ? 'ring-2 ring-white animate-pulse' : ''}`}
         >
-          <Square className="w-3.5 h-3.5 fill-current" /> СТОП
+          <Square className="w-3.5 h-3.5 fill-current" /> {armedAction === 'stop' ? 'ЕЩЁ РАЗ' : 'СТОП'}
         </button>
       </div>
     );
@@ -2799,10 +2831,10 @@ export const HudTab: React.FC<HudTabProps> = ({
               </div>
               <button
                 type="button"
-                onClick={handleStopTracking}
-                className="pointer-events-auto rounded-2xl bg-rose-600 text-white font-black text-sm px-5 py-2.5 flex items-center gap-1.5 shadow-lg shadow-rose-900/40 active:scale-[0.98]"
+                onClick={handleStopPress}
+                className={`pointer-events-auto rounded-2xl bg-rose-600 text-white font-black text-sm px-5 py-2.5 flex items-center gap-1.5 shadow-lg shadow-rose-900/40 active:scale-[0.98] ${armedAction === 'stop' ? 'ring-2 ring-white animate-pulse' : ''}`}
               >
-                <Square className="w-4 h-4 fill-current" /> СТОП
+                <Square className="w-4 h-4 fill-current" /> {armedAction === 'stop' ? 'ЕЩЁ РАЗ' : 'СТОП'}
               </button>
             </div>
           </>
@@ -3413,21 +3445,23 @@ export const HudTab: React.FC<HudTabProps> = ({
             <>
               <button
                 type="button"
-                onClick={handleStopTracking}
-                className="py-3 rounded-xl bg-rose-600 text-white font-black text-[14px] flex items-center justify-center gap-2 active:scale-[0.98] shadow-lg shadow-rose-900/40"
+                onClick={handleStopPress}
+                className={`py-3 rounded-xl bg-rose-600 text-white font-black text-[14px] flex items-center justify-center gap-2 active:scale-[0.98] shadow-lg shadow-rose-900/40 ${armedAction === 'stop' ? 'ring-2 ring-white animate-pulse' : ''}`}
               >
-                <Square className="w-4 h-4 fill-current" /> СТОП
+                <Square className="w-4 h-4 fill-current" /> {armedAction === 'stop' ? 'ЕЩЁ РАЗ — ЗАВЕРШИТЬ' : 'СТОП'}
               </button>
               <button
                 type="button"
-                onClick={handleResetTracking}
+                onClick={handleResetPress}
                 className={`py-3 rounded-xl border font-bold text-[14px] flex items-center justify-center gap-2 active:scale-[0.98] ${
-                  isDark
+                  armedAction === 'reset'
+                    ? 'bg-amber-500 text-slate-950 border-amber-300 ring-2 ring-amber-300 animate-pulse'
+                    : isDark
                     ? 'bg-slate-800 text-slate-200 border-slate-700'
                     : 'bg-slate-100 text-slate-700 border-slate-300'
                 }`}
               >
-                <RotateCcw className="w-4 h-4" /> СБРОС
+                <RotateCcw className="w-4 h-4" /> {armedAction === 'reset' ? 'СТЕРЕТЬ ТРЕК?' : 'СБРОС'}
               </button>
             </>
           ) : (
