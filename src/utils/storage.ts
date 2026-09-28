@@ -295,6 +295,129 @@ export const INITIAL_SESSIONS: TripSession[] = [
 
 const SETTINGS_KEY = 'vigo_ev_settings_v2';
 const SESSIONS_KEY = 'vigo_ev_sessions_v1';
+const HUD_CHECKPOINT_KEY = 'vigo_hud_trip_checkpoint_v1';
+const CALCULATOR_DRAFT_KEY = 'vigo_calculator_draft_v1';
+
+/** Snapshot of an in-progress HUD trip — survives WebView kill / page reload. */
+export interface HudTripCheckpoint {
+  v: 1;
+  savedAt: number;
+  tripStartTime: number;
+  elapsedSeconds: number;
+  tripDistanceKm: number;
+  maxSpeed: number;
+  startTripSoc: number;
+  climateOn: boolean;
+  passengers: number;
+  elevationGainM: number;
+  elevationLossM: number;
+  altitudeAvailable: boolean;
+  /** Full-precision accumulators from refs */
+  distanceKm: number;
+  segmentEnergyKwh: number;
+  elevationEnergyKwh: number;
+  climateEnergyKwh: number;
+  speedHistory: number[];
+  windLog: Array<Record<string, unknown>>;
+  lastWindLogDistanceKm: number;
+  destinationQuery?: string;
+  destinationMode?: 'address' | 'distance';
+  manualAvgSpeedKmH?: number;
+}
+
+export function loadHudCheckpoint(): HudTripCheckpoint | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(HUD_CHECKPOINT_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    if (!p || p.v !== 1 || typeof p.tripStartTime !== 'number') return null;
+    // Ignore checkpoints older than 48h — likely abandoned.
+    if (Date.now() - (p.savedAt || 0) > 48 * 3600 * 1000) {
+      localStorage.removeItem(HUD_CHECKPOINT_KEY);
+      return null;
+    }
+    return p as HudTripCheckpoint;
+  } catch {
+    return null;
+  }
+}
+
+export function saveHudCheckpoint(cp: HudTripCheckpoint): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(HUD_CHECKPOINT_KEY, JSON.stringify({ ...cp, savedAt: Date.now(), v: 1 }));
+  } catch (err) {
+    console.error('Failed to save HUD checkpoint:', err);
+  }
+}
+
+export function clearHudCheckpoint(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(HUD_CHECKPOINT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export interface CalculatorDraft {
+  startSoc?: number;
+  endSoc?: number;
+  distanceKm?: number;
+  climateOn?: boolean;
+  passengers?: number;
+  destinationAddress?: string;
+  plannedSpeedKmH?: number;
+  plannedMaxSpeedKmH?: number;
+  calculatorMode?: 'route' | 'manual';
+}
+
+export function loadCalculatorDraft(): CalculatorDraft | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(CALCULATOR_DRAFT_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as CalculatorDraft;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCalculatorDraft(draft: CalculatorDraft): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(CALCULATOR_DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Personal baseline kWh/100km from the user's own trips (weighted toward recent).
+ * Falls back to the shared Vigo benchmark when history is too thin.
+ */
+export function getPersonalBenchmarkKwh100(sessions: TripSession[]): number {
+  const valid = sessions
+    .filter(
+      (s) =>
+        typeof s.consumptionPer100Km === 'number' &&
+        s.consumptionPer100Km > 5 &&
+        s.consumptionPer100Km < 40 &&
+        (s.distanceKm ?? 0) >= 5,
+    )
+    .slice(0, 40);
+  if (valid.length < 3) return BENCHMARK_CONSUMPTION_KWH_100KM;
+  let wSum = 0;
+  let cSum = 0;
+  valid.forEach((s, i) => {
+    const w = Math.max(1, (s.distanceKm || 10) / 10) * (1 + (valid.length - i) * 0.02);
+    wSum += w;
+    cSum += s.consumptionPer100Km * w;
+  });
+  const avg = cSum / wSum;
+  return Number(Math.min(35, Math.max(8, avg)).toFixed(1));
+}
 
 export function loadSettings(): UserSettings {
   if (typeof window === 'undefined') return DEFAULT_SETTINGS;
