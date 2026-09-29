@@ -445,12 +445,19 @@ html {
     padding: var(--ui-card-pad) calc(var(--ui-card-pad) + 0.1rem) !important;
   }
 
+  /* Only guarantee a touch-friendly minimum height; each button keeps its own padding
+     (forcing padding with !important used to flatten primary buttons). */
   #calculator-tab-container button,
   #settings-tab-container button,
   #history-tab-container button {
     min-height: var(--ui-control-min-h);
-    padding-top: var(--ui-btn-py) !important;
-    padding-bottom: var(--ui-btn-py) !important;
+  }
+  /* Big action buttons (py-3 / py-3.5) get a moderate, fixed padding in landscape */
+  #calculator-tab-container button[class*="py-3"],
+  #settings-tab-container button[class*="py-3"],
+  #history-tab-container button[class*="py-3"] {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
   }
 
   /*
@@ -515,18 +522,17 @@ html {
   }
 
   #main-bottom-nav {
-    transform: scale(var(--ui-nav-scale));
-    transform-origin: bottom center;
-    padding-top: 0.3rem !important;
-    padding-bottom: 0.3rem !important;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
   }
   #main-bottom-nav button {
-    min-height: 2.4rem;
-    padding-top: 0.3rem !important;
-    padding-bottom: 0.3rem !important;
+    min-height: 44px;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
   }
   #main-bottom-nav button span {
-    font-size: 0.65rem !important;
+    font-size: 10px !important;
+    margin-top: 2px !important;
   }
 
   .route-map-shell,
@@ -546,13 +552,13 @@ html {
 /* landscape-short: phone on side, very little vertical room */
 @media (orientation: landscape) and (max-height: 430px) {
   :root {
-    --ui-font-size: 13.5px;
+    --ui-font-size: 14.5px;
     --ui-card-pad: 0.5rem;
     --ui-stack-gap: 0.4rem;
-    --ui-control-min-h: 2rem;
-    --ui-btn-py: 0.32rem;
-    --layout-nav-clearance: 3.75rem;
-    --ui-nav-scale: 0.94;
+    --ui-control-min-h: 2.4rem;
+    --ui-btn-py: 0.4rem;
+    --layout-nav-clearance: 4.5rem;
+    --ui-nav-scale: 1;
   }
 }
 
@@ -724,7 +730,7 @@ html {
 
 /* ---- Compact landscape: phones on their side (height <= 520px) ---- */
 @media (orientation: landscape) and (min-width: 640px) and (max-height: 520px) {
-  :root { --layout-nav-clearance: 3.4rem; }
+  :root { --layout-nav-clearance: 68px; --ui-font-size: 14.5px; }
 
   .calculator-minimal-shell > .calculator-guide,
   .calculator-minimal-shell > .calculator-mode-hint { display: none; }
@@ -741,32 +747,27 @@ html {
   #calculator-tab-container .calculator-conditions > *,
   #calculator-tab-container .calculator-route > * { margin-block: 0 !important; }
   #calculator-tab-container .calculator-mode-switch { padding: 0.2rem !important; }
-  #calculator-tab-container .calculator-mode-switch button { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; font-size: 0.8125rem; }
+  #calculator-tab-container .calculator-mode-switch button { min-height: 2.4rem; font-size: 0.8125rem; }
   #calculator-tab-container .calculator-mode-content { gap: 0.4rem; }
-  #calculator-tab-container .calculator-route input { padding-top: 0.45rem !important; padding-bottom: 0.45rem !important; }
+  #calculator-tab-container .calculator-route input { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
   #calculator-tab-container .calculator-manual-inputs { padding: 0.5rem 0.6rem !important; }
   #calculator-tab-container .calculator-manual-inputs > * + * { margin-top: 0.4rem !important; }
   #calculator-tab-container .calculator-hero { padding: 0.5rem !important; }
   #calculator-tab-container .calculator-hero .text-5xl { font-size: 2.25rem; line-height: 1.05; }
   #calculator-tab-container .calculator-hero > * { margin-top: 0.25rem !important; }
 
-  /* Slim one-row bottom nav */
-  #main-bottom-nav-wrap { padding-bottom: max(4px, calc(env(safe-area-inset-bottom, 0px) * 0.35)) !important; }
+  /* Bottom nav: same icon-over-label pill as portrait, just narrower and never scaled/squeezed */
+  #main-bottom-nav-wrap { padding-bottom: max(6px, calc(env(safe-area-inset-bottom, 0px) * 0.4)) !important; }
   #main-bottom-nav {
-    width: min(34rem, calc(100vw - 2rem)) !important;
-    padding-top: 0.2rem !important;
-    padding-bottom: 0.2rem !important;
-    transform: none;
+    width: min(30rem, calc(100vw - 2rem)) !important;
+    padding: 4px !important;
   }
   #main-bottom-nav button {
-    flex-direction: row !important;
-    gap: 0.3rem;
-    min-height: 2rem;
-    padding-top: 0.15rem !important;
-    padding-bottom: 0.15rem !important;
+    min-height: 44px;
+    padding: 4px 2px !important;
   }
-  #main-bottom-nav button span { margin-top: 0 !important; font-size: 0.6875rem !important; }
-  #main-bottom-nav button svg { width: 1.05rem; height: 1.05rem; }
+  #main-bottom-nav button span { font-size: 10px !important; margin-top: 2px !important; }
+  #main-bottom-nav button svg { width: 20px; height: 20px; }
 }
 
 /* ========== Capacitor / APK only (old Android WebView safe) ========== */
