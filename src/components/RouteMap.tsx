@@ -12,6 +12,7 @@ import {
   type AnyMapBundle,
 } from '../utils/yandexMaps';
 import { TESLA_ROUTE_BLUE, TESLA_ROUTE_TRAVELED, TESLA_ROUTE_GLOW } from '../utils/mapStyleTesla';
+import { HeadingFilter, headingDelta } from '../utils/headingFilter';
 
 export interface RouteMapChargingStop {
   lat: number;
@@ -78,6 +79,11 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     lon: number;
     heading: number | null;
   } | null>(null);
+  /** Movement-based course (not compass / raw GPS heading). */
+  const headingFilterRef = useRef(new HeadingFilter());
+  /** Continuous camera azimuth in degrees — accumulates deltas (no 0↔360 flips). */
+  const camAzimuthDegRef = useRef(0);
+  const camAzimuthReadyRef = useRef(false);
   const displayPosRef = useRef<{ lat: number; lon: number } | null>(null);
   /** Heavily smoothed heading used for camera (deg). */
   const displayHeadingRef = useRef<number | null>(null);
@@ -586,7 +592,16 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       return;
     }
 
-    // Prefer heading along the planned route (stable). GPS bearing is only a fallback.
+    // Course from movement only (HeadingFilter). Never trust compass / noisy coords.heading
+    // at low speed — that is what made the map spin at lights.
+    const speedKmH =
+      moveSpeedKmH != null && Number.isFinite(moveSpeedKmH) ? Number(moveSpeedKmH) : null;
+    const filtered = headingFilterRef.current.update(
+      currentPosition.lat,
+      currentPosition.lon,
+      speedKmH,
+    );
+
     let routeHeading: number | null = null;
     const pts = positionsRef.current;
     if (pts.length >= 2) {
@@ -601,25 +616,29 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           bestIdx = i;
         }
       }
-      const a = pts[Math.min(bestIdx, pts.length - 2)];
-      const b = pts[Math.min(bestIdx + 1, pts.length - 1)];
-      if (a && b && (a[0] !== b[0] || a[1] !== b[1])) {
-        const dLat = ((b[0] - a[0]) * Math.PI) / 180;
-        const lat1 = (a[0] * Math.PI) / 180;
-        const lat2 = (b[0] * Math.PI) / 180;
-        const dLon = ((b[1] - a[1]) * Math.PI) / 180;
-        const y = Math.sin(dLon) * Math.cos(lat2);
-        const x =
-          Math.cos(lat1) * Math.sin(lat2) -
-          Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-        routeHeading = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+      // Only use route tangent when near the polyline (~80 m).
+      if (bestD < 0.0000007) {
+        const a = pts[Math.min(bestIdx, pts.length - 2)];
+        const b = pts[Math.min(bestIdx + 1, pts.length - 1)];
+        if (a && b && (a[0] !== b[0] || a[1] !== b[1])) {
+          const lat1 = (a[0] * Math.PI) / 180;
+          const lat2 = (b[0] * Math.PI) / 180;
+          const dLon = ((b[1] - a[1]) * Math.PI) / 180;
+          const y = Math.sin(dLon) * Math.cos(lat2);
+          const x =
+            Math.cos(lat1) * Math.sin(lat2) -
+            Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+          routeHeading = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+        }
       }
     }
 
-    const gpsHeading =
-      headingDeg != null && Number.isFinite(headingDeg) ? Number(headingDeg) : null;
-    // Route heading when on a planned path; otherwise GPS.
-    const heading = routeHeading ?? gpsHeading;
+    const heading =
+      routeHeading != null && (speedKmH == null || speedKmH >= 11)
+        ? routeHeading
+        : headingFilterRef.current.ready
+          ? filtered
+          : null;
 
     followTargetRef.current = {
       lat: currentPosition.lat,
@@ -635,7 +654,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     if (displayHeadingRef.current == null && heading != null) {
       displayHeadingRef.current = heading;
     }
-  }, [currentPosition?.lat, currentPosition?.lon, headingDeg, positions]);
+  }, [currentPosition?.lat, currentPosition?.lon, moveSpeedKmH, positions]);
 
   // Continuous follow loop: smooth marker + course-up camera. Independent of GPS tick rate.
   useEffect(() => {
@@ -654,6 +673,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       stopLoop();
       displayPosRef.current = null;
       displayHeadingRef.current = null;
+      headingFilterRef.current.reset();
+      camAzimuthReadyRef.current = false;
+      camAzimuthDegRef.current = 0;
       removeObj(bundle, currentPosMarkerRef.current);
       currentPosMarkerRef.current = null;
       return;
@@ -701,33 +723,26 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
     };
 
-    // HUD follow: Tesla-like course-up + tilt. Calculator / idle: north-up, no spin.
+    // HUD follow: course-up + tilt. Idle/calculator: north-up.
     const POS_LERP = 0.14;
-    const HEAD_LERP = 0.1;
-    const HEAD_DEADZONE = 2.5;
-    const CENTER_MS = 100;
+    const HEAD_LERP = 0.18;
+    const HEAD_DEADZONE = 3;
+    // Rarer than GPS so duration animations do not stack (was 100ms → chaos).
+    const CENTER_MS = 850;
+    const CAM_DURATION = 800;
     const TILT_RAD = (50 * Math.PI) / 180;
     const courseUp = !!followModeRef.current;
 
-    if (bundle.apiVersion === 3) {
+    if (bundle.apiVersion === 3 && !courseUp) {
       try {
         if (typeof map.setCamera === 'function') {
-          map.setCamera({
-            azimuth: 0,
-            tilt: courseUp ? TILT_RAD : 0,
-            duration: 0,
-          });
+          map.setCamera({ azimuth: 0, tilt: 0, duration: 0 });
         } else {
-          map.update({
-            camera: { azimuth: 0, tilt: courseUp ? TILT_RAD : 0, duration: 0 },
-          });
+          map.update({ camera: { azimuth: 0, tilt: 0, duration: 0 } });
         }
-      } catch {
-        try {
-          if (typeof map.setCamera === 'function') map.setCamera({ azimuth: 0, duration: 0 });
-          else map.update({ camera: { azimuth: 0, duration: 0 } });
-        } catch { /* ignore */ }
-      }
+      } catch { /* ignore */ }
+      camAzimuthReadyRef.current = false;
+      camAzimuthDegRef.current = 0;
     }
     lastCameraHeadingDegRef.current = 0;
 
@@ -749,21 +764,13 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         disp.lon += (target.lon - disp.lon) * POS_LERP;
       }
 
-      // Heading: update while moving; freeze last value when nearly stopped (Tesla-like).
-      const speedNow = moveSpeedRef.current;
-      const isMoving =
-        speedNow != null && Number.isFinite(speedNow) && speedNow >= 6;
-
-      if (
-        isMoving &&
-        target.heading != null &&
-        Number.isFinite(target.heading)
-      ) {
+      // Display heading for north-up arrow only. Course-up keeps arrow at 0°.
+      if (target.heading != null && Number.isFinite(target.heading)) {
         const prev = displayHeadingRef.current;
         if (prev == null) {
           displayHeadingRef.current = target.heading;
         } else {
-          const d = normalizeDeg180(target.heading - prev);
+          const d = headingDelta(prev, target.heading);
           if (Math.abs(d) >= HEAD_DEADZONE) {
             displayHeadingRef.current = prev + d * HEAD_LERP;
           }
@@ -771,9 +778,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
       const headingSmooth = displayHeadingRef.current;
 
-      // Course-up: arrow points up; north-up: arrow follows geographic heading.
+      // Map rotates in course-up → marker must NOT also rotate (double turn = chaos).
       const arrowDeg = courseUp ? 0 : (headingSmooth ?? 0);
-
       ensureMarker(disp.lat, disp.lon, arrowDeg);
 
       if (followModeRef.current && Date.now() >= userNavPauseUntilRef.current) {
@@ -786,35 +792,49 @@ export const RouteMap: React.FC<RouteMapProps> = ({
               if (typeof map.zoom === 'number') zoom = map.zoom;
               else if (typeof map.location?.zoom === 'number') zoom = map.location.zoom;
             } catch { /* ignore */ }
-            // Prefer ~16–17 in drive mode for a closer Tesla-like frame
             if (courseUp && zoom < 15) zoom = 16;
 
-            const azimuth =
-              headingSmooth != null && Number.isFinite(headingSmooth)
-                ? headingDegToAzimuthRad(headingSmooth)
-                : 0;
+            if (courseUp && headingSmooth != null && Number.isFinite(headingSmooth)) {
+              // Continuous azimuth: 358°→2° is +4°, not a full reverse spin.
+              if (!camAzimuthReadyRef.current) {
+                camAzimuthDegRef.current = headingSmooth;
+                camAzimuthReadyRef.current = true;
+              } else {
+                camAzimuthDegRef.current += headingDelta(
+                  camAzimuthDegRef.current,
+                  headingSmooth,
+                );
+              }
+            }
+
+            // Yandex v3: azimuth in radians.
+            const azimuthRad = courseUp
+              ? (camAzimuthDegRef.current * Math.PI) / 180
+              : 0;
 
             try {
-              // Location + camera together when supported
               map.update({
-                location: { center: coords, zoom, duration: 400 },
+                location: { center: coords, zoom, duration: CAM_DURATION },
                 camera: {
-                  azimuth: courseUp ? azimuth : 0,
+                  azimuth: azimuthRad,
                   tilt: courseUp ? TILT_RAD : 0,
-                  duration: 400,
+                  duration: CAM_DURATION,
                 },
               });
             } catch {
               try {
-                map.setLocation({ center: coords, zoom, duration: 0 });
-                if (courseUp) {
-                  if (typeof map.setCamera === 'function') {
-                    map.setCamera({ azimuth, tilt: TILT_RAD, duration: 300 });
-                  }
+                map.setLocation({ center: coords, zoom, duration: CAM_DURATION });
+                if (courseUp && typeof map.setCamera === 'function') {
+                  map.setCamera({
+                    azimuth: azimuthRad,
+                    tilt: TILT_RAD,
+                    duration: CAM_DURATION,
+                  });
                 }
               } catch { /* ignore */ }
             }
-            lastCameraHeadingDegRef.current = headingSmooth ?? 0;
+            lastCameraHeadingDegRef.current =
+              headingSmooth ?? lastCameraHeadingDegRef.current;
           } else {
             try {
               const z = typeof map.getZoom === 'function' ? map.getZoom() : 16;
