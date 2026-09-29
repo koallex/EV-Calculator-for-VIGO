@@ -127,7 +127,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   }
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center pb-[max(env(safe-area-inset-bottom,0px),12px)]">
+    <div id="main-bottom-nav-wrap" className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center pb-[max(env(safe-area-inset-bottom,0px),12px)]">
       <AnimatePresence>
         {visible && (
           <motion.div

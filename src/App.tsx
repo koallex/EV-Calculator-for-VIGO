@@ -639,6 +639,8 @@ function AppInner() {
 
       {/* Main Content Area — landscape: full-bleed only for map-like tabs; forms stay centered */}
       <main
+        id="app-main"
+        data-tab={activeTab}
         className={
           isLandscape
             ? `flex-1 w-full h-[100dvh] max-h-[100dvh] overflow-auto m-0 ${

@@ -234,7 +234,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   return (
     <div id="history-tab-container" className="space-y-4 pb-12">
       {/* Top Statistics Overview Banner */}
-      <div className={`border rounded-2xl p-4 shadow-xl transition-colors ${
+      <div className={`history-stats border rounded-2xl p-4 shadow-xl transition-colors ${
         isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
       }`}>
         <div className={`flex items-center justify-between mb-3 border-b pb-2.5 ${
@@ -438,7 +438,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
       {/* Smooth Consumption Chart (Recharts) */}
       {sessions.length > 0 && (
-        <div className={`border rounded-2xl p-4 shadow-xl space-y-3 transition-colors ${
+        <div className={`history-chart border rounded-2xl p-4 shadow-xl space-y-3 transition-colors ${
           isDark ? 'bg-slate-900/90 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
         }`}>
           <div className="flex items-center justify-between">
@@ -566,7 +566,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
       )}
 
       {/* Search, Filter & Export Action Bar */}
-      <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between">
+      <div className="history-actions flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between">
         {/* Search Input */}
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -689,7 +689,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
       </div>
 
       {/* Trips Session List */}
-      <div className="space-y-2.5">
+      <div className="history-list space-y-2.5">
         {filteredSessions.length === 0 ? (
           <div className={`border rounded-2xl p-8 text-center space-y-2 ${
             isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200'

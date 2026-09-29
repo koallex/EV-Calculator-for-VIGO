@@ -1389,7 +1389,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       {/* First-run guidance: algorithm + nearest chargers + how to start */}
       {showGuideTip && (
         <section
-          className={`rounded-2xl border px-3.5 py-3 space-y-2 ${
+          className={`calculator-guide rounded-2xl border px-3.5 py-3 space-y-2 ${
             isDark
               ? 'bg-gradient-to-br from-cyan-950/40 to-slate-900/80 border-cyan-800/50'
               : 'bg-gradient-to-br from-cyan-50 to-white border-cyan-200 shadow-xs'
@@ -1434,7 +1434,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       )}
 
       {/* Compact trip conditions: SoC + people + climate in one row-card */}
-      <section className={`rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+      <section className={`calculator-conditions rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center justify-between gap-2">
           <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Старт</span>
           <span className={`text-xl font-black font-mono tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(startSoc)}%</span>
@@ -1468,7 +1468,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       </section>
 
       {/* Mode: route planning vs. logging a completed trip — two different workflows, kept visually separate instead of one long interleaved scroll */}
-      <div className="flex items-center justify-end -mt-1 mb-0.5">
+      <div className="calculator-reset flex items-center justify-end -mt-1 mb-0.5">
         <button
           type="button"
           onClick={() => {
@@ -1512,7 +1512,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       </div>
 
       <LayoutGroup>
-        <div className={`relative grid grid-cols-2 rounded-2xl border p-1 gap-1 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+        <div className={`calculator-mode-switch relative grid grid-cols-2 rounded-2xl border p-1 gap-1 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
           <button
             onClick={() => { triggerHaptic('light', settings.hapticFeedback); setCalculatorMode('route'); }}
             className={`relative z-10 rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors ${calculatorMode === 'route' ? 'text-white' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
@@ -1545,7 +1545,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           </button>
         </div>
       </LayoutGroup>
-      <p className={`-mt-1 text-[11px] leading-snug px-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+      <p className={`calculator-mode-hint -mt-1 text-[11px] leading-snug px-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
         {calculatorMode === 'route'
           ? 'Маршрут — прогноз до точки Б по карте, погоде и рельефу.'
           : 'Ручной ввод — оценка по дистанции и скорости без построения маршрута (для уже пройденных поездок).'}
@@ -1559,7 +1559,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          className="flex flex-col gap-3"
+          className="calculator-mode-content flex flex-col gap-3"
         >
         <>
 
@@ -2587,12 +2587,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          className="flex flex-col gap-3"
+          className="calculator-mode-content flex flex-col gap-3"
         >
         <>
           {/* Hero result */}
           <section
-            className={`rounded-2xl border p-4 text-center ${
+            className={`calculator-hero rounded-2xl border p-4 text-center ${
               isDark ? 'bg-cyan-950/40 border-cyan-800/60' : 'bg-cyan-50 border-cyan-200'
             }`}
           >
@@ -2625,7 +2625,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           </section>
 
           {/* Core inputs: end SOC + distance */}
-          <section className={`rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+          <section className={`calculator-manual-inputs rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>SOC на финише</span>

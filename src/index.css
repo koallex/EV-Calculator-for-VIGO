@@ -597,6 +597,178 @@ html {
   gap: var(--ui-stack-gap);
 }
 
+/*
+ * ========== Landscape two-column screens ==========
+ * Target: iPhone 16 Pro landscape (874x402 standalone, ~874x330 in Safari) and any
+ * landscape viewport >= 640px wide. Portrait layout is not touched at all.
+ *  - side paddings respect the notch / Dynamic Island (safe-area-inset-left/right)
+ *  - Calculator: left column = inputs (SoC, people, climate, mode), right = route / manual form
+ *  - History / Settings / Charging cost: two columns
+ *  - bottom nav becomes a slim one-row pill so it does not eat ~70px of height
+ */
+@media (orientation: landscape) and (min-width: 640px) {
+  #app-main:not([data-tab="hud"]):not([data-tab="charging"]) {
+    padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+    padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+    padding-bottom: calc(var(--layout-nav-clearance) + 0.25rem);
+  }
+  [data-tab-panel='calculator'],
+  [data-tab-panel='history'],
+  [data-tab-panel='settings'] {
+    max-width: min(64rem, 100%);
+  }
+
+  /* ---- Calculator ---- */
+  #calculator-tab-container.calculator-minimal-shell {
+    display: grid !important;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    grid-template-rows: repeat(5, auto) 1fr;
+    column-gap: 0.75rem;
+    row-gap: 0.4rem;
+    align-items: start;
+    max-width: 100%;
+    padding: 0 0 0.5rem 0;
+  }
+  .calculator-minimal-shell > .calculator-status { grid-column: 1; grid-row: 1; }
+  .calculator-minimal-shell > .calculator-conditions { grid-column: 1; grid-row: 2; }
+  .calculator-minimal-shell > .calculator-reset { grid-column: 1; grid-row: 3; margin: 0 !important; }
+  .calculator-minimal-shell > .calculator-mode-switch { grid-column: 1; grid-row: 4; }
+  .calculator-minimal-shell > .calculator-mode-hint { grid-column: 1; grid-row: 5; margin: 0 !important; }
+  .calculator-minimal-shell > .calculator-mode-content { grid-column: 2; grid-row: 1 / 7; min-width: 0; }
+  .calculator-minimal-shell > .calculator-guide { grid-column: 1 / -1; grid-row: 7; }
+
+  /* Primary buttons fill their column (global landscape rule shrinks them to fit-content) */
+  #calculator-tab-container .calculator-mode-content button.w-full {
+    width: 100% !important;
+    min-width: 0;
+    max-width: none;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  /* Manual mode: inputs first (they are what you type), result right below */
+  .calculator-mode-content > * { order: 3; }
+  .calculator-mode-content > .calculator-manual-inputs { order: 1; }
+  .calculator-mode-content > .calculator-hero { order: 2; }
+
+  /* ---- History ---- */
+  #history-tab-container {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 0.75rem;
+    row-gap: 0.5rem;
+    align-items: start;
+    max-width: 100%;
+    padding: 0 0 0.5rem 0;
+  }
+  #history-tab-container > .history-actions,
+  #history-tab-container > .history-list { grid-column: 1 / -1; }
+  #history-tab-container > * { margin: 0 !important; min-width: 0; }
+  .history-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.5rem 0.75rem;
+    align-items: start;
+  }
+  .history-list > * { margin: 0 !important; min-width: 0; }
+  .history-list > *:only-child { grid-column: 1 / -1; }
+
+  /* ---- Settings ---- */
+  #settings-tab-container {
+    max-width: 100%;
+    padding: 0 0 0.5rem 0;
+  }
+  #settings-tab-container > form {
+    display: block !important;
+    column-count: 2;
+    column-gap: 0.75rem;
+  }
+  #settings-tab-container > form > * {
+    break-inside: avoid;
+    margin-bottom: 0.5rem;
+  }
+
+  /* ---- Charging: cost calculator view (map view is full-bleed and handled separately) ---- */
+  #charging-tab-container[data-view="calc"] {
+    max-width: min(64rem, 100%) !important;
+    height: auto;
+    min-height: 0;
+    column-count: 2;
+    column-gap: 0.75rem;
+    padding: max(0.5rem, env(safe-area-inset-top, 0px))
+             max(0.75rem, env(safe-area-inset-right, 0px))
+             calc(var(--layout-nav-clearance) + 0.25rem)
+             max(0.75rem, env(safe-area-inset-left, 0px)) !important;
+    box-sizing: border-box;
+  }
+  #charging-tab-container[data-view="calc"] > * {
+    break-inside: avoid;
+    margin-bottom: 0.5rem;
+  }
+  #charging-tab-container[data-view="calc"] > :first-child {
+    column-span: all;
+    max-width: 18rem;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* ---- HUD / map overlays: keep clear of the notch and the rounded corners ---- */
+  #hud-tab-container > .absolute.left-2 { left: max(0.5rem, env(safe-area-inset-left, 0px)) !important; }
+  #hud-tab-container > .absolute.right-2 { right: max(0.5rem, env(safe-area-inset-right, 0px)) !important; }
+  #hud-tab-container > .absolute.inset-x-0 {
+    padding-left: max(0.625rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.625rem, env(safe-area-inset-right, 0px));
+  }
+}
+
+/* ---- Compact landscape: phones on their side (height <= 520px) ---- */
+@media (orientation: landscape) and (min-width: 640px) and (max-height: 520px) {
+  :root { --layout-nav-clearance: 3.4rem; }
+
+  .calculator-minimal-shell > .calculator-guide,
+  .calculator-minimal-shell > .calculator-mode-hint { display: none; }
+
+  /* Calculator: tighten cards, no vertical rhythm from portrait */
+  #calculator-tab-container .calculator-status { padding: 0.35rem 0.6rem !important; }
+  #calculator-tab-container .calculator-conditions,
+  #calculator-tab-container .calculator-route {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.5rem 0.6rem !important;
+  }
+  #calculator-tab-container .calculator-conditions > *,
+  #calculator-tab-container .calculator-route > * { margin-block: 0 !important; }
+  #calculator-tab-container .calculator-mode-switch { padding: 0.2rem !important; }
+  #calculator-tab-container .calculator-mode-switch button { padding-top: 0.3rem !important; padding-bottom: 0.3rem !important; font-size: 0.8125rem; }
+  #calculator-tab-container .calculator-mode-content { gap: 0.4rem; }
+  #calculator-tab-container .calculator-route input { padding-top: 0.45rem !important; padding-bottom: 0.45rem !important; }
+  #calculator-tab-container .calculator-manual-inputs { padding: 0.5rem 0.6rem !important; }
+  #calculator-tab-container .calculator-manual-inputs > * + * { margin-top: 0.4rem !important; }
+  #calculator-tab-container .calculator-hero { padding: 0.5rem !important; }
+  #calculator-tab-container .calculator-hero .text-5xl { font-size: 2.25rem; line-height: 1.05; }
+  #calculator-tab-container .calculator-hero > * { margin-top: 0.25rem !important; }
+
+  /* Slim one-row bottom nav */
+  #main-bottom-nav-wrap { padding-bottom: max(4px, calc(env(safe-area-inset-bottom, 0px) * 0.35)) !important; }
+  #main-bottom-nav {
+    width: min(34rem, calc(100vw - 2rem)) !important;
+    padding-top: 0.2rem !important;
+    padding-bottom: 0.2rem !important;
+    transform: none;
+  }
+  #main-bottom-nav button {
+    flex-direction: row !important;
+    gap: 0.3rem;
+    min-height: 2rem;
+    padding-top: 0.15rem !important;
+    padding-bottom: 0.15rem !important;
+  }
+  #main-bottom-nav button span { margin-top: 0 !important; font-size: 0.6875rem !important; }
+  #main-bottom-nav button svg { width: 1.05rem; height: 1.05rem; }
+}
+
 /* ========== Capacitor / APK only (old Android WebView safe) ========== */
 html.native-app,
 html.native-app body {
