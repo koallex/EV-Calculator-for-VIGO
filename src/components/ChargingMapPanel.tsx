@@ -1110,42 +1110,46 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         </button>
       </div>
 
-      {/* Nearest free charger — accent CTA, safe-area, still readable on dark map */}
-      <div
-        className="absolute left-2 right-2 z-20 flex justify-center pointer-events-none"
-        style={{ top: 'calc(3.35rem + env(safe-area-inset-top, 0px))' }}
-      >
-        <button
-          type="button"
-          onClick={findNearestFree}
-          disabled={findingNearest}
-          className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-[13px] font-black shadow-lg backdrop-blur-md active:scale-[0.98] disabled:opacity-80 border ${
-            findingNearest
-              ? 'bg-cyan-700 text-white border-cyan-500/50 shadow-cyan-950/50'
-              : 'bg-cyan-500 text-slate-950 border-cyan-300/40 shadow-cyan-500/30 hover:bg-cyan-400'
-          }`}
+      {/* Nearest free — bottom CTA (thumb zone), list opens upward above it */}
+      {!selected && (
+        <div
+          className="absolute left-2 right-2 z-20 flex justify-center pointer-events-none"
+          style={{ bottom: 'calc(5.5rem + env(safe-area-inset-bottom, 0px))' }}
         >
-          {findingNearest ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Ищем свободную…
-            </>
-          ) : (
-            <>
-              <PlugZap className="h-4 w-4" />
-              Ближайшая свободная
-            </>
-          )}
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={findNearestFree}
+            disabled={findingNearest}
+            className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-[13px] font-black shadow-lg backdrop-blur-md active:scale-[0.98] disabled:opacity-80 border ${
+              findingNearest
+                ? 'bg-cyan-700 text-white border-cyan-500/50 shadow-cyan-950/50'
+                : 'bg-cyan-500 text-slate-950 border-cyan-300/40 shadow-cyan-500/30 hover:bg-cyan-400'
+            }`}
+          >
+            {findingNearest ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Ищем свободную…
+              </>
+            ) : (
+              <>
+                <PlugZap className="h-4 w-4" />
+                Ближайшая свободная
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
-
-      {/* Nearest free list — like Calculator */}
+      {/* Nearest free list — anchored above the CTA / bottom nav */}
       {nearestFreeOpen && (
         <div
-          className={`absolute z-30 overflow-hidden rounded-2xl border backdrop-blur-md max-h-[min(55vh,22rem)] ${
+          className={`absolute z-30 overflow-hidden rounded-2xl border backdrop-blur-md max-h-[min(50vh,20rem)] ${
             isDark ? 'bg-slate-950/95 border-slate-700 text-slate-100' : 'bg-white/95 border-slate-200 text-slate-900 shadow-lg'
-          } left-2 right-2 top-[6.5rem] landscape:left-auto landscape:right-2 landscape:top-14 landscape:w-[min(20rem,42vw)]`}
+          } left-2 right-2 landscape:left-auto landscape:right-2 landscape:w-[min(20rem,42vw)]`}
+          style={{
+            bottom: 'calc(8.75rem + env(safe-area-inset-bottom, 0px))',
+          }}
         >
           <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
             <span className="text-[11px] font-bold uppercase tracking-wide opacity-70">
