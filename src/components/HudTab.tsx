@@ -717,18 +717,17 @@ export const HudTab: React.FC<HudTabProps> = ({
       const { latitude, longitude, speed, accuracy, heading } = pos.coords;
       const now = Date.now();
       latestGpsPositionRef.current = { lat: latitude, lon: longitude };
-      // EMA-smoothed map marker (visual only — trip metrics use raw filtered GPS elsewhere).
+      // EMA-smoothed map marker — reduces GPS jumpiness on the HUD map.
       {
         const prev = smoothMapPosRef.current;
-        // Softer blend → less target jumpiness for the map lerp.
-        const alpha = prev ? 0.18 : 1;
+        const alpha = prev ? 0.28 : 1;
         const smoothed = {
           lat: prev ? prev.lat * (1 - alpha) + latitude * alpha : latitude,
           lon: prev ? prev.lon * (1 - alpha) + longitude * alpha : longitude,
         };
         smoothMapPosRef.current = smoothed;
-        // ~1.5 Hz React updates — enough for follow; avoids re-rendering whole HUD 4×/s (heat).
-        if (now - lastMapPosUpdateRef.current > 650) {
+        // ~4 Hz map feed — RouteMap continuously lerps marker toward this target.
+        if (now - lastMapPosUpdateRef.current > 250) {
           lastMapPosUpdateRef.current = now;
           setMapLivePosition(smoothed);
         }
@@ -1075,8 +1074,7 @@ export const HudTab: React.FC<HudTabProps> = ({
 
     watchIdRef.current = navigator.geolocation.watchPosition(handleSuccess, handleError, {
       enableHighAccuracy: true,
-      // Allow slightly older fixes — fewer GPS/radio spikes; map still interpolates smoothly.
-      maximumAge: 2000,
+      maximumAge: 1000,
       timeout: 8000,
     });
 
@@ -2330,7 +2328,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   );
 
 
-  // Sit above floating bottom nav; in landscape also clear trip controls (passengers / STOP).
+  // Above bottom nav; in portrait also clear the trip telemetry strip (time / avg / distance).
   const hudEvseCard = selectedMapStop ? (
     <div
       className={`pointer-events-auto absolute left-1/2 z-40 w-[min(22rem,calc(100%-1.25rem))] -translate-x-1/2 rounded-2xl border p-3 shadow-2xl backdrop-blur-md overflow-y-auto overscroll-contain ${
@@ -2341,10 +2339,11 @@ export const HudTab: React.FC<HudTabProps> = ({
       style={{
         bottom: isLandscape
           ? 'calc(7.5rem + env(safe-area-inset-bottom, 0px))'
-          : 'calc(6.25rem + env(safe-area-inset-bottom, 0px))',
+          // Telemetry strip sits ~4.75rem + ~3.5rem card → keep EVSE above it in portrait.
+          : 'calc(11.75rem + env(safe-area-inset-bottom, 0px))',
         maxHeight: isLandscape
           ? 'calc(100dvh - 9rem - env(safe-area-inset-bottom, 0px))'
-          : 'calc(100dvh - 10rem - env(safe-area-inset-bottom, 0px))',
+          : 'calc(100dvh - 14.5rem - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px))',
       }}
     >
       <div className="flex items-start gap-2">
@@ -2780,7 +2779,11 @@ export const HudTab: React.FC<HudTabProps> = ({
 
   // ── Map-first driving mode ──────────────────────────────────────────────
   if (isTracking) {
-    const rangeShown = displayRangeKm || dynamicRemainingRangeKm;
+    // Visual only: HUD range feels optimistic vs real winter/highway driving.
+    // Does not affect SOC, consumption, trip energy, or charging logic.
+    const HUD_RANGE_DISPLAY_FACTOR = 0.88;
+    const rangeRaw = displayRangeKm || dynamicRemainingRangeKm;
+    const rangeShown = Math.max(0, Math.round(rangeRaw * HUD_RANGE_DISPLAY_FACTOR));
 
     const socColor =
       liveDynamicSoc < 20 ? 'text-rose-400' : liveDynamicSoc < 40 ? 'text-amber-400' : 'text-cyan-300';
