@@ -11,6 +11,7 @@ import {
   toLonLat,
   type AnyMapBundle,
 } from '../utils/yandexMaps';
+import { TESLA_ROUTE_BLUE, TESLA_ROUTE_TRAVELED, TESLA_ROUTE_GLOW } from '../utils/mapStyleTesla';
 
 export interface RouteMapChargingStop {
   lat: number;
@@ -206,8 +207,11 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     let cancelled = false;
     let timer: number | null = null;
 
-    const strokeMain = isDark ? 'rgba(34, 211, 238, 0.95)' : 'rgba(6, 182, 212, 0.95)';
-    const strokeOutline = isDark ? 'rgba(15, 23, 42, 0.55)' : 'rgba(255, 255, 255, 0.65)';
+    // Dark HUD: Tesla-like bright blue route + soft glow. Light theme keeps cyan accent.
+    const strokeMain = isDark ? TESLA_ROUTE_BLUE : 'rgba(6, 182, 212, 0.95)';
+    const strokeGlow = isDark ? TESLA_ROUTE_GLOW : 'rgba(6, 182, 212, 0.2)';
+    const strokeOutline = isDark ? 'rgba(20, 23, 29, 0.75)' : 'rgba(255, 255, 255, 0.65)';
+    const strokeTraveled = isDark ? TESLA_ROUTE_TRAVELED : '#94a3b8';
 
     // Draw-in animation A→B unless actively following GPS (HUD trip).
     // Pre-start HUD uses fill=true but followMode=false — still animate.
@@ -221,16 +225,31 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       const { YMapFeature, YMapMarker } = ymaps3;
       const lonLatPath = positions.map(([la, lo]) => toLonLat(la, lo));
 
+      // Underlay (outline) + glow + core — Tesla multi-stroke look
       const outline = new YMapFeature({
         geometry: { type: 'LineString', coordinates: lonLatPath.slice(0, count) },
-        style: { stroke: [{ width: 7, color: strokeOutline }] },
+        style: {
+          stroke: isDark
+            ? [
+                { width: 16, color: strokeGlow },
+                { width: 9, color: strokeOutline },
+              ]
+            : [{ width: 7, color: strokeOutline }],
+        },
       });
       map.addChild(outline);
       outlineFeatureRef.current = outline;
 
       const feature = new YMapFeature({
         geometry: { type: 'LineString', coordinates: lonLatPath.slice(0, count) },
-        style: { stroke: [{ width: 4.5, color: strokeMain }] },
+        style: {
+          stroke: isDark
+            ? [
+                { width: 12, color: strokeGlow },
+                { width: 5.5, color: strokeMain },
+              ]
+            : [{ width: 4.5, color: strokeMain }],
+        },
       });
       map.addChild(feature);
       featureRef.current = feature;
@@ -447,8 +466,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     const remainingPos = positions.slice(Math.max(0, bestIdx));
     if (remainingPos.length < 2) return;
 
-    const strokeMain = isDark ? 'rgba(34, 211, 238, 0.95)' : 'rgba(6, 182, 212, 0.95)';
-    const strokeTraveled = isDark ? 'rgba(100, 116, 139, 0.75)' : 'rgba(148, 163, 184, 0.8)';
+    const strokeMain = isDark ? TESLA_ROUTE_BLUE : 'rgba(6, 182, 212, 0.95)';
+    const strokeGlow = isDark ? TESLA_ROUTE_GLOW : 'rgba(6, 182, 212, 0.2)';
+    const strokeTraveled = isDark ? TESLA_ROUTE_TRAVELED : 'rgba(148, 163, 184, 0.8)';
 
     if (bundle.apiVersion === 3) {
       const { YMapFeature } = (bundle as any).ymaps3;
@@ -478,7 +498,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         try {
           featureRef.current.update({
             geometry: { type: 'LineString', coordinates: remainCoords },
-            style: { stroke: [{ width: 4.5, color: strokeMain }] },
+            style: { stroke: isDark ? [{ width: 12, color: strokeGlow }, { width: 5.5, color: strokeMain }] : [{ width: 4.5, color: strokeMain }] },
           });
         } catch { /* ignore */ }
       }
@@ -496,7 +516,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         const traveled = new ymaps.Polyline(
           traveledPos,
           {},
-          { strokeColor: '#94a3b8', strokeWidth: 5, strokeOpacity: 0.8 },
+          { strokeColor: strokeTraveled, strokeWidth: 5, strokeOpacity: 0.8 },
         );
         map.geoObjects.add(traveled);
         traveledFeatureRef.current = traveled;
@@ -645,7 +665,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         if (!currentPosMarkerRef.current) {
           const { YMapMarker } = (bundle as any).ymaps3;
           const el = followModeRef.current
-            ? makeNavArrowEl('#38bdf8', arrowDeg)
+            ? makeNavArrowEl('#f8fafc', arrowDeg)
             : makeDotMarkerEl('#38bdf8', 14, '#fff');
           const m = new YMapMarker({ coordinates: coords }, el);
           map.addChild(m);
@@ -660,7 +680,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             currentPosMarkerRef.current?.element ||
             currentPosMarkerRef.current?._element;
           const arrow = root?.querySelector?.('[data-vigo-nav-arrow]') as HTMLElement | null;
-          if (arrow) arrow.style.transform = `rotate(${arrowDeg}deg)`;
+          if (arrow) arrow.style.transform = `translate(-50%,-50%) rotate(${arrowDeg}deg)`;
         } catch { /* ignore */ }
       } else {
         const coords: [number, number] = [lat, lon];
@@ -687,15 +707,22 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     const HEAD_DEADZONE = 3;
     const CENTER_MS = 120;
 
-    // Ensure map stays north-up if a previous session left azimuth non-zero.
+    // North-up (azimuth 0). Optional mild tilt in follow/dark for a Tesla-like angle —
+    // wrapped in try/catch; unsupported builds stay flat.
     if (bundle.apiVersion === 3) {
       try {
+        const tiltRad = followModeRef.current && isDark ? (42 * Math.PI) / 180 : 0;
         if (typeof map.setCamera === 'function') {
-          map.setCamera({ azimuth: 0, duration: 0 });
+          map.setCamera({ azimuth: 0, tilt: tiltRad, duration: 0 });
         } else {
-          map.update({ camera: { azimuth: 0, duration: 0 } });
+          map.update({ camera: { azimuth: 0, tilt: tiltRad, duration: 0 } });
         }
-      } catch { /* ignore */ }
+      } catch {
+        try {
+          if (typeof map.setCamera === 'function') map.setCamera({ azimuth: 0, duration: 0 });
+          else map.update({ camera: { azimuth: 0, duration: 0 } });
+        } catch { /* ignore */ }
+      }
     }
     lastCameraHeadingDegRef.current = 0;
 
