@@ -741,19 +741,17 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
     };
 
-    // HUD follow: course-up + mild tilt. Smooth marker via time-based EMA (not per-frame fixed lerp).
-    // Cap work ~30 fps — full 60 rAF + map.update was a major heat source.
-    const POS_TAU_S = 0.55; // higher = smoother, slightly more lag
+    // North-up only: rotating the whole map (course-up) was chaotic with GPS noise.
+    // Smooth marker position + rotate the arrow; camera azimuth stays 0.
+    const POS_TAU_S = 0.55;
     const HEAD_LERP = 0.14;
     const HEAD_DEADZONE = 3;
     const FRAME_MIN_MS = 33; // ~30 fps
     const CENTER_MS = 1200;
-    const CAM_DURATION = 1100;
-    const TILT_RAD = (38 * Math.PI) / 180; // slightly flatter → less GPU than 50°
-    const courseUp = !!followModeRef.current;
+    const CAM_DURATION = 900;
     let lastFrameTs = 0;
 
-    if (bundle.apiVersion === 3 && !courseUp) {
+    if (bundle.apiVersion === 3) {
       try {
         if (typeof map.setCamera === 'function') {
           map.setCamera({ azimuth: 0, tilt: 0, duration: 0 });
@@ -806,8 +804,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
       const headingSmooth = displayHeadingRef.current;
 
-      // Map rotates in course-up → marker must NOT also rotate (double turn = chaos).
-      const arrowDeg = courseUp ? 0 : (headingSmooth ?? 0);
+      // North-up: arrow shows geographic heading; map never yaws.
+      const arrowDeg = headingSmooth ?? 0;
       ensureMarker(disp.lat, disp.lon, arrowDeg);
 
       if (followModeRef.current && Date.now() >= userNavPauseUntilRef.current) {
@@ -820,49 +818,21 @@ export const RouteMap: React.FC<RouteMapProps> = ({
               if (typeof map.zoom === 'number') zoom = map.zoom;
               else if (typeof map.location?.zoom === 'number') zoom = map.location.zoom;
             } catch { /* ignore */ }
-            if (courseUp && zoom < 15) zoom = 16;
-
-            if (courseUp && headingSmooth != null && Number.isFinite(headingSmooth)) {
-              // Continuous azimuth: 358°→2° is +4°, not a full reverse spin.
-              if (!camAzimuthReadyRef.current) {
-                camAzimuthDegRef.current = headingSmooth;
-                camAzimuthReadyRef.current = true;
-              } else {
-                camAzimuthDegRef.current += headingDelta(
-                  camAzimuthDegRef.current,
-                  headingSmooth,
-                );
-              }
-            }
-
-            // Yandex v3: azimuth in radians.
-            const azimuthRad = courseUp
-              ? (camAzimuthDegRef.current * Math.PI) / 180
-              : 0;
-
+            // Pan only — lock azimuth/tilt so nothing can spin the basemap.
             try {
               map.update({
                 location: { center: coords, zoom, duration: CAM_DURATION },
-                camera: {
-                  azimuth: azimuthRad,
-                  tilt: courseUp ? TILT_RAD : 0,
-                  duration: CAM_DURATION,
-                },
+                camera: { azimuth: 0, tilt: 0, duration: 0 },
               });
             } catch {
               try {
                 map.setLocation({ center: coords, zoom, duration: CAM_DURATION });
-                if (courseUp && typeof map.setCamera === 'function') {
-                  map.setCamera({
-                    azimuth: azimuthRad,
-                    tilt: TILT_RAD,
-                    duration: CAM_DURATION,
-                  });
+                if (typeof map.setCamera === 'function') {
+                  map.setCamera({ azimuth: 0, tilt: 0, duration: 0 });
                 }
               } catch { /* ignore */ }
             }
-            lastCameraHeadingDegRef.current =
-              headingSmooth ?? lastCameraHeadingDegRef.current;
+            lastCameraHeadingDegRef.current = headingSmooth ?? lastCameraHeadingDegRef.current;
           } else {
             try {
               const z = typeof map.getZoom === 'function' ? map.getZoom() : 16;
