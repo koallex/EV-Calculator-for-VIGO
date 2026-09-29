@@ -1386,57 +1386,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         )}
       </section>
 
-      {/* First-run guidance: algorithm + nearest chargers + how to start */}
-      {showGuideTip && (
-        <section
-          className={`calculator-guide rounded-2xl border px-3.5 py-3 space-y-2 ${
-            isDark
-              ? 'bg-gradient-to-br from-cyan-950/40 to-slate-900/80 border-cyan-800/50'
-              : 'bg-gradient-to-br from-cyan-50 to-white border-cyan-200 shadow-xs'
-          }`}
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 space-y-1.5">
-              <p className={`text-xs font-bold ${isDark ? 'text-cyan-300' : 'text-cyan-800'}`}>
-                Как пользоваться
-              </p>
-              <ul className={`text-[11px] leading-relaxed space-y-1 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                <li>
-                  <span className="font-semibold">1.</span> Укажите точку Б (адрес или карта) — расчёт пойдёт по реальному маршруту, рельефу и прогнозу погоды.
-                </li>
-                <li>
-                  <span className="font-semibold">2.</span> Физическая модель: аэродинамика, масса, ветер, осадки, климат и тепловой насос — не «средний расход из брошюры».
-                </li>
-                <li>
-                  <span className="font-semibold">3.</span> Автопоиск ближайших ЭЗС по маршруту и свободных CCS рядом (кнопка ниже и вкладка «Карта ЭЗС»).
-                </li>
-                <li>
-                  <span className="font-semibold">4.</span> Профиль авто — в «Настройках»: готовые модели РБ или «Свой автомобиль» (масса, кузов, батарея, ТН).
-                </li>
-              </ul>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setShowGuideTip(false);
-                try { localStorage.setItem('ev_guide_tip_dismissed', '1'); } catch {}
-              }}
-              className={`shrink-0 text-[11px] font-bold px-2 py-1 rounded-lg border ${
-                isDark
-                  ? 'border-slate-700 text-slate-400 hover:text-white'
-                  : 'border-slate-200 text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Понятно
-            </button>
-          </div>
-        </section>
-      )}
-
       {/* Compact trip conditions: SoC + people + climate in one row-card */}
       <section className={`calculator-conditions rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center justify-between gap-2">
-          <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Старт</span>
+          <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Параметры поездки</span>
           <span className={`text-xl font-black font-mono tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(startSoc)}%</span>
         </div>
         <div className="flex items-center gap-2">
@@ -1467,7 +1420,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         </div>
       </section>
 
-      {/* Mode: route planning vs. logging a completed trip — two different workflows, kept visually separate instead of one long interleaved scroll */}
+      {/* Calculator controls: route planning is now the primary and only visible workflow. */}
       <div className="calculator-reset flex items-center justify-end -mt-1 mb-0.5">
         <button
           type="button"
@@ -1511,48 +1464,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         </button>
       </div>
 
-      <LayoutGroup>
-        <div className={`calculator-mode-switch relative grid grid-cols-2 rounded-2xl border p-1 gap-1 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-          <button
-            onClick={() => { triggerHaptic('light', settings.hapticFeedback); setCalculatorMode('route'); }}
-            className={`relative z-10 rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors ${calculatorMode === 'route' ? 'text-white' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
-          >
-            {calculatorMode === 'route' && (
-              <motion.div
-                layoutId="calculatorModePill"
-                className="absolute inset-0 rounded-xl bg-cyan-600 shadow-sm"
-                transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-              />
-            )}
-            <span className="relative z-10 inline-flex items-center gap-1.5">
-              <Navigation className="w-4 h-4" /> Маршрут
-            </span>
-          </button>
-          <button
-            onClick={() => { triggerHaptic('light', settings.hapticFeedback); setCalculatorMode('manual'); }}
-            className={`relative z-10 rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors ${calculatorMode === 'manual' ? 'text-white' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
-          >
-            {calculatorMode === 'manual' && (
-              <motion.div
-                layoutId="calculatorModePill"
-                className="absolute inset-0 rounded-xl bg-cyan-600 shadow-sm"
-                transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-              />
-            )}
-            <span className="relative z-10 inline-flex items-center gap-1.5">
-              <Gauge className="w-4 h-4" /> Ручной ввод
-            </span>
-          </button>
-        </div>
-      </LayoutGroup>
-      <p className={`calculator-mode-hint -mt-1 text-[11px] leading-snug px-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-        {calculatorMode === 'route'
-          ? 'Маршрут — прогноз до точки Б по карте, погоде и рельефу.'
-          : 'Ручной ввод — оценка по дистанции и скорости без построения маршрута (для уже пройденных поездок).'}
-      </p>
-
       <AnimatePresence mode="wait" initial={false}>
-      {calculatorMode === 'route' && (
+      {true && (
         <motion.div
           key="mode-route"
           initial={{ opacity: 0, y: 8 }}
