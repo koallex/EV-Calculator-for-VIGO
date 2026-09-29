@@ -2778,7 +2778,11 @@ export const HudTab: React.FC<HudTabProps> = ({
 
   // ── Map-first driving mode ──────────────────────────────────────────────
   if (isTracking) {
-    const rangeShown = displayRangeKm || dynamicRemainingRangeKm;
+    // Visual only: HUD range feels optimistic vs real winter/highway driving.
+    // Does not affect SOC, consumption, trip energy, or charging logic.
+    const HUD_RANGE_DISPLAY_FACTOR = 0.88;
+    const rangeRaw = displayRangeKm || dynamicRemainingRangeKm;
+    const rangeShown = Math.max(0, Math.round(rangeRaw * HUD_RANGE_DISPLAY_FACTOR));
 
     const socColor =
       liveDynamicSoc < 20 ? 'text-rose-400' : liveDynamicSoc < 40 ? 'text-amber-400' : 'text-cyan-300';
