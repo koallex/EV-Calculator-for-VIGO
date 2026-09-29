@@ -717,17 +717,18 @@ export const HudTab: React.FC<HudTabProps> = ({
       const { latitude, longitude, speed, accuracy, heading } = pos.coords;
       const now = Date.now();
       latestGpsPositionRef.current = { lat: latitude, lon: longitude };
-      // EMA-smoothed map marker — reduces GPS jumpiness on the HUD map.
+      // EMA-smoothed map marker (visual only — trip metrics use raw filtered GPS elsewhere).
       {
         const prev = smoothMapPosRef.current;
-        const alpha = prev ? 0.28 : 1;
+        // Softer blend → less target jumpiness for the map lerp.
+        const alpha = prev ? 0.18 : 1;
         const smoothed = {
           lat: prev ? prev.lat * (1 - alpha) + latitude * alpha : latitude,
           lon: prev ? prev.lon * (1 - alpha) + longitude * alpha : longitude,
         };
         smoothMapPosRef.current = smoothed;
-        // ~4 Hz map feed — RouteMap continuously lerps marker toward this target.
-        if (now - lastMapPosUpdateRef.current > 250) {
+        // ~1.5 Hz React updates — enough for follow; avoids re-rendering whole HUD 4×/s (heat).
+        if (now - lastMapPosUpdateRef.current > 650) {
           lastMapPosUpdateRef.current = now;
           setMapLivePosition(smoothed);
         }
@@ -1074,7 +1075,8 @@ export const HudTab: React.FC<HudTabProps> = ({
 
     watchIdRef.current = navigator.geolocation.watchPosition(handleSuccess, handleError, {
       enableHighAccuracy: true,
-      maximumAge: 1000,
+      // Allow slightly older fixes — fewer GPS/radio spikes; map still interpolates smoothly.
+      maximumAge: 2000,
       timeout: 8000,
     });
 
@@ -2778,11 +2780,7 @@ export const HudTab: React.FC<HudTabProps> = ({
 
   // ── Map-first driving mode ──────────────────────────────────────────────
   if (isTracking) {
-    // Visual only: HUD range feels optimistic vs real winter/highway driving.
-    // Does not affect SOC, consumption, trip energy, or charging logic.
-    const HUD_RANGE_DISPLAY_FACTOR = 0.88;
-    const rangeRaw = displayRangeKm || dynamicRemainingRangeKm;
-    const rangeShown = Math.max(0, Math.round(rangeRaw * HUD_RANGE_DISPLAY_FACTOR));
+    const rangeShown = displayRangeKm || dynamicRemainingRangeKm;
 
     const socColor =
       liveDynamicSoc < 20 ? 'text-rose-400' : liveDynamicSoc < 40 ? 'text-amber-400' : 'text-cyan-300';

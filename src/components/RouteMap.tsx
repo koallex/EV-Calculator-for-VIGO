@@ -681,7 +681,23 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       return;
     }
 
+        const lastMarkerPushRef = { lat: NaN, lon: NaN, deg: NaN, t: 0 };
     const ensureMarker = (lat: number, lon: number, arrowDeg: number) => {
+      // Skip tiny updates — fewer Yandex marker writes → cooler phone, still looks continuous.
+      const dLat = lat - lastMarkerPushRef.lat;
+      const dLon = lon - lastMarkerPushRef.lon;
+      const moved = !(
+        Number.isFinite(lastMarkerPushRef.lat) &&
+        dLat * dLat + dLon * dLon < 2.5e-11 // ~0.5 m
+      );
+      const turned =
+        !Number.isFinite(lastMarkerPushRef.deg) ||
+        Math.abs(arrowDeg - lastMarkerPushRef.deg) >= 1.5;
+      if (!moved && !turned && currentPosMarkerRef.current) return;
+      lastMarkerPushRef.lat = lat;
+      lastMarkerPushRef.lon = lon;
+      lastMarkerPushRef.deg = arrowDeg;
+
       if (bundle.apiVersion === 3) {
         const coords = toLonLat(lat, lon);
         if (!currentPosMarkerRef.current) {
@@ -692,18 +708,20 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           const m = new YMapMarker({ coordinates: coords }, el);
           map.addChild(m);
           currentPosMarkerRef.current = m;
-        } else {
+        } else if (moved) {
           try {
             currentPosMarkerRef.current.update({ coordinates: coords });
           } catch { /* ignore */ }
         }
-        try {
-          const root =
-            currentPosMarkerRef.current?.element ||
-            currentPosMarkerRef.current?._element;
-          const arrow = root?.querySelector?.('[data-vigo-nav-arrow]') as HTMLElement | null;
-          if (arrow) arrow.style.transform = `translate(-50%,-50%) rotate(${arrowDeg}deg)`;
-        } catch { /* ignore */ }
+        if (turned || !currentPosMarkerRef.current) {
+          try {
+            const root =
+              currentPosMarkerRef.current?.element ||
+              currentPosMarkerRef.current?._element;
+            const arrow = root?.querySelector?.('[data-vigo-nav-arrow]') as HTMLElement | null;
+            if (arrow) arrow.style.transform = `translate(-50%,-50%) rotate(${arrowDeg}deg)`;
+          } catch { /* ignore */ }
+        }
       } else {
         const coords: [number, number] = [lat, lon];
         if (!currentPosMarkerRef.current) {
@@ -715,7 +733,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           );
           map.geoObjects.add(m);
           currentPosMarkerRef.current = m;
-        } else {
+        } else if (moved) {
           try {
             currentPosMarkerRef.current.geometry.setCoordinates(coords);
           } catch { /* ignore */ }
@@ -723,15 +741,17 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
     };
 
-    // HUD follow: course-up + tilt. Idle/calculator: north-up.
-    const POS_LERP = 0.14;
-    const HEAD_LERP = 0.18;
+    // HUD follow: course-up + mild tilt. Smooth marker via time-based EMA (not per-frame fixed lerp).
+    // Cap work ~30 fps — full 60 rAF + map.update was a major heat source.
+    const POS_TAU_S = 0.55; // higher = smoother, slightly more lag
+    const HEAD_LERP = 0.14;
     const HEAD_DEADZONE = 3;
-    // Rarer than GPS so duration animations do not stack (was 100ms → chaos).
-    const CENTER_MS = 850;
-    const CAM_DURATION = 800;
-    const TILT_RAD = (50 * Math.PI) / 180;
+    const FRAME_MIN_MS = 33; // ~30 fps
+    const CENTER_MS = 1200;
+    const CAM_DURATION = 1100;
+    const TILT_RAD = (38 * Math.PI) / 180; // slightly flatter → less GPU than 50°
     const courseUp = !!followModeRef.current;
+    let lastFrameTs = 0;
 
     if (bundle.apiVersion === 3 && !courseUp) {
       try {
@@ -754,14 +774,22 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
 
       const now = performance.now();
+      if (lastFrameTs && now - lastFrameTs < FRAME_MIN_MS) {
+        followLoopRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+      const dt = lastFrameTs ? Math.min(0.08, (now - lastFrameTs) / 1000) : 0.032;
+      lastFrameTs = now;
+      // Exponential smooth toward GPS target — independent of frame rate, less snap.
+      const posAlpha = 1 - Math.exp(-dt / POS_TAU_S);
 
       let disp = displayPosRef.current;
       if (!disp) {
         disp = { lat: target.lat, lon: target.lon };
         displayPosRef.current = disp;
       } else {
-        disp.lat += (target.lat - disp.lat) * POS_LERP;
-        disp.lon += (target.lon - disp.lon) * POS_LERP;
+        disp.lat += (target.lat - disp.lat) * posAlpha;
+        disp.lon += (target.lon - disp.lon) * posAlpha;
       }
 
       // Display heading for north-up arrow only. Course-up keeps arrow at 0°.
