@@ -1065,29 +1065,38 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
 
   const visibleCount = stations.filter(matchesFilters).length;
 
+  const selectedTariff = selected ? fullTariff(selected) : null;
+  const selectedChips = selected ? portChips(selected) : [];
+  const subText = isDark ? 'text-slate-500' : 'text-slate-400';
+  const tileBg = isDark ? 'bg-slate-900' : 'bg-slate-50';
+  const fmtByn = (n: number | null | undefined) =>
+    n != null ? `${String(n).replace('.', ',')} BYN` : '—';
+  const panelSurface = isDark
+    ? 'bg-slate-950/95 border border-slate-700 text-slate-100'
+    : 'bg-white/95 border border-slate-200 text-slate-900 shadow-lg';
+
   return (
-    <div
-      // --nav-h: высота нижней навигации. Единственное место, где её нужно подправить
-      // (отдельно для портрета и ландшафта).
-      className="relative h-[calc(100dvh-7rem)] sm:h-[calc(100dvh-8rem)] landscape:h-[100dvh] max-h-none min-h-[320px] w-full overflow-hidden rounded-none sm:rounded-2xl landscape:rounded-none border-0 sm:border landscape:border-0 border-slate-800/60 [--nav-h:5.25rem] landscape:[--nav-h:5.25rem]"
-      style={
-        {
-          '--st': 'calc(0.5rem + env(safe-area-inset-top, 0px))',
-          '--sl': 'max(0.5rem, env(safe-area-inset-left, 0px))',
-          '--sr': 'max(0.5rem, env(safe-area-inset-right, 0px))',
-          '--sb': 'calc(var(--nav-h) + env(safe-area-inset-bottom, 0px))',
-        } as React.CSSProperties
-      }
-    >
+    <div className="relative h-[calc(100dvh-7rem)] sm:h-[calc(100dvh-8rem)] landscape:h-[100dvh] max-h-none min-h-[320px] w-full overflow-hidden rounded-none sm:rounded-2xl border-0 sm:border border-slate-800/60">
       <div ref={containerRef} className="absolute inset-0 bg-slate-900" />
 
-      {/* Верхняя колонка: контролы + панели (фильтры / ближайшие свободные) идут в потоке,
-          без жёстких отступов. Портрет — на всю ширину. Ландшафт — левая колонка
-          (правая сторона отдана карточке станции), с учётом выреза/safe-area. */}
-      <div className="absolute z-20 flex flex-col gap-2 pointer-events-none left-[var(--sl)] right-[var(--sr)] top-[var(--st)] landscape:right-auto landscape:bottom-[var(--sb)] landscape:w-[min(22rem,42vw)]">
-        <div className="flex shrink-0 items-start gap-2">
+      {/*
+        Overlay grid (one place for all floating UI, no hard-coded "top: 6.75rem"):
+        - Portrait: single column -> [filters + locate] / [CTA] / [filters sheet OR nearest list]
+        - Landscape: three columns -> left: filters (+ sheet), centre: free map, right: CTA (+ nearest list)
+        Safe-area insets are applied on all sides (notch / Dynamic Island in landscape).
+      */}
+      <div
+        className="pointer-events-none absolute inset-0 z-30 grid grid-cols-1 pt-1.5 landscape:pt-[calc(0.5rem_+_env(safe-area-inset-top,0px))] grid-rows-[auto_auto_minmax(0,1fr)] gap-2 landscape:grid-cols-[minmax(0,min(19rem,38%))_minmax(0,1fr)_minmax(0,min(19rem,38%))] landscape:grid-rows-[auto_minmax(0,1fr)]"
+        style={{
+          paddingLeft: 'max(0.5rem, env(safe-area-inset-left, 0px))',
+          paddingRight: 'max(0.5rem, env(safe-area-inset-right, 0px))',
+          paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom, 0px))',
+        }}
+      >
+        {/* Filters chip + counter + locate */}
+        <div className="pointer-events-none flex items-start gap-2 landscape:col-start-1 landscape:row-start-1">
           <div
-            className={`pointer-events-auto flex flex-1 flex-wrap items-center gap-1.5 rounded-xl px-2 py-1.5 backdrop-blur-md ${
+            className={`pointer-events-auto flex min-w-0 flex-1 flex-wrap items-center gap-1.5 rounded-xl px-2 py-1.5 backdrop-blur-md ${
               isDark ? 'bg-slate-950/85 text-slate-100' : 'bg-white/90 text-slate-900 shadow'
             }`}
           >
@@ -1097,7 +1106,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
                 setFiltersOpen((v) => !v);
                 setNearestFreeOpen(false);
               }}
-              className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-bold ${
+              className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold ${
                 filtersOpen ? 'bg-cyan-600 text-white' : isDark ? 'bg-slate-800' : 'bg-slate-100'
               }`}
             >
@@ -1116,7 +1125,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           <button
             type="button"
             onClick={goToMe}
-            className={`pointer-events-auto rounded-xl p-2 backdrop-blur-md shrink-0 ${
+            className={`pointer-events-auto shrink-0 rounded-xl p-2 backdrop-blur-md ${
               isDark ? 'bg-slate-950/85 text-cyan-400' : 'bg-white/90 text-cyan-600 shadow'
             }`}
             title="Моё местоположение"
@@ -1125,13 +1134,13 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           </button>
         </div>
 
-        {/* Портрет: акцентная кнопка по центру. Ландшафт: на всю ширину левой колонки. */}
-        <div className="flex shrink-0 justify-center pointer-events-none">
+        {/* CTA: portrait — centred under filters; landscape — top-right column */}
+        <div className="pointer-events-none flex justify-center landscape:col-start-3 landscape:row-start-1 landscape:justify-end">
           <button
             type="button"
             onClick={findNearestFree}
             disabled={findingNearest}
-            className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-[13px] font-black shadow-lg backdrop-blur-md active:scale-[0.98] disabled:opacity-80 border landscape:w-full landscape:justify-center landscape:px-4 landscape:py-2 landscape:text-[12px] ${
+            className={`pointer-events-auto inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-[13px] font-black shadow-lg backdrop-blur-md active:scale-[0.98] disabled:opacity-80 landscape:px-4 landscape:py-2 landscape:text-[12px] ${
               findingNearest
                 ? 'bg-cyan-700 text-white border-cyan-500/50 shadow-cyan-950/50'
                 : 'bg-cyan-500 text-slate-950 border-cyan-300/40 shadow-cyan-500/30 hover:bg-cyan-400'
@@ -1151,397 +1160,382 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           </button>
         </div>
 
-      {/* Ближайшие свободные: в потоке под кнопкой, высота сама подстраивается */}
-      {nearestFreeOpen && (
-        <div
-          className={`pointer-events-auto flex min-h-0 flex-col overflow-hidden rounded-2xl border backdrop-blur-md max-h-[min(50dvh,20rem)] landscape:max-h-none ${
-            isDark ? 'bg-slate-950/95 border-slate-700 text-slate-100' : 'bg-white/95 border-slate-200 text-slate-900 shadow-lg'
-          }`}
-        >
-          <div className="flex shrink-0 items-center justify-between px-3 py-2 border-b border-white/10">
-            <span className="text-[11px] font-bold uppercase tracking-wide opacity-70">
-              {findingNearest ? 'Поиск…' : `Свободные рядом · ${nearestFreeList.length}`}
-            </span>
+        {/* Nearest free list. Landscape: right column, hidden while a station card is open. */}
+        {nearestFreeOpen && (
+          <div
+            className={`pointer-events-auto flex min-h-0 flex-col self-start overflow-hidden rounded-2xl backdrop-blur-md landscape:col-start-3 landscape:row-start-2 landscape:max-h-full ${
+              selected ? 'max-h-[min(22dvh,11rem)] landscape:hidden' : 'max-h-[min(42dvh,20rem)]'
+            } ${panelSurface}`}
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2">
+              <span className="text-[11px] font-bold uppercase tracking-wide opacity-70">
+                {findingNearest ? 'Поиск…' : `Свободные рядом · ${nearestFreeList.length}`}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setNearestFreeOpen(false);
+                  setNearestFreeList([]);
+                }}
+                className="rounded-lg p-1 opacity-70 hover:opacity-100"
+                aria-label="Закрыть"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {findingNearest ? (
+              <div className="flex items-center gap-2 px-3 py-4 text-[12px] opacity-80">
+                <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+                Сканируем станции вокруг…
+              </div>
+            ) : nearestFreeList.length === 0 ? (
+              <div className="px-3 py-4 text-[12px] opacity-70">Ничего не найдено</div>
+            ) : (
+              <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain p-1.5">
+                {nearestFreeList.map((item) => {
+                  const isActive =
+                    selected &&
+                    (selected.id === item.station.id ||
+                      (Math.abs(selected.lat - item.station.lat) < 1e-4 &&
+                        Math.abs(selected.lon - item.station.lon) < 1e-4));
+                  return (
+                    <li key={item.station.id}>
+                      <button
+                        type="button"
+                        onClick={() => selectNearestResult(item)}
+                        className={`w-full rounded-xl border px-3 py-2 text-left transition-colors ${
+                          isActive
+                            ? isDark
+                              ? 'bg-emerald-950/50 border-emerald-600/50'
+                              : 'bg-emerald-50 border-emerald-300'
+                            : isDark
+                              ? 'bg-slate-900/80 border-transparent hover:bg-slate-800'
+                              : 'bg-white border-slate-100 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="truncate text-[12px] font-semibold">{item.station.name}</div>
+                        <div className="mt-0.5 text-[11px] opacity-60">
+                          {item.distanceKm < 1
+                            ? `${Math.round(item.distanceKm * 1000)} м`
+                            : `${item.distanceKm.toFixed(1)} км`}
+                          {' · '}
+                          {item.matchedConnector === 'gbt' ? 'GB/T' : item.matchedConnector === 'type2' ? 'Type2' : 'CCS'}{' '}
+                          свободно {item.freeCcs}
+                          {item.operator ? ` · ${item.operator}` : ''}
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {/* Filter sheet. Landscape: left column under the filters chip. */}
+        {filtersOpen && (
+          <div
+            className={`pointer-events-auto min-h-0 self-start overflow-y-auto overscroll-contain rounded-2xl p-3 backdrop-blur-md landscape:col-start-1 landscape:row-start-2 landscape:max-h-full landscape:p-2.5 ${
+              selected ? 'max-h-[min(30dvh,17rem)]' : 'max-h-[min(56dvh,26rem)]'
+            } ${panelSurface}`}
+          >
+            <div className={`mb-3 rounded-xl px-3 py-2 text-[11px] landscape:mb-2 ${isDark ? 'bg-slate-900 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+              <span className="font-semibold">Разъёмы:</span>{' '}
+              {profileConnectors.map((c) => c === 'ccs2' ? 'CCS2' : c === 'gbt' ? 'GB/T' : 'Type2').join(' + ') || 'из профиля авто'}
+            </div>
+
+            <p className={`mb-1.5 text-[11px] font-bold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              Мощность от
+            </p>
+            <div className="mb-3 flex flex-wrap gap-1.5 landscape:mb-2">
+              {(
+                [
+                  { v: null as number | null, label: 'Любая' },
+                  { v: 50, label: '≥ 50 кВт' },
+                  { v: 80, label: '≥ 80 кВт' },
+                  { v: 120, label: '≥ 120 кВт' },
+                  { v: 150, label: '≥ 150 кВт' },
+                  { v: 180, label: '≥ 180 кВт' },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={String(opt.v)}
+                  type="button"
+                  onClick={() => {
+                    setMinPowerKw(opt.v);
+                    triggerHaptic('light', settings.hapticFeedback);
+                  }}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                    minPowerKw === opt.v
+                      ? 'bg-cyan-600 text-white'
+                      : isDark
+                        ? 'bg-slate-800 text-slate-300'
+                        : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
             <button
               type="button"
               onClick={() => {
-                setNearestFreeOpen(false);
-                setNearestFreeList([]);
+                setOnlyFree((v) => !v);
+                triggerHaptic('light', settings.hapticFeedback);
               }}
-              className="rounded-lg p-1.5 opacity-70 hover:opacity-100"
-              aria-label="Закрыть"
+              className={`w-full rounded-xl py-2 text-[12px] font-bold ${
+                onlyFree
+                  ? 'bg-emerald-600 text-white'
+                  : isDark
+                    ? 'bg-slate-800 text-slate-200'
+                    : 'bg-slate-100 text-slate-700'
+              }`}
             >
-              <X className="h-4 w-4" />
+              Только свободные
             </button>
-          </div>
-          {findingNearest ? (
-            <div className="flex items-center gap-2 px-3 py-4 text-[12px] opacity-80">
-              <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
-              Сканируем станции вокруг…
-            </div>
-          ) : nearestFreeList.length === 0 ? (
-            <div className="px-3 py-4 text-[12px] opacity-70">Ничего не найдено</div>
-          ) : (
-            <ul className="min-h-0 max-h-52 landscape:max-h-none overflow-y-auto overscroll-contain p-1.5 space-y-1">
-              {nearestFreeList.map((item) => {
-                const isActive =
-                  selected &&
-                  (selected.id === item.station.id ||
-                    (Math.abs(selected.lat - item.station.lat) < 1e-4 &&
-                      Math.abs(selected.lon - item.station.lon) < 1e-4));
-                return (
-                  <li key={item.station.id}>
-                    <button
-                      type="button"
-                      onClick={() => selectNearestResult(item)}
-                      className={`w-full text-left rounded-xl px-3 py-2 border transition-colors ${
-                        isActive
-                          ? isDark
-                            ? 'bg-emerald-950/50 border-emerald-600/50'
-                            : 'bg-emerald-50 border-emerald-300'
-                          : isDark
-                            ? 'bg-slate-900/80 border-transparent hover:bg-slate-800'
-                            : 'bg-white border-slate-100 hover:bg-slate-50'
-                      }`}
-                    >
-                      <div className="text-[12px] font-semibold truncate">{item.station.name}</div>
-                      <div className="mt-0.5 text-[11px] opacity-60">
-                        {item.distanceKm < 1
-                          ? `${Math.round(item.distanceKm * 1000)} м`
-                          : `${item.distanceKm.toFixed(1)} км`}
-                        {' · '}
-                        {item.matchedConnector === 'gbt' ? 'GB/T' : item.matchedConnector === 'type2' ? 'Type2' : 'CCS'}{' '}
-                        свободно {item.freeCcs}
-                        {item.operator ? ` · ${item.operator}` : ''}
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      )}
 
-      {/* Filter sheet */}
-      {filtersOpen && (
-        <div
-          className={`pointer-events-auto min-h-0 overflow-y-auto overscroll-contain rounded-2xl p-3 backdrop-blur-md max-h-[min(60dvh,24rem)] landscape:max-h-none ${
-            isDark ? 'bg-slate-950/95 border border-slate-700' : 'bg-white/95 border border-slate-200 shadow-lg'
-          }`}
-        >
-          <div className={`mb-3 rounded-xl px-3 py-2 text-[11px] ${isDark ? 'bg-slate-900 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
-            <span className="font-semibold">Разъёмы:</span>{' '}
-            {profileConnectors.map((c) => c === 'ccs2' ? 'CCS2' : c === 'gbt' ? 'GB/T' : 'Type2').join(' + ') || 'из профиля авто'}
-          </div>
-
-          <p className={`mb-1.5 text-[11px] font-bold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            Мощность от
-          </p>
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            {(
-              [
-                { v: null as number | null, label: 'Любая' },
-                { v: 50, label: '≥ 50 кВт' },
-                { v: 80, label: '≥ 80 кВт' },
-                { v: 120, label: '≥ 120 кВт' },
-                { v: 150, label: '≥ 150 кВт' },
-                { v: 180, label: '≥ 180 кВт' },
-              ] as const
-            ).map((opt) => (
+            <p className={`mt-3 text-[10px] font-bold uppercase tracking-wide landscape:mt-2 ${subText}`}>
+              Оператор
+            </p>
+            <div className="mt-1.5 flex max-h-24 flex-wrap gap-1.5 overflow-y-auto landscape:max-h-none">
               <button
-                key={String(opt.v)}
                 type="button"
                 onClick={() => {
-                  setMinPowerKw(opt.v);
+                  setOperatorFilter([]);
                   triggerHaptic('light', settings.hapticFeedback);
                 }}
                 className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                  minPowerKw === opt.v
+                  !operatorFilter.length
                     ? 'bg-cyan-600 text-white'
                     : isDark
                       ? 'bg-slate-800 text-slate-300'
                       : 'bg-slate-100 text-slate-600'
                 }`}
               >
-                {opt.label}
+                Все
               </button>
-            ))}
+              {operatorsInView.map((op) => {
+                const active = operatorFilter.includes(op.key);
+                return (
+                  <button
+                    key={op.key}
+                    type="button"
+                    onClick={() => {
+                      setOperatorFilter((prev) =>
+                        prev.includes(op.key)
+                          ? prev.filter((k) => k !== op.key)
+                          : [...prev, op.key],
+                      );
+                      triggerHaptic('light', settings.hapticFeedback);
+                    }}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                      active
+                        ? 'text-white'
+                        : isDark
+                          ? 'bg-slate-800 text-slate-300'
+                          : 'bg-slate-100 text-slate-600'
+                    }`}
+                    style={active ? { backgroundColor: operatorColor(op.key) } : undefined}
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: operatorColor(op.key) }}
+                    />
+                    {op.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className={`mt-2 text-[10px] ${subText}`}>
+              Разъёмы — из профиля авто. Цвет маркера = оператор.
+              {minPowerKw != null ? ` · Мощность ≥ ${minPowerKw} кВт` : ''}
+            </p>
           </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setOnlyFree((v) => !v);
-              triggerHaptic('light', settings.hapticFeedback);
-            }}
-            className={`w-full rounded-xl py-2 text-[12px] font-bold ${
-              onlyFree
-                ? 'bg-emerald-600 text-white'
-                : isDark
-                  ? 'bg-slate-800 text-slate-200'
-                  : 'bg-slate-100 text-slate-700'
-            }`}
-          >
-            Только свободные
-          </button>
-
-          <p className={`mt-3 text-[10px] font-bold uppercase tracking-wide ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-            Оператор
-          </p>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                setOperatorFilter([]);
-                triggerHaptic('light', settings.hapticFeedback);
-              }}
-              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                !operatorFilter.length
-                  ? 'bg-cyan-600 text-white'
-                  : isDark
-                    ? 'bg-slate-800 text-slate-300'
-                    : 'bg-slate-100 text-slate-600'
-              }`}
-            >
-              Все
-            </button>
-            {operatorsInView.map((op) => {
-              const active = operatorFilter.includes(op.key);
-              return (
-                <button
-                  key={op.key}
-                  type="button"
-                  onClick={() => {
-                    setOperatorFilter((prev) =>
-                      prev.includes(op.key)
-                        ? prev.filter((k) => k !== op.key)
-                        : [...prev, op.key],
-                    );
-                    triggerHaptic('light', settings.hapticFeedback);
-                  }}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                    active
-                      ? 'text-white'
-                      : isDark
-                        ? 'bg-slate-800 text-slate-300'
-                        : 'bg-slate-100 text-slate-600'
-                  }`}
-                  style={active ? { backgroundColor: operatorColor(op.key) } : undefined}
-                >
-                  <span
-                    className="h-2 w-2 rounded-full shrink-0"
-                    style={{ backgroundColor: operatorColor(op.key) }}
-                  />
-                  {op.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <p className={`mt-2 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-            Разъёмы — из профиля авто. Цвет маркера = оператор.
-            {minPowerKw != null ? ` · Мощность ≥ ${minPowerKw} кВт` : ''}
-          </p>
-        </div>
-      )}
+        )}
       </div>
 
-      {/* Нижний стек: ошибка / индикатор / карточка станции — друг друга не перекрывают.
-          Портрет: шторка над навигацией. Ландшафт: правая колонка на всю доступную высоту. */}
-      <div className="fixed z-40 mx-auto flex max-w-md flex-col justify-end gap-2 pointer-events-none left-[var(--sl)] right-[var(--sr)] bottom-[var(--sb)] landscape:left-auto landscape:mx-0 landscape:top-[var(--st)] landscape:w-[min(27rem,52vw)] landscape:max-w-none">
-        {error && (
-          <div className="pointer-events-auto shrink-0 rounded-xl bg-rose-950/90 px-3 py-2 text-[11px] text-rose-200">
-            {error}
-          </div>
-        )}
+      {/* Loading pill: header counter already shows "…", so hide the pill while a card is open */}
+      {(loading || liveBusy) && !selected && (
+        <div className="absolute bottom-24 left-1/2 z-20 -translate-x-1/2 rounded-full bg-slate-950/80 px-3 py-1.5 text-[11px] text-slate-200 backdrop-blur landscape:bottom-3">
+          <Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" />
+          Обновление…
+        </div>
+      )}
 
-        {(loading || liveBusy) && (
-          <div className="shrink-0 self-center rounded-full bg-slate-950/80 px-3 py-1.5 text-[11px] text-slate-200 backdrop-blur">
-            <Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" />
-            Обновление…
-          </div>
-        )}
+      {error && (
+        <div
+          className={`absolute left-2 right-2 z-50 rounded-xl bg-rose-950/90 px-3 py-2 text-[11px] text-rose-200 landscape:bottom-3 landscape:left-1/2 landscape:right-auto landscape:w-[min(28rem,50vw)] landscape:-translate-x-1/2 ${
+            selected ? 'bottom-[calc(6rem_+_min(40dvh,24rem))]' : 'bottom-24'
+          }`}
+        >
+          {error}
+        </div>
+      )}
 
-        {/* Selected station card */}
-        {selected && (
-          <div
-            className={`pointer-events-auto min-h-0 overflow-y-auto overscroll-contain rounded-2xl border p-3 shadow-2xl backdrop-blur-md max-h-[min(48dvh,380px)] landscape:max-h-none ${
-              isDark
-                ? 'border-slate-700 bg-slate-950/95 text-slate-100'
-                : 'border-slate-200 bg-white/95 text-slate-900'
-            }`}
-          >
-            <div className="flex items-start gap-2">
-              <div className={`mt-0.5 rounded-lg p-1.5 ${isDark ? 'bg-cyan-500/15 text-cyan-400' : 'bg-cyan-50 text-cyan-600'}`}>
-                <PlugZap className="h-4 w-4" />
-              </div>
-              <div className="min-w-0 flex-1 landscape:grid landscape:grid-cols-2 landscape:content-start landscape:gap-x-3">
-                <div className="flex items-start justify-between gap-2 landscape:col-span-2">
-                  <div className="min-w-0">
-                    <p className="line-clamp-2 break-words text-[13px] font-bold leading-tight">{selected.name}</p>
-                    {selected.address && (
-                      <p className={`truncate text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                        {selected.address}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelected(null)}
-                    aria-label="Закрыть"
-                    className={`-m-1 shrink-0 rounded-lg p-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
+      {/*
+        Selected station card.
+        Portrait: bottom sheet above the bottom nav.
+        Landscape: compact two-column card pinned to the bottom-right (no bottom nav offset),
+        so it never overlaps the filters/CTA and keeps the map centre visible.
+      */}
+      {selected && (
+        <div
+          className={`fixed left-3 right-3 z-40 mx-auto max-w-md overflow-y-auto overscroll-contain rounded-2xl border p-3 shadow-2xl backdrop-blur-md bottom-[calc(5.25rem_+_env(safe-area-inset-bottom,0px))] max-h-[min(40dvh,24rem)] landscape:left-auto landscape:right-[max(0.5rem,env(safe-area-inset-right,0px))] landscape:mx-0 landscape:w-[min(26rem,54vw)] landscape:max-w-none landscape:bottom-[max(0.5rem,env(safe-area-inset-bottom,0px))] landscape:max-h-[calc(100dvh_-_4rem_-_env(safe-area-inset-top,0px)_-_env(safe-area-inset-bottom,0px))] landscape:p-2.5 ${
+            isDark
+              ? 'border-slate-700 bg-slate-950/95 text-slate-100'
+              : 'border-slate-200 bg-white/95 text-slate-900'
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            <div className={`mt-0.5 rounded-lg p-1.5 ${isDark ? 'bg-cyan-500/15 text-cyan-400' : 'bg-cyan-50 text-cyan-600'}`}>
+              <PlugZap className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                {/* Operator */}
-                <div className="mt-2 flex items-center gap-2">
-                  <span
-                    className="h-3 w-3 rounded-full shrink-0 ring-2 ring-black/20"
-                    style={{ backgroundColor: operatorColor(selected.operator) }}
-                  />
-                  <span className="text-[12px] font-bold truncate">{selected.operator || 'Оператор н/д'}</span>
+                  <p className="truncate text-[13px] font-bold leading-tight">{selected.name}</p>
+                  {selected.address && (
+                    <p className={`truncate text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {selected.address}
+                    </p>
+                  )}
                 </div>
-
-                {/* Free ports */}
-                <div className="mt-2">
-                  <span className={`block text-[10px] font-bold uppercase tracking-wide mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Свободные порты
-                    {liveBusy && !selected.liveChecked ? ' · обновление…' : ''}
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {portChips(selected).map((chip) => {
-                      const hasFree = chip.live && (chip.free ?? 0) > 0;
-                      const allBusy = chip.live && (chip.free ?? 0) === 0 && (chip.total ?? 0) > 0;
-                      return (
-                        <span
-                          key={chip.key}
-                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${
-                            hasFree
-                              ? 'bg-emerald-600 text-white'
-                              : allBusy
-                                ? 'bg-rose-600/90 text-white'
-                                : isDark
-                                  ? 'bg-slate-800 text-slate-200'
-                                  : 'bg-slate-100 text-slate-700'
-                          }`}
-                        >
-                          {chip.label}
-                          {chip.live ? ` ${chip.free ?? 0}/${chip.total ?? '—'}` : ''}
-                        </span>
-                      );
-                    })}
-                    {!portChips(selected).length && (
-                      <span className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>—</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Ports × power */}
-                <div className="mt-2">
-                  <span className={`block text-[10px] font-bold uppercase tracking-wide mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Порты и мощность
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(selected.portGroups?.length
-                      ? selected.portGroups
-                      : []
-                    ).map((g, i) => (
-                      <span
-                        key={`${g.connector}-${g.powerKw}-${i}`}
-                        className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${
-                          isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-50 text-slate-800'
-                        }`}
-                      >
-                        {g.connector}
-                        {g.powerKw != null ? ` ${Math.round(g.powerKw)} кВт` : ''}
-                        {g.count > 1 ? ` ×${g.count}` : ''}
-                      </span>
-                    ))}
-                    {!selected.portGroups?.length && (
-                      <span className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        {powerLine(selected)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                </div>
-
-                <div className="min-w-0">
-                {/* Day / night tariffs */}
-                {(() => {
-                  const ft = fullTariff(selected);
-                  const fmt = (n: number | null | undefined) =>
-                    n != null ? `${String(n).replace('.', ',')} BYN` : '—';
-                  return (
-                    <div className={`mt-2 grid grid-cols-2 gap-2 text-[11px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                      <div className={`rounded-xl px-2.5 py-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-                        <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                          DC день
-                        </span>
-                        <span className="font-semibold">{fmt(ft?.dcDay)}</span>
-                      </div>
-                      <div className={`rounded-xl px-2.5 py-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-                        <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                          DC ночь
-                        </span>
-                        <span className="font-semibold">{fmt(ft?.dcNight)}</span>
-                      </div>
-                      {ft?.acDay != null && (
-                        <div className={`rounded-xl px-2.5 py-2 col-span-2 ${isDark ? 'bg-slate-900' : 'bg-slate-50'}`}>
-                          <span className={`block text-[10px] uppercase ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                            AC
-                          </span>
-                          <span className="font-semibold">{fmt(ft.acDay)}</span>
-                        </div>
-                      )}
-                      {!ft && (
-                        <p className={`col-span-2 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                          Тариф оператора не найден
-                        </p>
-                      )}
-                    </div>
-                  );
-                })()}
-                {fullTariff(selected)?.asOf && (
-                  <p className={`mt-1 text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                    Тарифы на {fullTariff(selected)!.asOf}
-                  </p>
-                )}
-
                 <button
                   type="button"
-                  onClick={() => {
-                    triggerHaptic('medium', settings.hapticFeedback);
-                    const { lat, lon } = selected;
-                    // One target only — timed web fallback opened Maps + Navigator together.
-                    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(
-                      navigator.userAgent || '',
-                    );
-                    if (isMobile) {
-                      window.location.href = `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lon}`;
-                    } else {
-                      window.open(
-                        `https://yandex.ru/maps/?rtext=~${lat},${lon}&rtt=auto`,
-                        '_blank',
-                        'noopener,noreferrer',
-                      );
-                    }
-                  }}
-                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-500 py-2.5 text-[13px] font-black text-slate-950 active:scale-[0.98]"
+                  onClick={() => setSelected(null)}
+                  aria-label="Закрыть"
+                  className={`shrink-0 rounded-lg p-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
                 >
-                  <Navigation className="h-4 w-4" />
-                  Яндекс Навигатор
+                  <X className="h-4 w-4" />
                 </button>
+              </div>
+
+              {/* Portrait: one column. Landscape: two columns (info | tariffs + navigate). */}
+              <div className="landscape:grid landscape:grid-cols-2 landscape:gap-x-3">
+                <div className="min-w-0">
+                  {/* Operator */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-full ring-2 ring-black/20"
+                      style={{ backgroundColor: operatorColor(selected.operator) }}
+                    />
+                    <span className="truncate text-[12px] font-bold">{selected.operator || 'Оператор н/д'}</span>
+                  </div>
+
+                  {/* Free ports */}
+                  <div className="mt-2">
+                    <span className={`mb-1 block text-[10px] font-bold uppercase tracking-wide ${subText}`}>
+                      Свободные порты
+                      {liveBusy && !selected.liveChecked ? ' · обновление…' : ''}
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedChips.map((chip) => {
+                        const hasFree = chip.live && (chip.free ?? 0) > 0;
+                        const allBusy = chip.live && (chip.free ?? 0) === 0 && (chip.total ?? 0) > 0;
+                        return (
+                          <span
+                            key={chip.key}
+                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                              hasFree
+                                ? 'bg-emerald-600 text-white'
+                                : allBusy
+                                  ? 'bg-rose-600/90 text-white'
+                                  : isDark
+                                    ? 'bg-slate-800 text-slate-200'
+                                    : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {chip.label}
+                            {chip.live ? ` ${chip.free ?? 0}/${chip.total ?? '—'}` : ''}
+                          </span>
+                        );
+                      })}
+                      {!selectedChips.length && <span className={`text-[11px] ${subText}`}>—</span>}
+                    </div>
+                  </div>
+
+                  {/* Ports × power */}
+                  <div className="mt-2">
+                    <span className={`mb-1 block text-[10px] font-bold uppercase tracking-wide ${subText}`}>
+                      Порты и мощность
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(selected.portGroups?.length ? selected.portGroups : []).map((g, i) => (
+                        <span
+                          key={`${g.connector}-${g.powerKw}-${i}`}
+                          className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${
+                            isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-50 text-slate-800'
+                          }`}
+                        >
+                          {g.connector}
+                          {g.powerKw != null ? ` ${Math.round(g.powerKw)} кВт` : ''}
+                          {g.count > 1 ? ` ×${g.count}` : ''}
+                        </span>
+                      ))}
+                      {!selected.portGroups?.length && (
+                        <span className={`text-[11px] ${subText}`}>{powerLine(selected)}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="min-w-0">
+                  {/* Day / night tariffs */}
+                  <div className={`mt-2 grid grid-cols-2 gap-2 text-[11px] ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                    <div className={`rounded-xl px-2.5 py-2 ${tileBg}`}>
+                      <span className={`block text-[10px] uppercase ${subText}`}>DC день</span>
+                      <span className="font-semibold">{fmtByn(selectedTariff?.dcDay)}</span>
+                    </div>
+                    <div className={`rounded-xl px-2.5 py-2 ${tileBg}`}>
+                      <span className={`block text-[10px] uppercase ${subText}`}>DC ночь</span>
+                      <span className="font-semibold">{fmtByn(selectedTariff?.dcNight)}</span>
+                    </div>
+                    {selectedTariff?.acDay != null && (
+                      <div className={`col-span-2 rounded-xl px-2.5 py-2 ${tileBg}`}>
+                        <span className={`block text-[10px] uppercase ${subText}`}>AC</span>
+                        <span className="font-semibold">{fmtByn(selectedTariff.acDay)}</span>
+                      </div>
+                    )}
+                    {!selectedTariff && (
+                      <p className={`col-span-2 text-[10px] ${subText}`}>Тариф оператора не найден</p>
+                    )}
+                  </div>
+                  {selectedTariff?.asOf && (
+                    <p className={`mt-1 text-[10px] ${subText}`}>Тарифы на {selectedTariff.asOf}</p>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('medium', settings.hapticFeedback);
+                      const { lat, lon } = selected;
+                      // One target only — timed web fallback opened Maps + Navigator together.
+                      const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(
+                        navigator.userAgent || '',
+                      );
+                      if (isMobile) {
+                        window.location.href = `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lon}`;
+                      } else {
+                        window.open(
+                          `https://yandex.ru/maps/?rtext=~${lat},${lon}&rtt=auto`,
+                          '_blank',
+                          'noopener,noreferrer',
+                        );
+                      }
+                    }}
+                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-500 py-2.5 text-[13px] font-black text-slate-950 active:scale-[0.98] landscape:py-2"
+                  >
+                    <Navigation className="h-4 w-4" />
+                    Яндекс Навигатор
+                  </button>
                 </div>
               </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };
