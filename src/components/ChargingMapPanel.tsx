@@ -1069,58 +1069,58 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     <div className="relative h-[calc(100dvh-7rem)] sm:h-[calc(100dvh-8rem)] landscape:h-[100dvh] max-h-none min-h-[320px] w-full overflow-hidden rounded-none sm:rounded-2xl border-0 sm:border border-slate-800/60">
       <div ref={containerRef} className="absolute inset-0 bg-slate-900" />
 
-      {/* Top controls: filters + my location only */}
-      <div className="absolute left-2 right-2 top-2 z-20 flex items-start gap-2 pointer-events-none">
-        <div
-          className={`pointer-events-auto flex flex-1 flex-wrap items-center gap-1.5 rounded-xl px-2 py-1.5 backdrop-blur-md ${
-            isDark ? 'bg-slate-950/85 text-slate-100' : 'bg-white/90 text-slate-900 shadow'
-          }`}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setFiltersOpen((v) => !v);
-              setNearestFreeOpen(false);
-            }}
-            className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold ${
-              filtersOpen ? 'bg-cyan-600 text-white' : isDark ? 'bg-slate-800' : 'bg-slate-100'
+      {/* Top controls: filters + locate + free CTA (above bottom nav, safe-area) */}
+      <div
+        className="absolute left-2 right-2 z-20 flex flex-col gap-2 pointer-events-none"
+        style={{ top: 'calc(0.5rem + env(safe-area-inset-top, 0px))' }}
+      >
+        <div className="flex items-start gap-2">
+          <div
+            className={`pointer-events-auto flex flex-1 flex-wrap items-center gap-1.5 rounded-xl px-2 py-1.5 backdrop-blur-md ${
+              isDark ? 'bg-slate-950/85 text-slate-100' : 'bg-white/90 text-slate-900 shadow'
             }`}
           >
-            <Filter className="h-3.5 w-3.5" />
-            Фильтры
-          </button>
-          {onlyFree && (
-            <span className="rounded-full bg-emerald-600/90 px-2 py-0.5 text-[10px] font-semibold text-white">
-              свободные
+            <button
+              type="button"
+              onClick={() => {
+                setFiltersOpen((v) => !v);
+                setNearestFreeOpen(false);
+              }}
+              className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold ${
+                filtersOpen ? 'bg-cyan-600 text-white' : isDark ? 'bg-slate-800' : 'bg-slate-100'
+              }`}
+            >
+              <Filter className="h-3.5 w-3.5" />
+              Фильтры
+            </button>
+            {onlyFree && (
+              <span className="rounded-full bg-emerald-600/90 px-2 py-0.5 text-[10px] font-semibold text-white">
+                свободные
+              </span>
+            )}
+            <span className={`ml-auto text-[10px] tabular-nums ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              {loading || liveBusy ? '…' : `${visibleCount}`}
             </span>
-          )}
-          <span className={`ml-auto text-[10px] tabular-nums ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-            {loading || liveBusy ? '…' : `${visibleCount}`}
-          </span>
+          </div>
+          <button
+            type="button"
+            onClick={goToMe}
+            className={`pointer-events-auto rounded-xl p-2 backdrop-blur-md shrink-0 ${
+              isDark ? 'bg-slate-950/85 text-cyan-400' : 'bg-white/90 text-cyan-600 shadow'
+            }`}
+            title="Моё местоположение"
+          >
+            <LocateFixed className="h-5 w-5" />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={goToMe}
-          className={`pointer-events-auto rounded-xl p-2 backdrop-blur-md ${
-            isDark ? 'bg-slate-950/85 text-cyan-400' : 'bg-white/90 text-cyan-600 shadow'
-          }`}
-          title="Моё местоположение"
-        >
-          <LocateFixed className="h-5 w-5" />
-        </button>
-      </div>
 
-      {/* Nearest free — bottom CTA (thumb zone), list opens upward above it */}
-      {!selected && (
-        <div
-          className="absolute left-2 right-2 z-20 flex justify-center pointer-events-none"
-          style={{ bottom: 'calc(5.5rem + env(safe-area-inset-bottom, 0px))' }}
-        >
+        {/* Portrait: full-width accent under filters. Landscape: compact, right-aligned under locate. */}
+        <div className="flex justify-center landscape:justify-end pointer-events-none">
           <button
             type="button"
             onClick={findNearestFree}
             disabled={findingNearest}
-            className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-[13px] font-black shadow-lg backdrop-blur-md active:scale-[0.98] disabled:opacity-80 border ${
+            className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-[13px] font-black shadow-lg backdrop-blur-md active:scale-[0.98] disabled:opacity-80 border landscape:px-4 landscape:py-2 landscape:text-[12px] ${
               findingNearest
                 ? 'bg-cyan-700 text-white border-cyan-500/50 shadow-cyan-950/50'
                 : 'bg-cyan-500 text-slate-950 border-cyan-300/40 shadow-cyan-500/30 hover:bg-cyan-400'
@@ -1139,16 +1139,16 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
             )}
           </button>
         </div>
-      )}
+      </div>
 
-      {/* Nearest free list — anchored above the CTA / bottom nav */}
+      {/* Results under top CTA; landscape: side panel on the right */}
       {nearestFreeOpen && (
         <div
-          className={`absolute z-30 overflow-hidden rounded-2xl border backdrop-blur-md max-h-[min(50vh,20rem)] ${
+          className={`absolute z-30 overflow-hidden rounded-2xl border backdrop-blur-md max-h-[min(50vh,20rem)] landscape:max-h-[min(70vh,22rem)] ${
             isDark ? 'bg-slate-950/95 border-slate-700 text-slate-100' : 'bg-white/95 border-slate-200 text-slate-900 shadow-lg'
           } left-2 right-2 landscape:left-auto landscape:right-2 landscape:w-[min(20rem,42vw)]`}
           style={{
-            bottom: 'calc(8.75rem + env(safe-area-inset-bottom, 0px))',
+            top: 'calc(6.75rem + env(safe-area-inset-top, 0px))',
           }}
         >
           <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
@@ -1221,7 +1221,8 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         <div
           className={`absolute z-20 rounded-2xl p-3 backdrop-blur-md max-h-[min(60vh,24rem)] overflow-y-auto ${
             isDark ? 'bg-slate-950/95 border border-slate-700' : 'bg-white/95 border border-slate-200 shadow-lg'
-          } left-2 right-2 top-14 landscape:left-2 landscape:right-auto landscape:w-[min(20rem,42vw)] landscape:top-14`}
+          } left-2 right-2 landscape:left-2 landscape:right-auto landscape:w-[min(20rem,42vw)]`}
+          style={{ top: 'calc(6.75rem + env(safe-area-inset-top, 0px))' }}
         >
           <div className={`mb-3 rounded-xl px-3 py-2 text-[11px] ${isDark ? 'bg-slate-900 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
             <span className="font-semibold">Разъёмы:</span>{' '}
