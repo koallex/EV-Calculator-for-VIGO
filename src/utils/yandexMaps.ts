@@ -10,6 +10,8 @@ declare global {
   }
 }
 
+import { TESLA_DARK_STYLE } from './mapStyleTesla';
+
 const YANDEX_MAPS_API_KEY = (import.meta.env.VITE_YANDEX_MAPS_API_KEY as string | undefined)?.trim();
 
 export const YANDEX_MAPS_TERMS_URL = 'https://yandex.ru/legal/maps_api/';
@@ -256,9 +258,20 @@ export async function createV3Map(
 
   let schemeLayer: any;
   try {
-    schemeLayer = new YMapDefaultSchemeLayer(
-      isDark ? { theme: 'dark' } : { theme: 'light' },
-    );
+    if (isDark) {
+      // Tesla-like dark basemap: try customization, fall back to plain dark theme.
+      try {
+        schemeLayer = new YMapDefaultSchemeLayer({
+          theme: 'dark',
+          customization: TESLA_DARK_STYLE,
+        });
+      } catch (styleErr) {
+        console.warn('[maps] Tesla customization unsupported, plain dark theme', styleErr);
+        schemeLayer = new YMapDefaultSchemeLayer({ theme: 'dark' });
+      }
+    } else {
+      schemeLayer = new YMapDefaultSchemeLayer({ theme: 'light' });
+    }
   } catch {
     schemeLayer = new YMapDefaultSchemeLayer();
   }
@@ -302,7 +315,15 @@ export async function createV3Map(
     },
     setTheme: (dark: boolean) => {
       try {
-        schemeLayer.update?.({ theme: dark ? 'dark' : 'light' });
+        if (dark) {
+          try {
+            schemeLayer.update?.({ theme: 'dark', customization: TESLA_DARK_STYLE });
+          } catch {
+            schemeLayer.update?.({ theme: 'dark' });
+          }
+        } else {
+          schemeLayer.update?.({ theme: 'light', customization: [] });
+        }
       } catch {
         /* ignore */
       }
@@ -521,38 +542,34 @@ export function createStationObjectManager(_ymaps: any) {
  * Navigation chevron for HUD live position.
  * Default shape points UP (screen north). `headingDeg` is CSS rotation (clockwise).
  */
-export function makeNavArrowEl(color = '#38bdf8', headingDeg = 0): HTMLElement {
-  const wrap = document.createElement('div');
-  wrap.style.cssText = [
+export function makeNavArrowEl(color = '#f8fafc', headingDeg = 0): HTMLElement {
+  // Tesla-like light chevron: soft glow, geographic rotation via CSS transform.
+  const el = document.createElement('div');
+  el.setAttribute('data-vigo-nav-arrow', '1');
+  const deg = Number.isFinite(headingDeg) ? headingDeg : 0;
+  el.innerHTML = `<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <filter id="vigoNavGlow" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur stdDeviation="1.2" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    <path d="M14 3 L22 23 L14 18 L6 23 Z" fill="${color}" stroke="rgba(15,23,42,0.85)" stroke-width="1.2" filter="url(#vigoNavGlow)"/>
+  </svg>`;
+  el.style.cssText = [
     'width:28px',
     'height:28px',
-    'position:relative',
-    'transform:translate(-50%,-50%)',
-    'pointer-events:none',
-    'cursor:default',
-  ].join(';');
-  wrap.setAttribute('data-vigo-nav-arrow-root', '1');
-
-  const arrow = document.createElement('div');
-  arrow.style.cssText = [
-    'position:absolute',
-    'left:50%',
-    'top:50%',
-    'width:0',
-    'height:0',
-    'margin-left:-10px',
-    'margin-top:-14px',
-    'border-left:10px solid transparent',
-    'border-right:10px solid transparent',
-    'border-bottom:20px solid ' + color,
-    'filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))',
-    'transform-origin:50% 70%',
-    'transform:rotate(' + String(headingDeg) + 'deg)',
+    'transform:translate(-50%,-50%) rotate(' + String(deg) + 'deg)',
+    'transform-origin:50% 50%',
     'will-change:transform',
+    'pointer-events:none',
+    'filter:drop-shadow(0 0 6px rgba(62,106,225,0.55))',
   ].join(';');
-  arrow.setAttribute('data-vigo-nav-arrow', '1');
-  wrap.appendChild(arrow);
-  return wrap;
+  (el as any).__setHeading = (h: number) => {
+    const d = Number.isFinite(h) ? h : 0;
+    el.style.transform = `translate(-50%,-50%) rotate(${d}deg)`;
+  };
+  return el;
 }
 
 /** Normalize degrees to [-180, 180]. */
