@@ -200,7 +200,8 @@ const fetchServerElevationProfile = async (
       bLat: String(bLat),
       bLon: String(bLon),
     });
-    const getRes = await fetch(`/api/elevation/profile?${q.toString()}`, {
+    q.set("resource", "elevation");
+    const getRes = await fetch(`/api/osm/stations?${q.toString()}`, {
       headers: { Accept: 'application/json' },
     });
     if (getRes.ok) {
@@ -211,10 +212,10 @@ const fetchServerElevationProfile = async (
     }
     // Miss: POST sampled geometry so the server fetches Open-Meteo once and stores for everyone
     if (!sampledCoords?.length) return null;
-    const postRes = await fetch('/api/elevation/profile', {
+    const postRes = await fetch('/api/osm/stations?resource=elevation', {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ aLat, aLon, bLat, bLon, coords: sampledCoords }),
+      body: JSON.stringify({ resource: 'elevation', aLat, aLon, bLat, bLon, coords: sampledCoords }),
     });
     if (postRes.status === 429) {
       throw new ElevationLimitError('Elevation API quota exceeded (429)');
@@ -286,10 +287,11 @@ export const buildRouteElevation=async(aLat:number,aLon:number,bLat:number,bLon:
         profile = await fetchElevationProfile(route.coords, route.distanceKm, onProgress);
         writeElevationCache(cacheKey, { coords: profile.coords, elevations: profile.elevations, savedAt: Date.now() });
         // Seed shared Redis with the profile we already paid for (no second Open-Meteo hit).
-        void fetch('/api/elevation/profile', {
+        void fetch('/api/osm/stations?resource=elevation', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            resource: 'elevation',
             aLat, aLon, bLat, bLon,
             coords: profile.coords,
             elevations: profile.elevations,
