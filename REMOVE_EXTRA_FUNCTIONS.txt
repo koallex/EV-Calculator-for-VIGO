@@ -1,0 +1,2 @@
+DELETE_IF_EXISTS: api/elevation/profile.js
+DELETE_IF_EXISTS: api/elevation/

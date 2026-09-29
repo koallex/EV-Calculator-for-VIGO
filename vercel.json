@@ -1,9 +1,19 @@
 {
   "framework": "vite",
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    {
+      "source": "/api/elevation/profile",
+      "destination": "/api/osm/stations?resource=elevation"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ],
   "crons": [
-    { "path": "/api/cron/evrace-refresh", "schedule": "0 3 * * *" }
+    {
+      "path": "/api/cron/evrace-refresh",
+      "schedule": "0 3 * * *"
+    }
   ]
 }
