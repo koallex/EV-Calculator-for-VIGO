@@ -6,7 +6,7 @@ const EARTH_RADIUS_M=6371000, DEFAULT_MASS_KG=1600, GRAVITY=9.80665, DRIVETRAIN_
 // size means even our longest routes (≤200 points) need only 1–2 requests instead of dozens.
 const ELEVATION_BATCH_SIZE=100;
 const ELEVATION_CACHE_PREFIX='ev_elevation_cache_v1:';
-const ELEVATION_CACHE_TTL_MS=30*24*60*60*1000; // 30 days — terrain doesn't change, so a stale cache is still correct
+const ELEVATION_CACHE_TTL_MS=90*24*60*60*1000; // 90 days local; shared Redis keeps 1 year
 const ELEVATION_COOLDOWN_KEY='ev_elevation_api_cooldown_until_v1';
 const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 
@@ -184,6 +184,54 @@ const speedAtDistance=(distanceKm:number,segments:{startKm:number;endKm:number;s
   return{speedKmH:edge.speedKmH,lengthKm:Math.max(0,edge.endKm-edge.startKm)};
 };
 
+/** Shared server elevation cache (Upstash Redis, TTL ~1 year). */
+const fetchServerElevationProfile = async (
+  aLat: number,
+  aLon: number,
+  bLat: number,
+  bLon: number,
+  sampledCoords?: [number, number][],
+): Promise<{ coords: [number, number][]; elevations: number[]; source: string } | null> => {
+  try {
+    // Lookup-only first (cheap GET)
+    const q = new URLSearchParams({
+      aLat: String(aLat),
+      aLon: String(aLon),
+      bLat: String(bLat),
+      bLon: String(bLon),
+    });
+    const getRes = await fetch(`/api/elevation/profile?${q.toString()}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (getRes.ok) {
+      const data = await getRes.json();
+      if (Array.isArray(data?.elevations) && Array.isArray(data?.coords) && data.elevations.length === data.coords.length) {
+        return { coords: data.coords, elevations: data.elevations, source: data.source || 'redis' };
+      }
+    }
+    // Miss: POST sampled geometry so the server fetches Open-Meteo once and stores for everyone
+    if (!sampledCoords?.length) return null;
+    const postRes = await fetch('/api/elevation/profile', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aLat, aLon, bLat, bLon, coords: sampledCoords }),
+    });
+    if (postRes.status === 429) {
+      throw new ElevationLimitError('Elevation API quota exceeded (429)');
+    }
+    if (!postRes.ok) return null;
+    const data = await postRes.json();
+    if (Array.isArray(data?.elevations) && Array.isArray(data?.coords) && data.elevations.length === data.coords.length) {
+      return { coords: data.coords, elevations: data.elevations, source: data.source || 'server' };
+    }
+    return null;
+  } catch (e) {
+    if (e instanceof ElevationLimitError) throw e;
+    console.warn('[elevation] server cache unavailable:', e instanceof Error ? e.message : e);
+    return null;
+  }
+};
+
 export const buildRouteElevation=async(aLat:number,aLon:number,bLat:number,bLon:number,name='Маршрут',onProgress?:(p:RouteProgress)=>void):Promise<RouteElevationData>=>{
   onProgress?.({stage:'routing',message:'Строим автомобильный маршрут…'});
   const route=await fetchDrivingRoute(aLat,aLon,bLat,bLon);
@@ -195,20 +243,59 @@ export const buildRouteElevation=async(aLat:number,aLon:number,bLat:number,bLon:
   let elevationAvailable=true, elevationNote:string|undefined;
 
   if(cached){
-    // Same A→B trip already has a saved elevation profile — reuse it, no API call needed even
-    // though SOC/speed/climate/weather inputs may all be different this time.
+    // Same A→B trip already has a local profile — no network.
     onProgress?.({stage:'elevation',message:'Профиль высот — из кэша'});
     profile={coords:cached.coords,elevations:cached.elevations};
   }else if(isElevationOnCooldown()){
-    // Quota was exhausted earlier in the session — don't spend another request just to get another 429.
-    elevationAvailable=false; elevationNote=ELEVATION_UNAVAILABLE_NOTE;
-    onProgress?.({stage:'elevation',message:elevationNote});
-    const flat=sampleRouteByDistance(route.coords,route.distanceKm);
-    profile={coords:flat,elevations:flat.map(()=>0)};
+    // Try shared server cache even during local cooldown — another user may already have filled Redis.
+    onProgress?.({stage:'elevation',message:'Профиль высот — общий кэш…'});
+    try {
+      const sampled = sampleRouteByDistance(route.coords, route.distanceKm);
+      const server = await fetchServerElevationProfile(aLat, aLon, bLat, bLon, sampled);
+      if (server) {
+        profile = { coords: server.coords, elevations: server.elevations };
+        writeElevationCache(cacheKey, { coords: profile.coords, elevations: profile.elevations, savedAt: Date.now() });
+        onProgress?.({stage:'elevation',message:'Профиль высот — из общего кэша'});
+      } else {
+        elevationAvailable=false; elevationNote=ELEVATION_UNAVAILABLE_NOTE;
+        onProgress?.({stage:'elevation',message:elevationNote});
+        profile={coords:sampled,elevations:sampled.map(()=>0)};
+      }
+    } catch {
+      elevationAvailable=false; elevationNote=ELEVATION_UNAVAILABLE_NOTE;
+      onProgress?.({stage:'elevation',message:elevationNote});
+      const flat=sampleRouteByDistance(route.coords,route.distanceKm);
+      profile={coords:flat,elevations:flat.map(()=>0)};
+    }
   }else{
     try{
-      profile=await fetchElevationProfile(route.coords,route.distanceKm,onProgress);
-      writeElevationCache(cacheKey,{coords:profile.coords,elevations:profile.elevations,savedAt:Date.now()});
+      // 1) Shared Redis (all users), 2) server→Open-Meteo once, 3) direct client fallback
+      onProgress?.({stage:'elevation',message:'Профиль высот…'});
+      const sampled = sampleRouteByDistance(route.coords, route.distanceKm);
+      const server = await fetchServerElevationProfile(aLat, aLon, bLat, bLon, sampled);
+      if (server) {
+        profile = { coords: server.coords, elevations: server.elevations };
+        writeElevationCache(cacheKey, { coords: profile.coords, elevations: profile.elevations, savedAt: Date.now() });
+        onProgress?.({
+          stage: 'elevation',
+          message: server.source.includes('redis')
+            ? 'Профиль высот — из общего кэша'
+            : 'Профиль высот — сохранён в общий кэш',
+        });
+      } else {
+        profile = await fetchElevationProfile(route.coords, route.distanceKm, onProgress);
+        writeElevationCache(cacheKey, { coords: profile.coords, elevations: profile.elevations, savedAt: Date.now() });
+        // Seed shared Redis with the profile we already paid for (no second Open-Meteo hit).
+        void fetch('/api/elevation/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            aLat, aLon, bLat, bLon,
+            coords: profile.coords,
+            elevations: profile.elevations,
+          }),
+        }).catch(() => {});
+      }
     }catch(e){
       // Elevation is an optional enrichment. Any provider/network/parsing failure must never
       // abort the route SOC forecast: continue with a neutral (flat) profile.
