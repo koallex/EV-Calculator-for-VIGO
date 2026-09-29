@@ -1707,7 +1707,7 @@ export async function saveTextFile(filename: string, mime: string, text: string)
 
 export function exportBackupJSON(settings: UserSettings, sessions: TripSession[]): void {
   const data = {
-    appName: 'Dongfeng Vigo EV Calculator',
+    appName: 'EV Route BY',
     version: APP_VERSION,
     exportDate: new Date().toISOString(),
     settings,

@@ -57,7 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </div>
             <p className={`text-[11px] font-medium truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              Калькулятор расхода и зарядки EV
+              Планировщик поездок по Беларуси
             </p>
           </div>
         </div>

@@ -34,7 +34,7 @@ if [ "$ok" -eq 0 ]; then
   done
   echo "Patched. Re-run sync and rebuild APK."
 else
-  echo "Manifest looks OK. On phone: Settings → Apps → EV Calculator → Permissions → Location → Allow (Precise)."
+  echo "Manifest looks OK. On phone: Settings → Apps → EV Route BY → Permissions → Location → Allow (Precise)."
 fi
 # Geolocation plugin in capacitor
 if [ -d "$ROOT/node_modules/@capacitor/geolocation" ]; then

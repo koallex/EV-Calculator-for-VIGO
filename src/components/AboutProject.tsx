@@ -16,6 +16,7 @@ export const AboutProject: React.FC<AboutProjectProps> = ({ isOpen, onClose, isD
     { icon: CloudSun, title: 'Погода', text: 'Учитываются температура, ветер и осадки — то, что реально влияет на расход энергии.' },
     { icon: Mountain, title: 'Рельеф', text: 'Подъёмы увеличивают расход, а спуски могут частично вернуть энергию за счёт рекуперации.' },
     { icon: BatteryCharging, title: 'Заряд батареи', text: 'Расчёт учитывает исходный заряд, доступную ёмкость и ожидаемый остаток в конце поездки.' },
+    { icon: BatteryCharging, title: 'Зарядные остановки', text: 'Если заряда недостаточно, приложение помогает спланировать остановки на зарядных станциях по маршруту с учётом особенностей инфраструктуры Беларуси.' },
   ];
 
   return (
@@ -29,7 +30,7 @@ export const AboutProject: React.FC<AboutProjectProps> = ({ isOpen, onClose, isD
             </div>
             <div>
               <h2 className="text-base font-bold">О проекте</h2>
-              <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Как работает расчёт запаса хода</p>
+              <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Планирование поездок на электромобиле по Беларуси</p>
             </div>
           </div>
           <button onClick={onClose} aria-label="Закрыть" className={`w-9 h-9 rounded-xl flex items-center justify-center border ${isDark ? 'bg-slate-900 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
@@ -39,9 +40,9 @@ export const AboutProject: React.FC<AboutProjectProps> = ({ isOpen, onClose, isD
 
         <div className="p-5 space-y-5">
           <div>
-            <h3 className="text-lg font-bold mb-2">Не просто расчёт по километрам</h3>
+            <h3 className="text-lg font-bold mb-2">Планирование поездки целиком</h3>
             <p className={`text-sm leading-6 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-              Запас хода электромобиля зависит не только от ёмкости батареи и расстояния. Поэтому калькулятор старается оценивать поездку в целом — с учётом условий, в которых она действительно будет проходить.
+              EV Route BY рассчитывает поездку целиком — от исходного заряда до прибытия, учитывая условия движения и доступную зарядную инфраструктуру. Логика планирования остановок на зарядку адаптирована для поездок по Беларуси.
             </p>
           </div>
 
