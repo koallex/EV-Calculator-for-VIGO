@@ -1338,10 +1338,89 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
   const isDark = settings.theme !== 'light';
 
+  const mapFirstChargingStops =
+    chargingSuggestionStatus === 'ready' && chargingStops.length
+      ? chargingStops.map((s) => ({
+          id: s.station.id,
+          lat: s.station.lat,
+          lon: s.station.lon,
+          name: s.station.name,
+          address: s.station.address,
+        }))
+      : chargingSuggestionStatus === 'ready' && chargingSuggestion
+        ? [{
+            id: chargingSuggestion.station.id,
+            lat: chargingSuggestion.station.lat,
+            lon: chargingSuggestion.station.lon,
+            name: chargingSuggestion.station.name,
+            address: chargingSuggestion.station.address,
+          }]
+        : [];
+
+  const handleMapChargingStopClick = (stop: {
+    id?: string;
+    lat: number;
+    lon: number;
+    name: string;
+    address?: string;
+  }) => {
+    triggerHaptic('light', settings.hapticFeedback);
+    const fromList = chargingStops.find(
+      (s) =>
+        s.station.id === stop.id ||
+        (Math.abs(s.station.lat - stop.lat) < 1e-5 && Math.abs(s.station.lon - stop.lon) < 1e-5),
+    );
+    if (fromList) {
+      setSelectedRouteStop(fromList);
+      return;
+    }
+    if (
+      chargingSuggestion &&
+      (chargingSuggestion.station.id === stop.id ||
+        (Math.abs(chargingSuggestion.station.lat - stop.lat) < 1e-5 &&
+          Math.abs(chargingSuggestion.station.lon - stop.lon) < 1e-5))
+    ) {
+      setSelectedRouteStop({
+        station: chargingSuggestion.station,
+        connector: chargingSuggestion.connector,
+        socAtStation: chargingSuggestion.socAtStation,
+        targetSoc: chargingSuggestion.targetSoc,
+        session: chargingSuggestion.session,
+        finishSocAfterCharge: chargingSuggestion.finishSocAfterCharge,
+      });
+      return;
+    }
+    setSelectedRouteStop({
+      station: {
+        id: stop.id || `map:${stop.lat},${stop.lon}`,
+        lat: stop.lat,
+        lon: stop.lon,
+        name: stop.name,
+        address: stop.address || '',
+        hasType2: false,
+        hasCcs2: true,
+        connectorTypeUnknown: true,
+        distanceFromRouteKm: 0,
+        distanceAlongRouteKm: 0,
+      },
+    });
+  };
+
   return (
-    <div id="calculator-tab-container" className="calculator-minimal-shell flex flex-col gap-3 pb-12 max-w-2xl mx-auto w-full">
+    <div
+      id="calculator-tab-container"
+      className={`calculator-minimal-shell w-full ${
+        calculatorMode === 'route'
+          ? 'relative flex flex-col max-w-none mx-0 h-[calc(100dvh-7rem)] sm:h-[calc(100dvh-8rem)] landscape:h-[100dvh] min-h-[420px] overflow-hidden pb-0'
+          : 'flex flex-col gap-3 pb-12 max-w-2xl mx-auto'
+      }`}
+    >
       {/* Quick status */}
-      <section className={`calculator-status rounded-2xl border px-4 py-2.5 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+      <section
+        className={`calculator-status rounded-2xl border px-4 py-2.5 shrink-0 ${
+          calculatorMode === 'route' ? 'relative z-20 mx-2 mt-2 pointer-events-auto ' : ''
+        }${isDark ? 'bg-slate-900/85 border-slate-800 backdrop-blur-md' : 'bg-white/95 border-slate-200 shadow-xs'}`}
+      >
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs min-w-0">
             <span className={`inline-flex h-2 w-2 shrink-0 rounded-full ${gpsStatus === 'ok' ? 'bg-cyan-500' : gpsStatus === 'error' ? 'bg-rose-500' : 'bg-amber-500 animate-pulse'}`} />
@@ -1512,7 +1591,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       </div>
 
       <LayoutGroup>
-        <div className={`calculator-mode-switch relative grid grid-cols-2 rounded-2xl border p-1 gap-1 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+        <div className={`calculator-mode-switch relative grid grid-cols-2 rounded-2xl border p-1 gap-1 shrink-0 ${
+          calculatorMode === 'route' ? 'z-20 mx-2 pointer-events-auto ' : ''
+        }${isDark ? 'bg-slate-900/85 border-slate-800 backdrop-blur-md' : 'bg-white/95 border-slate-200 shadow-xs'}`}>
           <button
             onClick={() => { triggerHaptic('light', settings.hapticFeedback); setCalculatorMode('route'); }}
             className={`relative z-10 rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 transition-colors ${calculatorMode === 'route' ? 'text-white' : isDark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800'}`}
@@ -1545,26 +1626,39 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           </button>
         </div>
       </LayoutGroup>
-      <p className={`calculator-mode-hint -mt-1 text-[11px] leading-snug px-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-        {calculatorMode === 'route'
-          ? 'Маршрут — прогноз до точки Б по карте, погоде и рельефу.'
-          : 'Ручной ввод — оценка по дистанции и скорости без построения маршрута (для уже пройденных поездок).'}
-      </p>
+      {calculatorMode !== 'route' && (
+        <p className={`calculator-mode-hint -mt-1 text-[11px] leading-snug px-0.5 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+          Ручной ввод — оценка по дистанции и скорости без построения маршрута (для уже пройденных поездок).
+        </p>
+      )}
 
       <AnimatePresence mode="wait" initial={false}>
       {calculatorMode === 'route' && (
         <motion.div
           key="mode-route"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          className="calculator-mode-content flex flex-col gap-3"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="calculator-mode-content relative flex-1 min-h-0 flex flex-col"
         >
         <>
+      {/* Full-bleed map background — route draw animation still runs after calculate */}
+      <div className="absolute inset-0 z-0">
+        <RouteMap
+          points={routeElevation?.points ?? []}
+          isDark={isDark}
+          fill
+          chargingStops={mapFirstChargingStops}
+          onChargingStopClick={handleMapChargingStopClick}
+        />
+      </div>
+
+      <div className="relative z-10 flex-1 min-h-0 flex flex-col pointer-events-none overflow-y-auto overscroll-contain">
+      <div className="pointer-events-auto mx-2 mt-2 mb-2 space-y-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] landscape:max-w-md landscape:ml-2 landscape:mr-auto">
 
       {/* Route: A → B + calculate */}
-      <section className={`calculator-route rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
+      <section className={`calculator-route rounded-2xl border p-3 space-y-3 backdrop-blur-md ${isDark ? 'bg-slate-950/90 border-slate-700/80 shadow-xl' : 'bg-white/95 border-slate-200 shadow-lg'}`}>
         <div className={`grid grid-cols-2 rounded-xl p-1 ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
           <button onClick={() => setStartMode('gps')} className={`rounded-lg py-2 text-xs font-semibold ${startMode === 'gps' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>📍 Здесь</button>
           <button onClick={() => setStartMode('address')} className={`rounded-lg py-2 text-xs font-semibold ${startMode === 'address' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>🏠 Адрес А</button>
@@ -1688,36 +1782,15 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         {routeLoading && <div className="text-xs text-cyan-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />{routeStatus || 'Подготавливаем расчёт…'}</div>}
         {routeError && <div className="text-xs text-rose-500">{routeError}</div>}
 
-        <div className={`rounded-2xl border p-3 space-y-2 ${
-          isDark
-            ? 'border-emerald-700/50 bg-gradient-to-br from-emerald-950/50 to-slate-950/80 shadow-[0_0_24px_rgba(16,185,129,0.12)]'
-            : 'border-emerald-300 bg-gradient-to-br from-emerald-50 to-white shadow-sm'
-        }`}>
-          <div className="flex items-center gap-2 px-0.5">
-            <span className={`relative flex h-2.5 w-2.5 shrink-0`}>
-              <span className={`absolute inline-flex h-full w-full rounded-full opacity-60 ${
-                nearbyFreeStatus === 'loading' ? 'bg-emerald-400 animate-ping' : 'bg-emerald-500'
-              }`} />
-              <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
-                nearbyFreeStatus === 'loading' ? 'bg-emerald-300' : 'bg-emerald-500'
-              }`} />
-            </span>
-            <p className={`text-[11px] font-bold uppercase tracking-wide ${isDark ? 'text-emerald-300' : 'text-emerald-800'}`}>
-              Автопоиск свободных ЭЗС рядом
-            </p>
-          </div>
+        <div className="space-y-2">
           <button
             type="button"
             onClick={() => { triggerHaptic('medium', settings.hapticFeedback); void searchNearbyFreeChargers(); }}
             disabled={nearbyFreeStatus === 'loading'}
-            className={`w-full rounded-xl px-3 py-3.5 text-[13px] font-bold flex items-center justify-center gap-2.5 active:scale-[0.98] transition-all disabled:opacity-80 ${
+            className={`w-full rounded-xl px-3 py-3 text-[13px] font-black flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-80 border ${
               nearbyFreeStatus === 'loading'
-                ? isDark
-                  ? 'bg-emerald-900/60 text-emerald-100 border border-emerald-600/40'
-                  : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                : isDark
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30'
-                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/25'
+                ? 'bg-cyan-700 text-white border-cyan-500/40'
+                : 'bg-cyan-500 text-slate-950 border-cyan-300/40 shadow-md shadow-cyan-500/25 hover:bg-cyan-400'
             }`}
           >
             {nearbyFreeStatus === 'loading' ? (
@@ -2144,73 +2217,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   </a>
                 </div>
 
-                {/* Map — secondary after the answers */}
-                <div className={`rounded-2xl border overflow-hidden ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                  <RouteMap
-                    points={routeElevation.points}
-                    isDark={isDark}
-                    chargingStops={
-                      chargingSuggestionStatus === 'ready' && chargingStops.length
-                        ? chargingStops.map((s) => ({
-                            id: s.station.id,
-                            lat: s.station.lat,
-                            lon: s.station.lon,
-                            name: s.station.name,
-                            address: s.station.address,
-                          }))
-                        : chargingSuggestionStatus === 'ready' && chargingSuggestion
-                          ? [{
-                              id: chargingSuggestion.station.id,
-                              lat: chargingSuggestion.station.lat,
-                              lon: chargingSuggestion.station.lon,
-                              name: chargingSuggestion.station.name,
-                              address: chargingSuggestion.station.address,
-                            }]
-                          : []
-                    }
-                    onChargingStopClick={(stop) => {
-                      triggerHaptic('light', settings.hapticFeedback);
-                      const fromList = chargingStops.find(
-                        (s) => s.station.id === stop.id
-                          || (Math.abs(s.station.lat - stop.lat) < 1e-5 && Math.abs(s.station.lon - stop.lon) < 1e-5),
-                      );
-                      if (fromList) {
-                        setSelectedRouteStop(fromList);
-                        return;
-                      }
-                      if (
-                        chargingSuggestion
-                        && (chargingSuggestion.station.id === stop.id
-                          || (Math.abs(chargingSuggestion.station.lat - stop.lat) < 1e-5
-                            && Math.abs(chargingSuggestion.station.lon - stop.lon) < 1e-5))
-                      ) {
-                        setSelectedRouteStop({
-                          station: chargingSuggestion.station,
-                          connector: chargingSuggestion.connector,
-                          socAtStation: chargingSuggestion.socAtStation,
-                          targetSoc: chargingSuggestion.targetSoc,
-                          session: chargingSuggestion.session,
-                          finishSocAfterCharge: chargingSuggestion.finishSocAfterCharge,
-                        });
-                        return;
-                      }
-                      setSelectedRouteStop({
-                        station: {
-                          id: stop.id || `map:${stop.lat},${stop.lon}`,
-                          lat: stop.lat,
-                          lon: stop.lon,
-                          name: stop.name,
-                          address: stop.address || '',
-                          hasType2: false,
-                          hasCcs2: true,
-                          connectorTypeUnknown: true,
-                          distanceFromRouteKm: 0,
-                          distanceAlongRouteKm: 0,
-                        },
-                      });
-                    }}
-                  />
-                </div>
+                {/* Map full-bleed background; markers clickable there */}
+
 
                 {selectedRouteStop && (
                   <div className={`rounded-2xl border p-3 shadow-lg ${
@@ -2576,6 +2584,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           )}
         </div>
       </CollapsibleDetails>
+      </div>
+      </div>
         </>
         </motion.div>
       )}
