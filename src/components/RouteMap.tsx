@@ -231,8 +231,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         style: {
           stroke: isDark
             ? [
-                { width: 16, color: strokeGlow },
-                { width: 9, color: strokeOutline },
+                { width: 18, color: strokeGlow },
+                { width: 10, color: strokeOutline },
               ]
             : [{ width: 7, color: strokeOutline }],
         },
@@ -245,8 +245,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         style: {
           stroke: isDark
             ? [
-                { width: 12, color: strokeGlow },
-                { width: 5.5, color: strokeMain },
+                { width: 14, color: strokeGlow },
+                { width: 6, color: strokeMain },
               ]
             : [{ width: 4.5, color: strokeMain }],
         },
@@ -498,7 +498,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         try {
           featureRef.current.update({
             geometry: { type: 'LineString', coordinates: remainCoords },
-            style: { stroke: isDark ? [{ width: 12, color: strokeGlow }, { width: 5.5, color: strokeMain }] : [{ width: 4.5, color: strokeMain }] },
+            style: { stroke: isDark ? [{ width: 14, color: strokeGlow }, { width: 6, color: strokeMain }] : [{ width: 4.5, color: strokeMain }] },
           });
         } catch { /* ignore */ }
       }
@@ -701,21 +701,26 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
     };
 
-    // North-up map: no camera rotation. Only pan + arrow by geographic heading.
+    // HUD follow: Tesla-like course-up + tilt. Calculator / idle: north-up, no spin.
     const POS_LERP = 0.14;
-    const HEAD_LERP = 0.08;
-    const HEAD_DEADZONE = 3;
-    const CENTER_MS = 120;
+    const HEAD_LERP = 0.1;
+    const HEAD_DEADZONE = 2.5;
+    const CENTER_MS = 100;
+    const TILT_RAD = (50 * Math.PI) / 180;
+    const courseUp = !!followModeRef.current;
 
-    // North-up (azimuth 0). Optional mild tilt in follow/dark for a Tesla-like angle —
-    // wrapped in try/catch; unsupported builds stay flat.
     if (bundle.apiVersion === 3) {
       try {
-        const tiltRad = followModeRef.current && isDark ? (42 * Math.PI) / 180 : 0;
         if (typeof map.setCamera === 'function') {
-          map.setCamera({ azimuth: 0, tilt: tiltRad, duration: 0 });
+          map.setCamera({
+            azimuth: 0,
+            tilt: courseUp ? TILT_RAD : 0,
+            duration: 0,
+          });
         } else {
-          map.update({ camera: { azimuth: 0, tilt: tiltRad, duration: 0 } });
+          map.update({
+            camera: { azimuth: 0, tilt: courseUp ? TILT_RAD : 0, duration: 0 },
+          });
         }
       } catch {
         try {
@@ -744,10 +749,10 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         disp.lon += (target.lon - disp.lon) * POS_LERP;
       }
 
-      // Soft heading for the arrow only (map does not rotate).
+      // Heading: update while moving; freeze last value when nearly stopped (Tesla-like).
       const speedNow = moveSpeedRef.current;
       const isMoving =
-        speedNow != null && Number.isFinite(speedNow) && speedNow >= 8;
+        speedNow != null && Number.isFinite(speedNow) && speedNow >= 6;
 
       if (
         isMoving &&
@@ -766,12 +771,11 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
       const headingSmooth = displayHeadingRef.current;
 
-      // North-up: arrow rotates by geographic heading (0 = north / up on screen).
-      const arrowDeg = headingSmooth ?? 0;
+      // Course-up: arrow points up; north-up: arrow follows geographic heading.
+      const arrowDeg = courseUp ? 0 : (headingSmooth ?? 0);
 
       ensureMarker(disp.lat, disp.lon, arrowDeg);
 
-      // Pan only — never setCamera / azimuth.
       if (followModeRef.current && Date.now() >= userNavPauseUntilRef.current) {
         if (now - lastCenterPushMsRef.current >= CENTER_MS) {
           lastCenterPushMsRef.current = now;
@@ -782,13 +786,35 @@ export const RouteMap: React.FC<RouteMapProps> = ({
               if (typeof map.zoom === 'number') zoom = map.zoom;
               else if (typeof map.location?.zoom === 'number') zoom = map.location.zoom;
             } catch { /* ignore */ }
+            // Prefer ~16–17 in drive mode for a closer Tesla-like frame
+            if (courseUp && zoom < 15) zoom = 16;
+
+            const azimuth =
+              headingSmooth != null && Number.isFinite(headingSmooth)
+                ? headingDegToAzimuthRad(headingSmooth)
+                : 0;
+
             try {
-              map.setLocation({ center: coords, zoom, duration: 0 });
+              // Location + camera together when supported
+              map.update({
+                location: { center: coords, zoom, duration: 400 },
+                camera: {
+                  azimuth: courseUp ? azimuth : 0,
+                  tilt: courseUp ? TILT_RAD : 0,
+                  duration: 400,
+                },
+              });
             } catch {
               try {
-                map.update({ location: { center: coords, zoom, duration: 0 } });
+                map.setLocation({ center: coords, zoom, duration: 0 });
+                if (courseUp) {
+                  if (typeof map.setCamera === 'function') {
+                    map.setCamera({ azimuth, tilt: TILT_RAD, duration: 300 });
+                  }
+                }
               } catch { /* ignore */ }
             }
+            lastCameraHeadingDegRef.current = headingSmooth ?? 0;
           } else {
             try {
               const z = typeof map.getZoom === 'function' ? map.getZoom() : 16;

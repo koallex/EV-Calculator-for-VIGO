@@ -1,6 +1,6 @@
 /**
- * Tesla-like dark basemap for Yandex Maps JS API v3 (YMapDefaultSchemeLayer customization).
- * Tags/elements may differ slightly by API build — always apply inside try/catch.
+ * Tesla-like dark basemap for Yandex Maps JS API v3 (YMapDefaultSchemeLayer.customization).
+ * Tag names vary by API build — always apply inside try/catch with plain dark fallback.
  */
 export type VectorCustomizationItem = {
   tags?: { any?: string[]; all?: string[]; none?: string[] };
@@ -9,31 +9,82 @@ export type VectorCustomizationItem = {
   zoom?: { min?: number; max?: number };
 };
 
-/** Primary route blue used by Tesla UI (approx). */
 export const TESLA_ROUTE_BLUE = '#3E6AE1';
 export const TESLA_ROUTE_TRAVELED = '#3a4a7a';
-export const TESLA_ROUTE_GLOW = 'rgba(62, 106, 225, 0.22)';
+export const TESLA_ROUTE_GLOW = 'rgba(62, 106, 225, 0.28)';
 
+/**
+ * Goal: quiet graphite ground, readable roads, almost no label noise,
+ * water/parks do not compete with the route blue.
+ */
 export const TESLA_DARK_STYLE: VectorCustomizationItem[] = [
-  // Land / background
-  { tags: { any: ['landscape', 'land'] }, elements: 'geometry', stylers: [{ color: '#14171d' }] },
-  // Water
-  { tags: { any: ['water', 'waterway'] }, elements: 'geometry', stylers: [{ color: '#0e1116' }] },
-  // Parks / vegetation — nearly same as ground
-  { tags: { any: ['vegetation', 'park', 'landscape_vegetation'] }, elements: 'geometry', stylers: [{ color: '#171b22' }] },
-  // Buildings
-  { tags: { any: ['building'] }, elements: 'geometry', stylers: [{ color: '#1b1f27' }] },
-  // Roads — light graphite, outline blends into ground
-  { tags: { any: ['road', 'road_minor', 'road_limited', 'road_unclassified'] }, elements: 'geometry.fill', stylers: [{ color: '#3a404b' }] },
-  { tags: { any: ['road', 'road_minor', 'road_limited', 'road_unclassified'] }, elements: 'geometry.outline', stylers: [{ color: '#14171d' }] },
-  { tags: { any: ['road_major', 'road_trunk', 'road_motorway', 'highway'] }, elements: 'geometry.fill', stylers: [{ color: '#4a5160' }] },
-  { tags: { any: ['road_major', 'road_trunk', 'road_motorway', 'highway'] }, elements: 'geometry.outline', stylers: [{ color: '#14171d' }] },
-  // Labels — muted, readable
-  { tags: { any: ['admin', 'road', 'place', 'locality'] }, elements: 'label.text.fill', stylers: [{ color: '#7d8593' }] },
-  { tags: { any: ['admin', 'road', 'place', 'locality'] }, elements: 'label.text.outline', stylers: [{ color: '#14171d' }] },
-  // Hide POI / transit icon noise
-  { tags: { any: ['poi', 'transit', 'entrance'] }, elements: 'label.icon', stylers: [{ visibility: 'off' }] },
-  { tags: { any: ['poi'] }, elements: 'label.text.fill', stylers: [{ visibility: 'off' }] },
-];
+  // —— Ground ——
+  { tags: { any: ['landscape', 'land', 'landcover'] }, elements: 'geometry', stylers: [{ color: '#12151c' }] },
+  { tags: { any: ['building'] }, elements: 'geometry', stylers: [{ color: '#1a1e27' }] },
 
-/** Optional light style is left to Yandex default `theme: 'light'`. */
+  // —— Water (muted, not electric blue) ——
+  { tags: { any: ['water', 'waterway', 'ocean'] }, elements: 'geometry', stylers: [{ color: '#0f1520' }] },
+  { tags: { any: ['water'] }, elements: 'label', stylers: [{ visibility: 'off' }] },
+
+  // —— Parks / vegetation (1–2 tones above ground, no bright green/gray blobs) ——
+  {
+    tags: { any: ['vegetation', 'park', 'landscape_vegetation', 'wood', 'forest'] },
+    elements: 'geometry',
+    stylers: [{ color: '#161b24' }],
+  },
+
+  // —— Roads: clearly lighter than ground ——
+  {
+    tags: { any: ['road', 'road_unclassified', 'road_limited', 'road_minor', 'road_3', 'road_4', 'road_5', 'road_6', 'road_7'] },
+    elements: 'geometry.fill',
+    stylers: [{ color: '#3a4152' }],
+  },
+  {
+    tags: { any: ['road', 'road_unclassified', 'road_limited', 'road_minor', 'road_3', 'road_4', 'road_5', 'road_6', 'road_7'] },
+    elements: 'geometry.outline',
+    stylers: [{ color: '#12151c' }],
+  },
+  {
+    tags: { any: ['road_major', 'road_trunk', 'road_motorway', 'highway', 'road_1', 'road_2'] },
+    elements: 'geometry.fill',
+    stylers: [{ color: '#4c5568' }],
+  },
+  {
+    tags: { any: ['road_major', 'road_trunk', 'road_motorway', 'highway', 'road_1', 'road_2'] },
+    elements: 'geometry.outline',
+    stylers: [{ color: '#12151c' }],
+  },
+
+  // —— Labels: hide districts, villages, most street names, route shields ——
+  { tags: { any: ['district', 'suburb', 'neighbourhood', 'neighborhood'] }, elements: 'label', stylers: [{ visibility: 'off' }] },
+  { tags: { any: ['locality', 'village', 'hamlet', 'town'] }, elements: 'label', stylers: [{ visibility: 'off' }] },
+  // Keep large admin/city labels only as soft text (if present)
+  { tags: { any: ['admin', 'country', 'province', 'region'] }, elements: 'label.text.fill', stylers: [{ color: '#6b7280' }] },
+  { tags: { any: ['admin', 'country', 'province', 'region'] }, elements: 'label.text.outline', stylers: [{ color: '#12151c' }] },
+  // Hide minor road labels + highway number badges (M-9, H-9034, etc.)
+  {
+    tags: { any: ['road_3', 'road_4', 'road_5', 'road_6', 'road_7', 'road_minor', 'road_unclassified', 'road_limited'] },
+    elements: 'label',
+    stylers: [{ visibility: 'off' }],
+  },
+  {
+    tags: { any: ['road', 'road_1', 'road_2', 'highway', 'road_major'] },
+    elements: 'label.icon',
+    stylers: [{ visibility: 'off' }],
+  },
+  // Major road names: very muted, optional
+  {
+    tags: { any: ['road_1', 'road_2', 'road_major', 'road_motorway', 'highway'] },
+    elements: 'label.text.fill',
+    stylers: [{ color: '#6b7382' }],
+  },
+  {
+    tags: { any: ['road_1', 'road_2', 'road_major', 'road_motorway', 'highway'] },
+    elements: 'label.text.outline',
+    stylers: [{ color: '#12151c' }],
+  },
+
+  // —— POI / transit noise off ——
+  { tags: { any: ['poi', 'transit', 'entrance', 'airport'] }, elements: 'label.icon', stylers: [{ visibility: 'off' }] },
+  { tags: { any: ['poi', 'transit'] }, elements: 'label', stylers: [{ visibility: 'off' }] },
+];

@@ -1110,16 +1110,23 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         </button>
       </div>
 
-      {/* Nearest free charger — prominent, laconic */}
-      <div className="absolute left-2 right-2 top-[3.25rem] z-20 flex justify-center pointer-events-none">
+      {/* Nearest free charger — below top bar + safe-area, glass (not loud green) */}
+      <div
+        className="absolute left-2 right-2 z-20 flex justify-center pointer-events-none"
+        style={{ top: 'calc(3.35rem + env(safe-area-inset-top, 0px))' }}
+      >
         <button
           type="button"
           onClick={findNearestFree}
           disabled={findingNearest}
-          className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-[13px] font-black shadow-lg backdrop-blur-md active:scale-[0.98] disabled:opacity-70 ${
+          className={`pointer-events-auto inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-[13px] font-bold border shadow-lg backdrop-blur-md active:scale-[0.98] disabled:opacity-70 ${
             findingNearest
-              ? 'bg-cyan-700 text-white'
-              : 'bg-emerald-600 text-white shadow-emerald-900/40'
+              ? isDark
+                ? 'bg-slate-900/90 border-cyan-500/40 text-cyan-300'
+                : 'bg-white/95 border-cyan-300 text-cyan-800'
+              : isDark
+                ? 'bg-slate-950/90 border-slate-600/80 text-slate-100'
+                : 'bg-white/95 border-slate-200 text-slate-900'
           }`}
         >
           {findingNearest ? (
@@ -1129,7 +1136,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
             </>
           ) : (
             <>
-              <PlugZap className="h-4 w-4" />
+              <PlugZap className={`h-4 w-4 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
               Ближайшая свободная
             </>
           )}
