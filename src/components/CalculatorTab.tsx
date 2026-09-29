@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
+import { motion } from 'motion/react';
 import {
   Zap,
   Gauge,
@@ -140,14 +140,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   // Two distinct workflows used to live interleaved on one long scroll (route planning vs.
   // logging a completed trip by hand) with no visual separation between them. This just
   // groups the existing sections under a switcher; nothing about how each section works changes.
-  const [calculatorMode, setCalculatorMode] = useState<'route' | 'manual'>(() => {
-    try {
-      const d = JSON.parse(localStorage.getItem('vigo_calculator_draft_v1') || '{}');
-      return d.calculatorMode === 'manual' ? 'manual' : 'route';
-    } catch {
-      return 'route';
-    }
-  });
+  const calculatorMode = 'route';
 
   // Planned route: current GPS point A -> selected destination B -> detailed elevation profile.
   const [startMode, setStartMode] = useState<'gps' | 'address'>('gps');
@@ -1357,7 +1350,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               onClick={() => {
                 triggerHaptic('light', settings.hapticFeedback);
                 setStartMode('address');
-                setCalculatorMode('route');
               }}
               className={`shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-bold border ${
                 isDark
@@ -1389,7 +1381,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       {/* Compact trip conditions: SoC + people + climate in one row-card */}
       <section className={`calculator-conditions rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
         <div className="flex items-center justify-between gap-2">
-          <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Параметры поездки</span>
+          <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Старт</span>
           <span className={`text-xl font-black font-mono tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(startSoc)}%</span>
         </div>
         <div className="flex items-center gap-2">
@@ -1420,7 +1412,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         </div>
       </section>
 
-      {/* Calculator controls: route planning is now the primary and only visible workflow. */}
+      {/* Mode: route planning vs. logging a completed trip — two different workflows, kept visually separate instead of one long interleaved scroll */}
       <div className="calculator-reset flex items-center justify-end -mt-1 mb-0.5">
         <button
           type="button"
@@ -1464,17 +1456,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         </button>
       </div>
 
-      <AnimatePresence mode="wait" initial={false}>
-      {true && (
-        <motion.div
-          key="mode-route"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          className="calculator-mode-content flex flex-col gap-3"
-        >
-        <>
+      <div className="calculator-mode-content flex flex-col gap-3">
 
       {/* Route: A → B + calculate */}
       <section className={`calculator-route rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
@@ -2489,265 +2471,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           )}
         </div>
       </CollapsibleDetails>
-        </>
-        </motion.div>
-      )}
+      </div>
 
-      {calculatorMode === 'manual' && (
-        <motion.div
-          key="mode-manual"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          className="calculator-mode-content flex flex-col gap-3"
-        >
-        <>
-          {/* Hero result */}
-          <section
-            className={`calculator-hero rounded-2xl border p-4 text-center ${
-              isDark ? 'bg-cyan-950/40 border-cyan-800/60' : 'bg-cyan-50 border-cyan-200'
-            }`}
-          >
-            <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-cyan-300/80' : 'text-cyan-700'}`}>
-              Расход
-            </div>
-            <div className={`mt-1 text-5xl font-black font-mono tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
-              {consumptionPer100Km > 0 ? (
-                <AnimatedNumber value={consumptionPer100Km} decimals={1} className={isDark ? 'text-cyan-400' : 'text-cyan-600'} />
-              ) : '—'}
-              <span className="text-base font-bold ml-1.5 opacity-70">кВт⋅ч/100</span>
-            </div>
-            <div className={`mt-2 text-xs font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-              {Math.round(startSoc)}% → {Math.round(endSoc)}% · −{Math.round(socUsedPct)}% · {energyUsedKwh.toFixed(1)} кВт⋅ч
-              {distanceKm > 0 ? ` · ${distanceKm} км` : ''}
-            </div>
-            <div className={`mt-2 inline-flex items-center gap-2 text-[11px] font-semibold px-2.5 py-1 rounded-full border ${rating.bg} ${rating.color}`}>
-              {rating.label}
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-center">
-              <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-white/80'}`}>
-                <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Стоимость</div>
-                <div className="text-sm font-black font-mono">{tripCost.toFixed(2)} {settings.currency}</div>
-              </div>
-              <div className={`rounded-xl px-2 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-white/80'}`}>
-                <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>На 100 км</div>
-                <div className="text-sm font-black font-mono">{costPer100Km.toFixed(2)} {settings.currency}</div>
-              </div>
-            </div>
-          </section>
-
-          {/* Core inputs: end SOC + distance */}
-          <section className={`calculator-manual-inputs rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>SOC на финише</span>
-                <div className="text-right">
-                  <span className={`text-xl font-black font-mono ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(endSoc)}%</span>
-                </div>
-              </div>
-              {routeWeather && (
-                <div className={`mt-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold ${isDark ? 'bg-slate-950/70 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
-                  <div>
-                    Прибытие: {finishArrivalDate?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) ?? '—'}
-                    {totalChargingMinutes > 0 ? ` · зарядка ${totalChargingMinutes} мин` : ''}
-                  </div>
-                  <div className={`mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Погода на финише: {finishTemperature !== null ? `${finishTemperature >= 0 ? '+' : ''}${Math.round(finishTemperature)}°C` : '—'}
-                    {finishPrecipitation > 0.05 ? ' · осадки' : ' · без осадков'}
-                  </div>
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={() => adjustValue(setEndSoc, -5, 0, Math.max(0, startSoc - 1))} className={`w-10 h-9 rounded-lg text-xs font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>
-                <input
-                  type="range"
-                  min={0}
-                  max={Math.max(0, startSoc - 1)}
-                  value={Math.min(endSoc, Math.max(0, startSoc - 1))}
-                  onChange={(e) => setEndSoc(Number(e.target.value))}
-                  className="flex-1 accent-cyan-500 h-1.5 cursor-pointer"
-                  aria-label="SOC на финише"
-                />
-                <button type="button" onClick={() => adjustValue(setEndSoc, 5, 0, Math.max(0, startSoc - 1))} className={`w-10 h-9 rounded-lg text-xs font-bold border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+5</button>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Расстояние</span>
-                <div className="w-28">
-                  <DecimalInput
-                    value={distanceKm}
-                    onChange={(val) => setDistanceKm(Math.max(0.1, val))}
-                    suffix="км"
-                    className={`w-full text-right px-2 py-1 rounded-lg text-sm font-bold font-mono focus:outline-none border ${
-                      isDark
-                        ? 'bg-slate-950 border-slate-700 text-cyan-400'
-                        : 'bg-slate-50 border-slate-200 text-cyan-600'
-                    }`}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-4 gap-1.5">
-                {[
-                  { d: -10, l: '−10' },
-                  { d: -1, l: '−1' },
-                  { d: 1, l: '+1' },
-                  { d: 10, l: '+10' },
-                ].map(({ d, l }) => (
-                  <button
-                    key={l}
-                    type="button"
-                    onClick={() => adjustValue(setDistanceKm, d, 1, 1000)}
-                    className={`py-1.5 rounded-lg text-xs font-bold border ${
-                      isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
-                    }`}
-                  >
-                    {l}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <div className={`text-[11px] font-semibold mb-1.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Тип дороги</div>
-              <div className="grid grid-cols-3 gap-1.5">
-                {([
-                  ['city', 'Город'],
-                  ['highway', 'Трасса'],
-                  ['mixed', 'Смешан.'],
-                ] as const).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic('light', settings.hapticFeedback);
-                      setRoadType(id);
-                    }}
-                    className={`py-2 rounded-lg text-xs font-semibold border ${
-                      roadType === id
-                        ? isDark
-                          ? 'bg-cyan-950/70 text-cyan-300 border-cyan-500/60'
-                          : 'bg-cyan-600 text-white border-cyan-700'
-                        : isDark
-                        ? 'bg-slate-950 text-slate-400 border-slate-800'
-                        : 'bg-slate-50 text-slate-600 border-slate-200'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          {/* Secondary: tariff, ICE, range */}
-          <CollapsibleDetails
-            isDark={isDark}
-            label={`Тариф · ${activeTariff} ${settings.currency}/кВт⋅ч`}
-            open={manualDetailsOpen}
-            onToggle={() => setManualDetailsOpen(v => !v)}
-          >
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                {([
-                  ['malanka_dc', 'malanka_dc', 'fast_day'],
-                  ['evika', 'evika', 'malanka_ac', 'slow_public'],
-                  ['zaryadka_day', 'zaryadka_day', 'zaryadka', 'zaryadka_dc'],
-                  ['zaryadka_night', 'zaryadka_night'],
-                  ['batteryfly', 'batteryfly'],
-                  ['home_night', 'home_night', 'fast_night'],
-                  ['home', 'home', 'home_day'],
-                  ['free', 'free'],
-                ] as Array<[TripSession['chargingType'], ...string[]]>).map(([id, ...aliases]) => {
-                  const active = aliases.includes(chargingType) || chargingType === id;
-                  const label =
-                    id === 'home_night' ? 'Дом ночь' :
-                    id === 'home' ? 'Дом день' :
-                    id === 'free' ? 'Бесплатно' :
-                    getOperatorLabel(id, settings.regionPreset);
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => {
-                        triggerHaptic('light', settings.hapticFeedback);
-                        setChargingType(id);
-                      }}
-                      className={`py-2 px-2 rounded-lg text-xs font-semibold border text-left ${
-                        active
-                          ? isDark
-                            ? 'bg-amber-950/50 text-amber-300 border-amber-500/50'
-                            : 'bg-amber-50 text-amber-900 border-amber-300'
-                          : isDark
-                          ? 'bg-slate-950 text-slate-400 border-slate-800'
-                          : 'bg-white text-slate-700 border-slate-200'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className={`rounded-xl border p-3 text-xs ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
-                <div className="flex justify-between gap-2">
-                  <span>Экономия vs ДВС</span>
-                  <b className="text-cyan-500">+{moneySaved.toFixed(2)} {settings.currency}</b>
-                </div>
-                <div className={`mt-1 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                  ДВС ≈ {gasCostEquivalent.toFixed(2)} {settings.currency} · {settings.gasEquivalentL100km} л/100 км
-                </div>
-                {consumptionPer100Km > 0 && (
-                  <div className="mt-2 pt-2 border-t border-slate-500/20 flex justify-between gap-2">
-                    <span>Запас на текущем SOC</span>
-                    <b>{remainingRangeKm.toFixed(0)} км</b>
-                  </div>
-                )}
-              </div>
-            </div>
-          </CollapsibleDetails>
-
-          <div className="flex flex-col sm:flex-row gap-2">
-            <button
-              id="save-trip-direct-button"
-              type="button"
-              onClick={handleQuickSave}
-              className="flex-1 py-3.5 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-sm shadow-sm shadow-cyan-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-            >
-              <Zap className="w-4 h-4 fill-current" />
-              Сохранить · {consumptionPer100Km > 0 ? `${consumptionPer100Km.toFixed(1)} кВт⋅ч/100` : '—'}
-            </button>
-            <button
-              id="save-trip-detailed-button"
-              type="button"
-              onClick={() => {
-                triggerHaptic('medium', settings.hapticFeedback);
-                onOpenAddModalWithData({
-                  startSoc,
-                  endSoc,
-                  distanceKm,
-                  roadType,
-                  climateOn,
-                  chargingType,
-                  passengers,
-                });
-              }}
-              className={`py-3 px-3.5 rounded-xl font-semibold text-xs border active:scale-95 transition-all flex items-center justify-center gap-1.5 ${
-                isDark
-                  ? 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-800'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-200'
-              }`}
-            >
-              Подробнее
-              <ChevronRight className={`w-3.5 h-3.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
-            </button>
-          </div>
-        </>
-        </motion.div>
-      )}
-      </AnimatePresence>
 
     </div>
   );
