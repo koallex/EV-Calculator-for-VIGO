@@ -4,9 +4,9 @@
  */
 
 const MIN_SPEED_KMH = 11; // ~3 m/s — below this we keep last course
-const MIN_MOVE_M = 12;
+const MIN_MOVE_M = 9;
 const DEAD_BAND_DEG = 4;
-const SMOOTH = 0.22; // lower = smoother
+const SMOOTH = 0.45; // lower = smoother (the camera adds its own rate-limited smoothing on top)
 
 export const norm360 = (a: number) => ((a % 360) + 360) % 360;
 

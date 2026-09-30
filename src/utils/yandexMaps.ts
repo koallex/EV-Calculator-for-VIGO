@@ -238,6 +238,8 @@ export async function createV3Map(
     zoom?: number;
     isDark?: boolean;
     showZoom?: boolean;
+    /** Enabled gestures. Omit for the API default (which includes two-finger rotate and tilt). */
+    behaviors?: string[];
   } = {},
 ): Promise<V3MapBundle> {
   const ymaps3 = await loadYandexMapsV3();
@@ -249,12 +251,24 @@ export async function createV3Map(
   const isDark = !!opts.isDark;
 
   // Minimal options — avoid unsupported props that throw
-  const map = new YMap(container, {
+  const baseProps = {
     location: {
       center: toLonLat(lat, lon),
       zoom,
     },
-  });
+  };
+  let map: any;
+  if (opts.behaviors && opts.behaviors.length) {
+    // Explicit gesture list: the default set lets a two-finger pinch rotate/tilt the camera,
+    // which fights the navigation camera (and looked like the map "spinning by itself").
+    try {
+      map = new YMap(container, { ...baseProps, behaviors: opts.behaviors });
+    } catch {
+      map = new YMap(container, baseProps);
+    }
+  } else {
+    map = new YMap(container, baseProps);
+  }
 
   let schemeLayer: any;
   try {
@@ -448,6 +462,8 @@ export async function createBestMap(
     zoom?: number;
     isDark?: boolean;
     showZoom?: boolean;
+    /** Enabled gestures. Omit for the API default (which includes two-finger rotate and tilt). */
+    behaviors?: string[];
   } = {},
 ): Promise<AnyMapBundle> {
   try {
