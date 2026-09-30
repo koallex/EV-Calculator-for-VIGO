@@ -24,9 +24,18 @@ export const AddressAutocomplete: React.FC<Props> = ({
   const [loading, setLoading] = useState(false);
   const blurTimer = useRef<number | null>(null);
   const reqId = useRef(0);
+  /** Text just chosen from the list: the parent puts it into `value`, which must not trigger another search. */
+  const skipSearchFor = useRef<string | null>(null);
 
   useEffect(() => {
     const q = value.trim();
+    if (skipSearchFor.current !== null && skipSearchFor.current === value) {
+      skipSearchFor.current = null;
+      setItems([]);
+      setOpen(false);
+      setLoading(false);
+      return;
+    }
     if (q.length < 3) {
       setItems([]);
       setLoading(false);
@@ -111,6 +120,7 @@ export const AddressAutocomplete: React.FC<Props> = ({
                 }`}
                 onClick={() => {
                   if (blurTimer.current) window.clearTimeout(blurTimer.current);
+                  skipSearchFor.current = s.displayName;
                   onSelect(s);
                   setOpen(false);
                   setItems([]);

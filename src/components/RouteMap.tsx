@@ -42,6 +42,11 @@ interface RouteMapProps {
   fill?: boolean;
   /** Fired when user taps a charging-stop marker on the map. */
   onChargingStopClick?: (stop: RouteMapChargingStop) => void;
+  /**
+   * Where to center the map while there is no route yet (e.g. device GPS on the calculator's
+   * start screen). Ignored as soon as a route with 2+ points is drawn.
+   */
+  focusPoint?: { lat: number; lon: number } | null;
 }
 
 export const RouteMap: React.FC<RouteMapProps> = ({
@@ -56,6 +61,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   compact = false,
   fill = false,
   onChargingStopClick,
+  focusPoint = null,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const bundleRef = useRef<AnyMapBundle | null>(null);
@@ -183,6 +189,17 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   useEffect(() => {
     bundleRef.current?.setTheme(isDark);
   }, [isDark]);
+
+  // No route yet: keep the camera on the caller-provided point (GPS) instead of the Minsk default.
+  useEffect(() => {
+    const bundle = bundleRef.current;
+    if (!bundle || !mapReady || positions.length >= 2 || !focusPoint) return;
+    if (!Number.isFinite(focusPoint.lat) || !Number.isFinite(focusPoint.lon)) return;
+    try {
+      bundle.setLocation(focusPoint.lat, focusPoint.lon, 12);
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, focusPoint?.lat, focusPoint?.lon, positions.length >= 2]);
 
   // Extra pass: promo block is sometimes injected outside the map instance root.
   useEffect(() => {

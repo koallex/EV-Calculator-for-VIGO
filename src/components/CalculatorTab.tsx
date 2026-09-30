@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Zap,
   Gauge,
@@ -24,6 +24,11 @@ import {
   LocateFixed,
   PlugZap,
   RotateCcw,
+  SlidersHorizontal,
+  X,
+  History,
+  Route,
+  BatteryCharging,
 } from 'lucide-react';
 import { UserSettings, RoadType, TripSession } from '../types';
 import { BatteryVisual } from './BatteryVisual';
@@ -40,7 +45,7 @@ import { resolveEffectiveConnectors } from '../data/vehicleProfiles';
 import { estimateChargingSession, findOptimalChargeTargetSoc, DEFAULT_UNKNOWN_STATION_POWER_KW, ChargeConnector } from '../utils/chargingPlanner';
 import { RouteMap } from './RouteMap';
 import { LocationPickerModal } from './LocationPickerModal';
-import { ResponsiveContainer, AreaChart, Area, XAxis, Tooltip } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine, ReferenceDot } from 'recharts';
 import { CollapsibleDetails, SecondaryStatRow, ChipRow } from './ui/CollapsibleDetails';
 import { AnimatedNumber } from './ui/AnimatedNumber';
 import { RangeGauge } from './ui/RangeGauge';
@@ -64,6 +69,9 @@ const MANUAL_PRECIPITATION_PRESETS: Record<'rain' | 'snow', Record<'light' | 'mo
     heavy: { mm: 3.5, code: 75 },    // сильный снегопад
   },
 };
+
+const RECENT_PLACES_KEY = 'vigo_recent_places_v1';
+interface RecentPlace { name: string; lat: number; lon: number }
 
 import type { HudRoutePlan } from './HudTab';
 export type { HudRoutePlan };
@@ -284,6 +292,24 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [speedProfileOpen, setSpeedProfileOpen] = useState(false);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
   const [routeParamsOpen, setRouteParamsOpen] = useState(false);
+  /** Hidden-by-default parameters sheet (SoC, people, climate, speed, weather). */
+  const [paramsOpen, setParamsOpen] = useState(false);
+  /** True when a parameter that needs a recalculation changed while the sheet was open. */
+  const [paramsDirty, setParamsDirty] = useState(false);
+  /** Bumped to recalculate with the latest state (A/B edits made through the search card). */
+  const [recalcTick, setRecalcTick] = useState(0);
+  const [recentPlaces, setRecentPlaces] = useState<RecentPlace[]>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(RECENT_PLACES_KEY) || '[]');
+      return Array.isArray(raw)
+        ? raw
+            .filter((p) => p && typeof p.name === 'string' && Number.isFinite(p.lat) && Number.isFinite(p.lon))
+            .slice(0, 5)
+        : [];
+    } catch {
+      return [];
+    }
+  });
   const [showGuideTip, setShowGuideTip] = useState(() => {
     try { return localStorage.getItem('ev_guide_tip_dismissed') !== '1'; } catch { return true; }
   });
@@ -339,16 +365,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     );
     return () => navigator.geolocation.clearWatch(id);
   }, []);
-
-  // After a successful route calc, keep the hero result in the viewport (not the page bottom).
-  useEffect(() => {
-    if (!resultHighlight || !routeForecast) return;
-    const timer = window.setTimeout(() => {
-      document.getElementById('route-result-main')
-        ?.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
-    }, 120);
-    return () => window.clearTimeout(timer);
-  }, [resultHighlight, routeForecast]);
 
   // Searches stations along the current route. It is invoked automatically only when the
   // unassisted arrival SoC is below 20%, or manually from the button shown for safer routes.
@@ -1023,6 +1039,16 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     });
   };
 
+  const rememberPlace = (place: RecentPlace) => {
+    const name = (place.name || '').trim();
+    if (!name || name === 'Текущая геопозиция') return;
+    setRecentPlaces((prev) => {
+      const next = [{ ...place, name }, ...prev.filter((p) => p.name !== name)].slice(0, 5);
+      try { localStorage.setItem(RECENT_PLACES_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
   const calculateRouteProfile = async (destOverride?: { lat: number; lon: number; displayName: string }) => {
     // Guard: onClick may pass a MouseEvent if wired as onClick={calculateRouteProfile}.
     const dest =
@@ -1070,6 +1096,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       }
       const data = await buildRouteElevation(start.lat,start.lon,destination.lat,destination.lon,destination.displayName,onProgress);
       setRouteElevation(data); setDistanceKm(data.distanceKm);
+      rememberPlace({ name: destination.displayName, lat: destination.lat, lon: destination.lon });
       const etaMinutes=Math.max(1,Math.round((data.distanceKm/Math.max(10,plannedSpeedKmH))*60));
       // Всегда используем текущее время: API прогноза корректно работает для актуального
       // погодного окна, без выбора удалённой даты отправления.
@@ -1329,976 +1356,682 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     });
   };
 
+  // Recalculate after A/B were edited through the search card (state is fresh by the time this runs).
+  useEffect(() => {
+    if (recalcTick > 0) void calculateRouteProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recalcTick]);
+  const requestRecalc = () => setRecalcTick((n) => n + 1);
+
+  /** Clear the route on screen and go back to the "Куда едем?" state. */
+  const resetRoute = () => {
+    setDestinationAddress('');
+    setDestinationPin(null);
+    setRouteElevation(null);
+    setRouteWeather(null);
+    setRouteForecast(null);
+    setRouteError('');
+    setChargingSuggestion(null);
+    setChargingStops([]);
+    setChargingSuggestionStatus('idle');
+    setSelectedRouteStop(null);
+    setStationsFoundAlongRoute(0);
+    setRouteDetailsOpen(false);
+    setChargingSearchForced(false);
+  };
+
+  const resetAll = () => {
+    setStartSoc(100);
+    setEndSoc(45);
+    setDistanceKm(50);
+    setClimateOn(true);
+    setPassengers(1);
+    setPlannedSpeedKmH(70);
+    setPlannedMaxSpeedKmH(120);
+    setWeatherMode('current');
+    setRoadType('city');
+    setStartMode('gps');
+    setStartAddress('');
+    setStartPin(null);
+    setParamsDirty(false);
+    resetRoute();
+    try { localStorage.removeItem('vigo_calculator_draft_v1'); } catch { /* ignore */ }
+  };
+
+  /** Hand the planned route (with charging waypoints) over to the HUD tab. */
+  const handleStartTrip = () => {
+    if (!onSendToHud || !routeElevation) return;
+    triggerHaptic('success', settings.hapticFeedback);
+    const totalKm = routeElevation?.distanceKm ?? distanceKm;
+    const waypoints = [
+      ...chargingStops.map((stop) => ({
+        kind: 'charge' as const,
+        name: stop.station.name || 'Зарядка',
+        distanceAlongRouteKm: stop.station.distanceAlongRouteKm,
+        lat: stop.station.lat,
+        lon: stop.station.lon,
+        plannedArrivalSoc: stop.socAtStation,
+        chargeTargetSoc: stop.targetSoc,
+        connectorLabel:
+          stop.connector === 'gbt'
+            ? 'GB/T'
+            : stop.connector === 'ccs2'
+              ? 'CCS'
+              : 'Type2',
+        stationId: stop.station.id,
+        address: stop.station.address,
+        operator: stop.station.operator,
+        ccs2PowerKw: stop.station.ccs2PowerKw,
+        gbtPowerKw: stop.station.gbtPowerKw,
+        type2PowerKw: stop.station.type2PowerKw,
+      })),
+      {
+        kind: 'destination' as const,
+        name: destinationAddress.trim(),
+        distanceAlongRouteKm: totalKm,
+      },
+    ];
+    let routePoints:
+      | Array<{ lat: number; lon: number; elevationM?: number; distanceFromStartKm?: number }>
+      | undefined;
+    const pts = routeElevation?.points;
+    if (pts && pts.length >= 2) {
+      const maxPts = 280;
+      const toPt = (p: (typeof pts)[number]) => ({
+        lat: p.lat,
+        lon: p.lon,
+        elevationM: p.elevationM,
+        distanceFromStartKm: p.distanceFromStartKm,
+      });
+      if (pts.length <= maxPts) {
+        routePoints = pts.map(toPt);
+      } else {
+        const rdp = (arr: typeof pts, eps: number): typeof pts => {
+          if (arr.length <= 2) return arr.slice();
+          const toRad = Math.PI / 180;
+          const lat0 = arr[0].lat * toRad;
+          const mPerDegLat = 111_320;
+          const mPerDegLon = 111_320 * Math.cos(lat0);
+          const dist = (a: (typeof pts)[0], b: (typeof pts)[0], p: (typeof pts)[0]) => {
+            const ax = a.lon * mPerDegLon, ay = a.lat * mPerDegLat;
+            const bx = b.lon * mPerDegLon, by = b.lat * mPerDegLat;
+            const px = p.lon * mPerDegLon, py = p.lat * mPerDegLat;
+            const dx = bx - ax, dy = by - ay;
+            const len2 = dx * dx + dy * dy || 1;
+            let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+            t = Math.max(0, Math.min(1, t));
+            const cx = ax + t * dx, cy = ay + t * dy;
+            return Math.hypot(px - cx, py - cy);
+          };
+          let maxD = 0, idx = 0;
+          for (let i = 1; i < arr.length - 1; i++) {
+            const d = dist(arr[0], arr[arr.length - 1], arr[i]);
+            if (d > maxD) { maxD = d; idx = i; }
+          }
+          if (maxD > eps) {
+            const left = rdp(arr.slice(0, idx + 1), eps);
+            const right = rdp(arr.slice(idx), eps);
+            return left.slice(0, -1).concat(right);
+          }
+          return [arr[0], arr[arr.length - 1]];
+        };
+        let eps = 25;
+        let simplified = rdp(pts, eps);
+        while (simplified.length > maxPts && eps < 200) {
+          eps *= 1.35;
+          simplified = rdp(pts, eps);
+        }
+        if (simplified.length > maxPts) {
+          const step = Math.ceil(simplified.length / maxPts);
+          simplified = simplified.filter(
+            (_, i) => i === 0 || i === simplified.length - 1 || i % step === 0,
+          );
+        }
+        routePoints = simplified.map(toPt);
+      }
+    }
+    onSendToHud({
+      destination: destinationAddress.trim(),
+      startSoc,
+      plannedSpeedKmH,
+      passengers,
+      climateOn,
+      totalDistanceKm: totalKm,
+      predictedEndSoc: endSoc,
+      energyNeededKwh: energyUsedKwh,
+      predictedConsumption: consumptionPer100Km,
+      waypoints,
+      routePoints,
+    });
+  };
+
   const isDark = settings.theme !== 'light';
 
-  return (
-    <div id="calculator-tab-container" className="calculator-minimal-shell flex flex-col gap-3 pb-12 max-w-2xl mx-auto w-full">
-      {/* Quick status */}
-      <section className={`calculator-status rounded-2xl border px-4 py-2.5 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-xs min-w-0">
-            <span className={`inline-flex h-2 w-2 shrink-0 rounded-full ${gpsStatus === 'ok' ? 'bg-cyan-500' : gpsStatus === 'error' ? 'bg-rose-500' : 'bg-amber-500 animate-pulse'}`} />
-            <LocateFixed className={`w-4 h-4 shrink-0 ${gpsStatus === 'ok' ? 'text-cyan-500' : gpsStatus === 'error' ? 'text-rose-500' : 'text-amber-500'}`} />
-            <span className="font-semibold">GPS</span>
-            <span className="text-slate-500 truncate">
-              {gpsStatus === 'ok' ? 'Сигнал есть' : gpsStatus === 'error' ? 'Недоступен' : 'Поиск…'}
-            </span>
+  // ── Presentation helpers (no calculation logic lives here) ─────────────────────────────────
+  const surface = isDark
+    ? 'bg-slate-900/92 border-slate-700/60 text-slate-100 backdrop-blur-md'
+    : 'bg-white/95 border-slate-200 text-slate-900 backdrop-blur-md';
+  const muted = isDark ? 'text-slate-400' : 'text-slate-500';
+  const chipBg = isDark ? 'bg-slate-800/80 text-slate-200' : 'bg-slate-100 text-slate-800';
+  const inputCls = `w-full bg-transparent py-2.5 pl-8 pr-14 text-[14px] outline-none truncate ${
+    isDark ? 'text-white placeholder:text-slate-500' : 'text-slate-900 placeholder:text-slate-400'
+  }`;
+  const connLabel = (c?: string) => (c === 'gbt' ? 'GB/T' : c === 'type2' ? 'Type2' : 'CCS');
+  const connectorKw = (station: ChargingStation, connector?: string) =>
+    connector === 'gbt'
+      ? station.gbtPowerKw ?? station.ccs2PowerKw
+      : connector === 'ccs2'
+        ? station.ccs2PowerKw
+        : station.type2PowerKw;
+  const fmtDuration = (min: number) => {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    if (h <= 0) return `${m} мин`;
+    return m > 0 ? `${h} ч ${m} мин` : `${h} ч`;
+  };
+
+  /** Parameters that differ from the calculator defaults light up the sliders button. */
+  const paramsModified =
+    passengers !== 1 || !climateOn || plannedSpeedKmH !== 70 || plannedMaxSpeedKmH !== 120 || weatherMode !== 'current';
+
+  /** Charging plan as one list regardless of whether it came from the multi-stop planner or the single suggestion. */
+  const planStops =
+    chargingSuggestionStatus === 'ready'
+      ? chargingStops.length
+        ? chargingStops
+        : chargingSuggestion
+          ? [{
+              station: chargingSuggestion.station,
+              connector: chargingSuggestion.connector,
+              socAtStation: chargingSuggestion.socAtStation,
+              targetSoc: chargingSuggestion.targetSoc,
+              session: chargingSuggestion.session,
+              finishSocAfterCharge: chargingSuggestion.finishSocAfterCharge,
+            }]
+          : []
+      : [];
+
+  /** Markers on the map: the planned stops once a route exists, otherwise the nearby-charger list. */
+  const mapStops = routeElevation
+    ? planStops.map((s) => ({ id: s.station.id, lat: s.station.lat, lon: s.station.lon, name: s.station.name, address: s.station.address }))
+    : nearbyFreeList.map((x) => ({ id: x.station.id, lat: x.station.lat, lon: x.station.lon, name: x.station.name, address: x.station.address }));
+
+  const selectNearbyItem = (item: FreeChargerResult) => {
+    triggerHaptic('light', settings.hapticFeedback);
+    setSelectedRouteStop({
+      station: item.station,
+      connector: item.matchedConnector === 'gbt' ? 'gbt' : item.matchedConnector === 'type2' ? 'type2' : 'ccs2',
+    });
+  };
+
+  const handleMapStopClick = (stop: { id?: string; lat: number; lon: number; name: string; address?: string }) => {
+    triggerHaptic('light', settings.hapticFeedback);
+    if (!routeElevation) {
+      const free = nearbyFreeList.find((x) => x.station.id === stop.id);
+      if (free) { selectNearbyItem(free); return; }
+    }
+    const fromList = chargingStops.find(
+      (s) => s.station.id === stop.id
+        || (Math.abs(s.station.lat - stop.lat) < 1e-5 && Math.abs(s.station.lon - stop.lon) < 1e-5),
+    );
+    if (fromList) { setSelectedRouteStop(fromList); return; }
+    if (
+      chargingSuggestion
+      && (chargingSuggestion.station.id === stop.id
+        || (Math.abs(chargingSuggestion.station.lat - stop.lat) < 1e-5
+          && Math.abs(chargingSuggestion.station.lon - stop.lon) < 1e-5))
+    ) {
+      setSelectedRouteStop({
+        station: chargingSuggestion.station,
+        connector: chargingSuggestion.connector,
+        socAtStation: chargingSuggestion.socAtStation,
+        targetSoc: chargingSuggestion.targetSoc,
+        session: chargingSuggestion.session,
+        finishSocAfterCharge: chargingSuggestion.finishSocAfterCharge,
+      });
+      return;
+    }
+    setSelectedRouteStop({
+      station: {
+        id: stop.id || `map:${stop.lat},${stop.lon}`,
+        lat: stop.lat,
+        lon: stop.lon,
+        name: stop.name,
+        address: stop.address || '',
+        hasType2: false,
+        hasCcs2: true,
+        connectorTypeUnknown: true,
+        distanceFromRouteKm: 0,
+        distanceAlongRouteKm: 0,
+      },
+    });
+  };
+
+  const openStationInNavi = (lat: number, lon: number) => {
+    triggerHaptic('medium', settings.hapticFeedback);
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+    if (isMobile) {
+      window.location.href = `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lon}`;
+    } else {
+      window.open(`https://yandex.ru/maps/?rtext=~${lat},${lon}&rtt=auto`, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const buildRouteToSelectedStation = () => {
+    if (!selectedRouteStop) return;
+    const match = nearbyFreeList.find((x) => x.station.id === selectedRouteStop.station.id);
+    if (match) { applyFreeChargerAsDestination(match); return; }
+    applyFreeChargerAsDestination({
+      station: selectedRouteStop.station,
+      distanceKm: 0,
+      freeCcs: 0,
+      totalCcs: 0,
+      matchedConnector: selectedRouteStop.connector === 'gbt' ? 'gbt' : selectedRouteStop.connector === 'type2' ? 'type2' : 'ccs2',
+      operator: selectedRouteStop.station.operator || '',
+      connectors: [],
+    });
+  };
+
+  const applyPlaceAsDestination = (place: { name: string; lat: number; lon: number }) => {
+    triggerHaptic('light', settings.hapticFeedback);
+    setDestinationAddress(place.name);
+    setDestinationPin({ lat: place.lat, lon: place.lon });
+    void calculateRouteProfile({ lat: place.lat, lon: place.lon, displayName: place.name });
+  };
+
+  const closeParams = () => {
+    setParamsOpen(false);
+    if (paramsDirty) {
+      setParamsDirty(false);
+      // Conditions changed while a route is on screen — recompute so the answer never goes stale.
+      if (routeElevation && (destinationAddress.trim() || destinationPin)) void calculateRouteProfile();
+    }
+  };
+
+  const dirty = () => setParamsDirty(true);
+
+  const seg = (active: boolean) =>
+    `rounded-lg py-2 text-xs font-semibold ${
+      active ? (isDark ? 'bg-slate-700 text-white' : 'bg-white text-slate-900 shadow-sm') : muted
+    }`;
+  const optBtn = (active: boolean) =>
+    `rounded-lg py-2 text-xs font-semibold border ${
+      active ? 'border-cyan-500 bg-cyan-500/10 text-cyan-500' : isDark ? 'border-slate-700 text-slate-400' : 'border-slate-200 text-slate-600'
+    }`;
+
+  // ── Sheet: what the bottom panel shows right now ───────────────────────────────────────────
+  const renderStationCard = () => {
+    if (!selectedRouteStop) return null;
+    const st = selectedRouteStop.station;
+    const nearby = nearbyFreeList.find((x) => x.station.id === st.id);
+    return (
+      <div>
+        <div className="flex items-start gap-2.5">
+          <div className={`mt-0.5 shrink-0 rounded-xl p-2 ${isDark ? 'bg-amber-500/15 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>
+            <PlugZap className="h-4 w-4" />
           </div>
-          {gpsStatus === 'error' ? (
-            <button
-              type="button"
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setStartMode('address');
-              }}
-              className={`shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-bold border ${
-                isDark
-                  ? 'bg-rose-950/50 border-rose-700/50 text-rose-300'
-                  : 'bg-rose-50 border-rose-300 text-rose-700'
-              }`}
-            >
-              Указать адрес точки А
-            </button>
-          ) : quickWeather ? (
-            <div className="flex items-center gap-1.5 text-xs">
-              {weatherIcon(quickWeather.weatherCode)}
-              <span className="font-semibold">{quickWeather.temperature >= 0 ? '+' : ''}{quickWeather.temperature}°C</span>
-              <span className="text-slate-500">·</span>
-              <Wind className="w-3.5 h-3.5 text-slate-400" />
-              <span>{quickWeather.windSpeed} км/ч</span>
-            </div>
-          ) : (
-            <span className="text-xs text-slate-500">Погода загружается…</span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[14px] font-bold leading-tight">{st.name}</p>
+            {st.address && <p className={`mt-0.5 text-[12px] ${muted}`}>{st.address}</p>}
+          </div>
+          <button
+            type="button"
+            onClick={() => setSelectedRouteStop(null)}
+            aria-label="Закрыть карточку станции"
+            className={`shrink-0 rounded-full p-1.5 ${isDark ? 'text-slate-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-100'}`}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {st.operator && <p className={`mt-2 text-[12px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>{st.operator}</p>}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {st.hasCcs2 && <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${chipBg}`}>CCS{st.ccs2PowerKw ? ` · ${Math.round(st.ccs2PowerKw)} кВт` : ''}</span>}
+          {st.hasGbt && <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${chipBg}`}>GB/T{st.gbtPowerKw ? ` · ${Math.round(st.gbtPowerKw)} кВт` : ''}</span>}
+          {st.hasType2 && <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${chipBg}`}>Type2{st.type2PowerKw ? ` · ${Math.round(st.type2PowerKw)} кВт` : ''}</span>}
+          {nearby && nearby.totalCcs > 0 && (
+            <span className={`rounded-lg px-2 py-1 text-[11px] font-bold ${isDark ? 'bg-emerald-900/50 text-emerald-300' : 'bg-emerald-100 text-emerald-800'}`}>
+              свободно {nearby.freeCcs} из {nearby.totalCcs}
+            </span>
+          )}
+          {selectedRouteStop.connector && (
+            <span className={`rounded-lg px-2 py-1 text-[11px] font-bold ${isDark ? 'bg-amber-900/50 text-amber-300' : 'bg-amber-100 text-amber-800'}`}>
+              План: {connLabel(selectedRouteStop.connector)}
+            </span>
           )}
         </div>
-        {gpsStatus === 'error' && startMode === 'gps' && calculatorMode === 'route' && (
-          <p className={`mt-2 text-[11px] ${isDark ? 'text-rose-300/90' : 'text-rose-600'}`}>
-            Без GPS маршрут от текущей позиции недоступен. Переключитесь на «Адрес точки А» или нажмите кнопку выше.
+        {(selectedRouteStop.socAtStation != null || selectedRouteStop.session) && (
+          <p className={`mt-2 text-[12px] ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+            {selectedRouteStop.socAtStation != null && <>Прибытие ~{Math.round(selectedRouteStop.socAtStation)}%</>}
+            {selectedRouteStop.targetSoc != null && <> → {Math.round(selectedRouteStop.targetSoc)}%</>}
+            {selectedRouteStop.session && <> · ~{selectedRouteStop.session.minutes} мин · {selectedRouteStop.session.energyKwh.toFixed(1)} кВт⋅ч</>}
+            {selectedRouteStop.finishSocAfterCharge != null && <> · на финише ~{Math.round(selectedRouteStop.finishSocAfterCharge)}%</>}
           </p>
         )}
-      </section>
-
-      {/* Compact trip conditions: SoC + people + climate in one row-card */}
-      <section className={`calculator-conditions rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-        <div className="flex items-center justify-between gap-2">
-          <span className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Старт</span>
-          <span className={`text-xl font-black font-mono tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(startSoc)}%</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => updateRouteStartSoc(startSoc - 5)} className={`w-10 h-9 rounded-lg font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>−5</button>
-          <input type="range" min={1} max={100} value={startSoc} onChange={(e) => updateRouteStartSoc(Number(e.target.value))} className="flex-1 accent-cyan-500 h-1.5 rounded-lg cursor-pointer" />
-          <button type="button" onClick={() => updateRouteStartSoc(startSoc + 5)} className={`w-10 h-9 rounded-lg font-bold text-xs border ${isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>+5</button>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className={`flex-1 flex items-center justify-between gap-2 rounded-xl border px-2.5 py-1.5 ${isDark ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-            <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Люди</span>
-            <div className="flex items-center gap-1.5">
-              <button type="button" onClick={() => setPassengers(p => Math.max(1, p - 1))} className={`w-8 h-8 rounded-lg font-bold border text-sm ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>−</button>
-              <span className={`min-w-5 text-center font-bold font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>{passengers}</span>
-              <button type="button" onClick={() => setPassengers(p => Math.min(5, p + 1))} className={`w-8 h-8 rounded-lg font-bold border text-sm ${isDark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}>+</button>
-            </div>
-          </div>
+        {routeElevation ? (
           <button
             type="button"
-            onClick={() => { triggerHaptic('light', settings.hapticFeedback); setClimateOn(v => !v); }}
-            className={`shrink-0 rounded-xl px-3 py-2 text-xs font-bold border transition-colors ${
-              climateOn
-                ? isDark ? 'bg-cyan-950/70 text-cyan-300 border-cyan-500/60' : 'bg-cyan-600 text-white border-cyan-700'
-                : isDark ? 'bg-slate-950 text-slate-400 border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'
-            }`}
+            onClick={() => openStationInNavi(st.lat, st.lon)}
+            className="mt-3 w-full rounded-xl bg-cyan-600 px-3 py-3 text-[13px] font-bold text-white hover:bg-cyan-500 active:scale-[0.98]"
           >
-            <span className="inline-flex items-center gap-1"><Power className="w-3.5 h-3.5" />{climateOn ? 'Климат' : 'Без клим.'}</span>
+            Маршрут к станции
           </button>
-        </div>
-      </section>
+        ) : (
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button type="button" onClick={buildRouteToSelectedStation} className="rounded-xl bg-emerald-600 px-3 py-3 text-[13px] font-bold text-white hover:bg-emerald-500 active:scale-[0.98]">
+              Построить маршрут
+            </button>
+            <button type="button" onClick={() => openStationInNavi(st.lat, st.lon)} className="rounded-xl bg-cyan-600 px-3 py-3 text-[13px] font-bold text-white hover:bg-cyan-500 active:scale-[0.98]">
+              В навигатор
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
-      {/* Mode: route planning vs. logging a completed trip — two different workflows, kept visually separate instead of one long interleaved scroll */}
-      <div className="calculator-reset flex items-center justify-end -mt-1 mb-0.5">
+  const renderNearbyView = () => (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-[13px] font-bold">
+          <PlugZap className={`h-4 w-4 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
+          Свободные зарядки рядом
+        </div>
         <button
           type="button"
-          onClick={() => {
-            triggerHaptic('light', settings.hapticFeedback);
-            setStartSoc(100);
-            setEndSoc(45);
-            setDistanceKm(50);
-            setClimateOn(true);
-            setPassengers(1);
-            setPlannedSpeedKmH(90);
-            setRoadType('city');
-            setStartMode('gps');
-            setStartAddress('');
-            setDestinationAddress('');
-            setStartPin(null);
-            setDestinationPin(null);
-            setRouteElevation(null);
-            setRouteWeather(null);
-            setRouteForecast(null);
-            setRouteError('');
-            setChargingSuggestion(null);
-            setChargingStops([]);
-            setChargingSuggestionStatus('idle');
-            setSelectedRouteStop(null);
-            setStationsFoundAlongRoute(0);
-            setRouteDetailsOpen(false);
-            setChargingSearchForced(false);
-            try { localStorage.removeItem('vigo_calculator_draft_v1'); } catch { /* ignore */ }
-          }}
-          className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold border active:scale-[0.98] ${
-            isDark
-              ? 'border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-              : 'border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-          }`}
-          title="Сбросить введённые данные"
-          aria-label="Сбросить введённые данные"
+          onClick={() => { setNearbyFreeStatus('idle'); setNearbyFreeList([]); setNearbyFreeError(''); }}
+          aria-label="Закрыть список зарядок"
+          className={`rounded-full p-1.5 ${isDark ? 'text-slate-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-100'}`}
         >
-          <RotateCcw className="w-3 h-3" />
-          Сброс
+          <X className="h-4 w-4" />
         </button>
       </div>
-
-      <div className="calculator-mode-content flex flex-col gap-3">
-
-      {/* Route: A → B + calculate */}
-      <section className={`calculator-route rounded-2xl border p-3 space-y-3 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-xs'}`}>
-        <div className={`grid grid-cols-2 rounded-xl p-1 ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
-          <button onClick={() => setStartMode('gps')} className={`rounded-lg py-2 text-xs font-semibold ${startMode === 'gps' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>📍 Здесь</button>
-          <button onClick={() => setStartMode('address')} className={`rounded-lg py-2 text-xs font-semibold ${startMode === 'address' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>🏠 Адрес А</button>
-        </div>
-
-        {startMode === 'address' && (
-          <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <AddressAutocomplete
-              value={startAddress}
-              onChange={(v) => { setStartAddress(v); setStartPin(null); }}
-              onSelect={(s) => { setStartAddress(s.displayName); setStartPin({ lat: s.lat, lon: s.lon }); }}
-              placeholder="Откуда? Город, улица, дом"
-              isDark={isDark}
-              inputClassName={`w-full rounded-xl border py-3 pl-9 pr-12 text-sm outline-none truncate ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
-            />
-            <button
-              type="button"
-              onClick={() => { triggerHaptic('light', settings.hapticFeedback); setPickerFor('start'); }}
-              aria-label="Выбрать точку А на карте"
-              className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg ${startPin ? 'text-amber-500' : 'text-slate-400'} ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}
-            >
-              <Map className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
-        {startMode === 'address' && (startAddress || destinationAddress) && (
-          <div className="flex justify-center -my-1.5 relative z-10">
-            <button
-              type="button"
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                const from = startAddress;
-                const fromPin = startPin;
-                setStartAddress(destinationAddress);
-                setDestinationAddress(from);
-                setStartPin(destinationPin);
-                setDestinationPin(fromPin);
-              }}
-              aria-label="Поменять местами А и Б"
-              className={`p-1.5 rounded-full border transition-all active:scale-90 ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-white border-slate-300 text-slate-500 hover:text-slate-800 shadow-xs'}`}
-            >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
-
-        <div className="relative">
-          <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <AddressAutocomplete
-            value={destinationAddress}
-            onChange={(v) => { setDestinationAddress(v); setDestinationPin(null); }}
-            onSelect={(s) => { setDestinationAddress(s.displayName); setDestinationPin({ lat: s.lat, lon: s.lon }); }}
-            placeholder="Куда? Город, улица, дом"
-            isDark={isDark}
-            inputClassName={`w-full rounded-xl border py-3 pl-9 pr-12 text-sm outline-none truncate ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'}`}
-          />
-          <button
-            type="button"
-            onClick={() => { triggerHaptic('light', settings.hapticFeedback); setPickerFor('destination'); }}
-            aria-label="Выбрать точку Б на карте"
-            className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg ${destinationPin ? 'text-amber-500' : 'text-slate-400'} ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}
-          >
-            <Map className="w-4 h-4" />
-          </button>
-        </div>
-
-        <LocationPickerModal
-          isOpen={pickerFor !== null}
-          isDark={isDark}
-          title={pickerFor === 'start' ? 'Точка А — откуда' : 'Точка Б — куда'}
-          initialCenter={
-            (pickerFor === 'start' ? destinationPin : startPin) // pick near the other end of the route, if set
-            ?? gpsCoords // else near the device
-            ?? undefined // else the modal's own Minsk fallback
-          }
-          hapticFeedback={settings.hapticFeedback}
-          onClose={() => setPickerFor(null)}
-          onConfirm={({ lat, lon, displayName }) => {
-            if (pickerFor === 'start') { setStartAddress(displayName); setStartPin({ lat, lon }); }
-            else if (pickerFor === 'destination') { setDestinationAddress(displayName); setDestinationPin({ lat, lon }); }
-            setPickerFor(null);
-          }}
-        />
-
-        <CollapsibleDetails
-          isDark={isDark}
-          label={`Скорость · ср. ${plannedSpeedKmH} · макс. ${plannedMaxSpeedKmH} км/ч`}
-          open={routeParamsOpen}
-          onToggle={() => setRouteParamsOpen(v => !v)}
-        >
-          <div className="space-y-2">
-            <div className={`rounded-xl p-2.5 flex items-center justify-between gap-3 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
-              <span className="text-xs font-semibold">Средняя</span>
-              <div className="flex items-center gap-1">
-                <DecimalInput value={plannedSpeedKmH} onChange={(v) => { setPlannedSpeedKmH(v); setPlannedMaxSpeedKmH((prev) => Math.max(prev, v)); }} min={20} max={140} className="w-20 text-right" />
-                <span className="text-xs text-slate-500">км/ч</span>
-              </div>
-            </div>
-            <div className={`rounded-xl p-2.5 flex items-center justify-between gap-3 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
-              <span className="text-xs font-semibold">Максимум</span>
-              <div className="flex items-center gap-1">
-                <DecimalInput value={plannedMaxSpeedKmH} onChange={(v) => setPlannedMaxSpeedKmH(Math.max(plannedSpeedKmH, Math.min(150, v)))} min={20} max={150} className="w-20 text-right" />
-                <span className="text-xs text-slate-500">км/ч</span>
-              </div>
-            </div>
-          </div>
-        </CollapsibleDetails>
-
-        <button
-          onClick={() => { void calculateRouteProfile(); }}
-          disabled={routeLoading}
-          className="w-full rounded-xl bg-cyan-600 hover:bg-cyan-500 py-3.5 text-sm font-bold text-white disabled:opacity-60 flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-sm shadow-cyan-600/20"
-        >
-          {routeLoading
-            ? <><Loader2 className="w-5 h-5 animate-spin" /> Считаем маршрут…</>
-            : <><Navigation className="w-5 h-5" /> Рассчитать маршрут</>}
-        </button>
-
-        {routeLoading && <div className="text-xs text-cyan-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />{routeStatus || 'Подготавливаем расчёт…'}</div>}
-        {routeError && <div className="text-xs text-rose-500">{routeError}</div>}
-
-        <div className={`rounded-2xl border p-3 space-y-2 ${
-          isDark
-            ? 'border-emerald-700/50 bg-gradient-to-br from-emerald-950/50 to-slate-950/80 shadow-[0_0_24px_rgba(16,185,129,0.12)]'
-            : 'border-emerald-300 bg-gradient-to-br from-emerald-50 to-white shadow-sm'
-        }`}>
-          <div className="flex items-center gap-2 px-0.5">
-            <span className={`relative flex h-2.5 w-2.5 shrink-0`}>
-              <span className={`absolute inline-flex h-full w-full rounded-full opacity-60 ${
-                nearbyFreeStatus === 'loading' ? 'bg-emerald-400 animate-ping' : 'bg-emerald-500'
-              }`} />
-              <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${
-                nearbyFreeStatus === 'loading' ? 'bg-emerald-300' : 'bg-emerald-500'
-              }`} />
-            </span>
-            <p className={`text-[11px] font-bold uppercase tracking-wide ${isDark ? 'text-emerald-300' : 'text-emerald-800'}`}>
-              Автопоиск свободных ЭЗС рядом
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => { triggerHaptic('medium', settings.hapticFeedback); void searchNearbyFreeChargers(); }}
-            disabled={nearbyFreeStatus === 'loading'}
-            className={`w-full rounded-xl px-3 py-3.5 text-[13px] font-bold flex items-center justify-center gap-2.5 active:scale-[0.98] transition-all disabled:opacity-80 ${
-              nearbyFreeStatus === 'loading'
-                ? isDark
-                  ? 'bg-emerald-900/60 text-emerald-100 border border-emerald-600/40'
-                  : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                : isDark
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30'
-                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/25'
-            }`}
-          >
-            {nearbyFreeStatus === 'loading' ? (
-              <>
-                <span className="relative flex h-5 w-5 items-center justify-center">
-                  <span className="absolute inline-flex h-5 w-5 rounded-full border-2 border-emerald-300/30 border-t-emerald-200 animate-spin" />
-                  <PlugZap className="w-3 h-3 text-emerald-200" />
-                </span>
-                <span className="animate-pulse">Сканируем станции вокруг…</span>
-              </>
-            ) : (
-              <><PlugZap className="w-5 h-5" /> Найти ближайшую свободную зарядку</>
-            )}
-          </button>
-          {nearbyFreeStatus === 'error' && (
-            <p className="text-[11px] text-rose-500">{nearbyFreeError}</p>
-          )}
-          {nearbyFreeStatus === 'ready' && nearbyFreeError && !nearbyFreeList.length && (
-            <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{nearbyFreeError}</p>
-          )}
-          {nearbyFreeList.length > 0 && (
-            <ul className="space-y-1.5 max-h-56 overflow-auto">
-              {nearbyFreeList.map((item) => {
-                const isActive = selectedRouteStop?.station.id === item.station.id;
-                return (
-                <li key={item.station.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      triggerHaptic('light', settings.hapticFeedback);
-                      setSelectedRouteStop({
-                        station: item.station,
-                        connector: item.matchedConnector === 'gbt' ? 'gbt' : item.matchedConnector === 'type2' ? 'type2' : 'ccs2',
-                      });
-                    }}
-                    className={`w-full text-left rounded-lg px-3 py-2 border ${
-                      isActive
-                        ? isDark
-                          ? 'bg-amber-950/40 border-amber-600/50'
-                          : 'bg-amber-50 border-amber-300'
-                        : isDark
-                        ? 'bg-slate-900/80 hover:bg-slate-800 border-transparent'
-                        : 'bg-white hover:bg-slate-100 border-slate-100'
-                    }`}
-                  >
-                    <div className={`text-[12px] font-semibold ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>
-                      {item.station.name}
-                    </div>
-                    <div className={`mt-0.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                      {item.distanceKm < 1
-                        ? `${Math.round(item.distanceKm * 1000)} м`
-                        : `${item.distanceKm.toFixed(1)} км`}
-                      {' · '}
-                      {item.matchedConnector === 'gbt' ? 'GB/T' : 'CCS'} свободно {item.freeCcs}
-                      {(() => {
-                        const kw =
-                          item.matchedConnector === 'gbt'
-                            ? item.station.gbtPowerKw ?? item.station.ccs2PowerKw
-                            : item.station.ccs2PowerKw;
-                        return kw ? ` · ${Math.round(kw)} кВт` : '';
-                      })()}
-                      {item.operator ? ` · ${item.operator}` : ''}
-                    </div>
-                  </button>
-                </li>
-                );
-              })}
-            </ul>
-          )}
-          {/* EVSE card when a nearby station is selected from the list (before route is built) */}
-          {selectedRouteStop && !routeElevation && (
-            <div className={`mt-2 rounded-2xl border p-3 shadow-lg ${
-              isDark ? 'border-amber-700/40 bg-slate-950' : 'border-amber-200 bg-white'
-            }`}>
-              <div className="flex items-start gap-2">
-                <div className={`mt-0.5 rounded-lg p-1.5 ${isDark ? 'bg-amber-500/15 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>
-                  <PlugZap className="h-4 w-4" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className={`truncate text-[13px] font-bold leading-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                        {selectedRouteStop.station.name}
-                      </p>
-                      {selectedRouteStop.station.address && (
-                        <p className={`truncate text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                          {selectedRouteStop.station.address}
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedRouteStop(null)}
-                      className={`shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
-                    >
-                      Закрыть
-                    </button>
-                  </div>
-                  {(selectedRouteStop.station.operator) && (
-                    <p className={`mt-1.5 text-[12px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                      {selectedRouteStop.station.operator}
-                    </p>
-                  )}
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {selectedRouteStop.station.hasCcs2 && (
-                      <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>
-                        CCS{selectedRouteStop.station.ccs2PowerKw ? ` · ${Math.round(selectedRouteStop.station.ccs2PowerKw)} кВт` : ''}
-                      </span>
-                    )}
-                    {selectedRouteStop.station.hasGbt && (
-                      <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>
-                        GB/T{selectedRouteStop.station.gbtPowerKw ? ` · ${Math.round(selectedRouteStop.station.gbtPowerKw)} кВт` : ''}
-                      </span>
-                    )}
-                    {selectedRouteStop.station.hasType2 && (
-                      <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>
-                        Type2{selectedRouteStop.station.type2PowerKw ? ` · ${Math.round(selectedRouteStop.station.type2PowerKw)} кВт` : ''}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const match = nearbyFreeList.find((x) => x.station.id === selectedRouteStop.station.id);
-                        if (match) applyFreeChargerAsDestination(match);
-                        else {
-                          applyFreeChargerAsDestination({
-                            station: selectedRouteStop.station,
-                            distanceKm: 0,
-                            freeCcs: 0,
-                            totalCcs: 0,
-                            matchedConnector: selectedRouteStop.connector === 'gbt' ? 'gbt' : selectedRouteStop.connector === 'type2' ? 'type2' : 'ccs2',
-                            operator: selectedRouteStop.station.operator || '',
-                            connectors: [],
-                          });
-                        }
-                      }}
-                      className="rounded-xl px-3 py-2.5 text-[12px] font-bold bg-emerald-600 text-white hover:bg-emerald-500"
-                    >
-                      Построить маршрут
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        triggerHaptic('medium', settings.hapticFeedback);
-                        const { lat, lon } = selectedRouteStop.station;
-                        const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
-                        if (isMobile) {
-                          window.location.href = `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lon}`;
-                        } else {
-                          window.open(`https://yandex.ru/maps/?rtext=~${lat},${lon}&rtt=auto`, '_blank', 'noopener,noreferrer');
-                        }
-                      }}
-                      className="rounded-xl px-3 py-2.5 text-[12px] font-bold bg-cyan-600 text-white hover:bg-cyan-500"
-                    >
-                      В навигатор
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-        {routeElevation && !routeElevation.elevationAvailable && routeElevation.elevationNote && (
-          <div className={`text-xs rounded-lg px-3 py-2 ${isDark ? 'bg-amber-950/40 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>⚠ {routeElevation.elevationNote}</div>
-        )}
-
-        {routeElevation && (
-          <>
-            {routeForecast && (() => {
-              const arrival = routeForecast.arrivalSoc;
-              const displayArrival = hasChargingAdjustedFinishSoc ? chargingFinishSoc! : arrival;
-              const statusTone =
-                displayArrival >= 20
-                  ? 'good'
-                  : displayArrival >= ARRIVAL_RESERVE_SOC
-                  ? 'ok'
-                  : 'low';
-              const needsCharge = arrival < CHARGE_SUGGEST_SOC;
-              const statusText =
-                statusTone === 'good'
-                  ? 'Доедете с хорошим запасом'
-                  : statusTone === 'ok'
-                  ? 'Небольшой запас на финише'
-                  : needsCharge
-                  ? 'Нужна зарядка в пути'
-                  : 'Недостаточно заряда';
-              const statusColor =
-                statusTone === 'good'
-                  ? isDark
-                    ? 'text-emerald-400'
-                    : 'text-emerald-600'
-                  : statusTone === 'ok'
-                  ? 'text-amber-500'
-                  : 'text-rose-500';
-              const driveMinutes = routeWeather?.etaMinutes
-                ?? Math.max(1, Math.round((routeElevation.distanceKm / Math.max(10, plannedSpeedKmH)) * 60));
-              const totalTripMinutes = driveMinutes + totalChargingMinutes;
-              const etaLabel = (() => {
-                const h = Math.floor(totalTripMinutes / 60);
-                const m = totalTripMinutes % 60;
-                if (h <= 0) return `${m} мин`;
-                return m > 0 ? `${h} ч ${m} мин` : `${h} ч`;
-              })();
-              const chargeAnswer =
-                chargingSuggestionStatus === 'loading'
-                  ? 'Ищем станции…'
-                  : chargingSuggestionStatus === 'ready' && (chargingStops.length > 0 || chargingSuggestion)
-                    ? chargingStops.length > 1
-                      ? `${chargingStops.length} ${chargingStops.length < 5 ? 'остановки' : 'остановок'}`
-                      : 'Да, одна остановка'
-                    : needsCharge
-                      ? chargingSuggestionStatus === 'unavailable'
-                        ? 'Да, но станций нет'
-                        : 'Да'
-                      : 'Нет, без остановки';
-
-              return (
-              <div id="route-result-main" className="space-y-3">
-                {/* 1. Three answers the driver needs first */}
-                <div
-                  className={`rounded-2xl border overflow-hidden ${
-                    isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200 shadow-xs'
+      {nearbyFreeStatus === 'loading' && (
+        <p className={`mt-3 flex items-center gap-2 text-[12px] ${muted}`}>
+          <Loader2 className="h-4 w-4 animate-spin" /> Сканируем станции вокруг…
+        </p>
+      )}
+      {nearbyFreeStatus === 'error' && <p className="mt-3 text-[12px] text-rose-500">{nearbyFreeError}</p>}
+      {nearbyFreeStatus === 'ready' && nearbyFreeError && !nearbyFreeList.length && (
+        <p className={`mt-3 text-[12px] ${muted}`}>{nearbyFreeError}</p>
+      )}
+      {nearbyFreeList.length > 0 && (
+        <ul className="mt-2 space-y-1.5">
+          {nearbyFreeList.map((item) => {
+            const isActive = selectedRouteStop?.station.id === item.station.id;
+            const kw = item.matchedConnector === 'gbt' ? item.station.gbtPowerKw ?? item.station.ccs2PowerKw : item.station.ccs2PowerKw;
+            return (
+              <li key={item.station.id}>
+                <button
+                  type="button"
+                  onClick={() => selectNearbyItem(item)}
+                  className={`w-full rounded-xl border px-3 py-2.5 text-left ${
+                    isActive
+                      ? isDark ? 'border-amber-600/50 bg-amber-950/40' : 'border-amber-300 bg-amber-50'
+                      : isDark ? 'border-transparent bg-slate-800/60 hover:bg-slate-800' : 'border-slate-100 bg-slate-50 hover:bg-slate-100'
                   }`}
                 >
-                  <div className={`px-4 pt-3 pb-2 border-b ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
-                    <p className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                      Результат маршрута
-                    </p>
-                    <p className={`text-[13px] font-bold ${statusColor}`}>{statusText}</p>
+                  <div className="text-[13px] font-semibold">{item.station.name}</div>
+                  <div className={`mt-0.5 text-[12px] ${muted}`}>
+                    {item.distanceKm < 1 ? `${Math.round(item.distanceKm * 1000)} м` : `${item.distanceKm.toFixed(1)} км`}
+                    {' · '}
+                    {item.matchedConnector === 'gbt' ? 'GB/T' : 'CCS'} свободно {item.freeCcs}
+                    {kw ? ` · ${Math.round(kw)} кВт` : ''}
+                    {item.operator ? ` · ${item.operator}` : ''}
                   </div>
-                  <div className="grid grid-cols-3 divide-x divide-slate-800/40">
-                    <div className="px-3 py-3 text-center">
-                      <div className={`text-[10px] font-semibold mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        SoC на финише
-                      </div>
-                      <div className={`text-2xl font-black font-mono tabular-nums ${statusColor}`}>
-                        {Math.round(displayArrival)}%
-                      </div>
-                      <div className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        старт {Math.round(startSoc)}%
-                        {hasChargingAdjustedFinishSoc && arrival !== displayArrival ? (
-                          <span className="block">без зарядки {Math.round(arrival)}%</span>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="px-3 py-3 text-center">
-                      <div className={`text-[10px] font-semibold mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        Зарядка
-                      </div>
-                      <div
-                        className={`text-[15px] font-bold leading-tight ${
-                          needsCharge
-                            ? isDark
-                              ? 'text-amber-400'
-                              : 'text-amber-600'
-                            : isDark
-                              ? 'text-emerald-400'
-                              : 'text-emerald-600'
-                        }`}
-                      >
-                        {chargeAnswer}
-                      </div>
-                      <div className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        {routeForecast.consumption.toFixed(1)} кВт⋅ч/100
-                      </div>
-                    </div>
-                    <div className="px-3 py-3 text-center">
-                      <div className={`text-[10px] font-semibold mb-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        В пути
-                      </div>
-                      <div className={`text-[15px] font-bold tabular-nums ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                        {etaLabel}
-                      </div>
-                      <div className={`text-[10px] mt-0.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                        {routeElevation.distanceKm.toFixed(0)} км
-                        {totalChargingMinutes > 0 ? ` · +${totalChargingMinutes} мин зар.` : ''}
-                      </div>
-                    </div>
-                  </div>
-                  {finishArrivalDate && (
-                    <div className={`px-4 py-2 text-[11px] border-t ${isDark ? 'border-slate-800 text-slate-400' : 'border-slate-100 text-slate-500'}`}>
-                      Прибытие ~{finishArrivalDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                      {finishTemperature != null && (
-                        <> · {finishTemperature >= 0 ? '+' : ''}{Math.round(finishTemperature)}°C</>
-                      )}
-                      {routeForecast.windLabel ? ` · ${routeForecast.windLabel}` : ''}
-                    </div>
-                  )}
-                </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 
-                {/* Compact sticky actions */}
-                <div className="space-y-2">
-                  {onSendToHud && destinationAddress.trim() && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        triggerHaptic('success', settings.hapticFeedback);
-                        const totalKm = routeElevation?.distanceKm ?? distanceKm;
-                        const waypoints = [
-                          ...chargingStops.map((stop) => ({
-                            kind: 'charge' as const,
-                            name: stop.station.name || 'Зарядка',
-                            distanceAlongRouteKm: stop.station.distanceAlongRouteKm,
-                            lat: stop.station.lat,
-                            lon: stop.station.lon,
-                            plannedArrivalSoc: stop.socAtStation,
-                            chargeTargetSoc: stop.targetSoc,
-                            connectorLabel:
-                              stop.connector === 'gbt'
-                                ? 'GB/T'
-                                : stop.connector === 'ccs2'
-                                  ? 'CCS'
-                                  : 'Type2',
-                            stationId: stop.station.id,
-                            address: stop.station.address,
-                            operator: stop.station.operator,
-                            ccs2PowerKw: stop.station.ccs2PowerKw,
-                            gbtPowerKw: stop.station.gbtPowerKw,
-                            type2PowerKw: stop.station.type2PowerKw,
-                          })),
-                          {
-                            kind: 'destination' as const,
-                            name: destinationAddress.trim(),
-                            distanceAlongRouteKm: totalKm,
-                          },
-                        ];
-                        let routePoints:
-                          | Array<{ lat: number; lon: number; elevationM?: number; distanceFromStartKm?: number }>
-                          | undefined;
-                        const pts = routeElevation?.points;
-                        if (pts && pts.length >= 2) {
-                          const maxPts = 280;
-                          const toPt = (p: (typeof pts)[number]) => ({
-                            lat: p.lat,
-                            lon: p.lon,
-                            elevationM: p.elevationM,
-                            distanceFromStartKm: p.distanceFromStartKm,
-                          });
-                          if (pts.length <= maxPts) {
-                            routePoints = pts.map(toPt);
-                          } else {
-                            const rdp = (arr: typeof pts, eps: number): typeof pts => {
-                              if (arr.length <= 2) return arr.slice();
-                              const toRad = Math.PI / 180;
-                              const lat0 = arr[0].lat * toRad;
-                              const mPerDegLat = 111_320;
-                              const mPerDegLon = 111_320 * Math.cos(lat0);
-                              const dist = (a: (typeof pts)[0], b: (typeof pts)[0], p: (typeof pts)[0]) => {
-                                const ax = a.lon * mPerDegLon, ay = a.lat * mPerDegLat;
-                                const bx = b.lon * mPerDegLon, by = b.lat * mPerDegLat;
-                                const px = p.lon * mPerDegLon, py = p.lat * mPerDegLat;
-                                const dx = bx - ax, dy = by - ay;
-                                const len2 = dx * dx + dy * dy || 1;
-                                let t = ((px - ax) * dx + (py - ay) * dy) / len2;
-                                t = Math.max(0, Math.min(1, t));
-                                const cx = ax + t * dx, cy = ay + t * dy;
-                                return Math.hypot(px - cx, py - cy);
-                              };
-                              let maxD = 0, idx = 0;
-                              for (let i = 1; i < arr.length - 1; i++) {
-                                const d = dist(arr[0], arr[arr.length - 1], arr[i]);
-                                if (d > maxD) { maxD = d; idx = i; }
-                              }
-                              if (maxD > eps) {
-                                const left = rdp(arr.slice(0, idx + 1), eps);
-                                const right = rdp(arr.slice(idx), eps);
-                                return left.slice(0, -1).concat(right);
-                              }
-                              return [arr[0], arr[arr.length - 1]];
-                            };
-                            let eps = 25;
-                            let simplified = rdp(pts, eps);
-                            while (simplified.length > maxPts && eps < 200) {
-                              eps *= 1.35;
-                              simplified = rdp(pts, eps);
-                            }
-                            if (simplified.length > maxPts) {
-                              const step = Math.ceil(simplified.length / maxPts);
-                              simplified = simplified.filter(
-                                (_, i) => i === 0 || i === simplified.length - 1 || i % step === 0,
-                              );
-                            }
-                            routePoints = simplified.map(toPt);
-                          }
-                        }
-                        onSendToHud({
-                          destination: destinationAddress.trim(),
-                          startSoc,
-                          plannedSpeedKmH,
-                          passengers,
-                          climateOn,
-                          totalDistanceKm: totalKm,
-                          predictedEndSoc: endSoc,
-                          energyNeededKwh: energyUsedKwh,
-                          predictedConsumption: consumptionPer100Km,
-                          waypoints,
-                          routePoints,
-                        });
-                      }}
-                      className={`w-full rounded-xl py-3.5 text-sm font-bold flex items-center justify-center gap-2 border transition-all active:scale-[0.98] ${
-                        isDark
-                          ? 'bg-cyan-600 border-cyan-500 text-white hover:bg-cyan-500 shadow-lg shadow-cyan-900/30'
-                          : 'bg-cyan-600 border-cyan-600 text-white hover:bg-cyan-500 shadow-md shadow-cyan-600/20'
-                      }`}
-                    >
-                      <Navigation className="w-5 h-5" />
-                      {chargingStops.length > 0
-                        ? `Начать поездку · ${chargingStops.length} зарядк${chargingStops.length === 1 ? 'а' : chargingStops.length < 5 ? 'и' : 'ок'}`
-                        : 'Начать поездку'}
-                    </button>
-                  )}
-                  <a
-                    href={typeof yandexNaviHref === 'string' ? '#' : yandexNaviHref.web}
-                    onClick={openYandexNavi}
-                    className={`block w-full rounded-xl px-3 py-2.5 text-center text-[12px] font-semibold border ${
-                      isDark
-                        ? 'bg-slate-900 border-slate-700 text-slate-200 hover:bg-slate-800'
-                        : 'bg-white border-slate-200 text-slate-800'
-                    }`}
-                  >
-                    Открыть в Яндекс Навигаторе
-                  </a>
-                </div>
+  const renderIdleView = () => (
+    <div>
+      <p className="text-[14px] font-bold">Куда едем?</p>
+      <p className={`mt-0.5 text-[12px] ${muted}`}>
+        Введите точку Б. Старт — ваша геопозиция, климат и погода подставятся сами.
+      </p>
+      {recentPlaces.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {recentPlaces.map((p) => (
+            <li key={`${p.lat},${p.lon}`}>
+              <button
+                type="button"
+                onClick={() => applyPlaceAsDestination(p)}
+                className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left text-[13px] ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-100'}`}
+              >
+                <History className={`h-4 w-4 shrink-0 ${muted}`} />
+                <span className="truncate">{p.name}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 
-                {/* Map — secondary after the answers */}
-                <div className={`rounded-2xl border overflow-hidden ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
-                  <RouteMap
-                    points={routeElevation.points}
-                    isDark={isDark}
-                    chargingStops={
-                      chargingSuggestionStatus === 'ready' && chargingStops.length
-                        ? chargingStops.map((s) => ({
-                            id: s.station.id,
-                            lat: s.station.lat,
-                            lon: s.station.lon,
-                            name: s.station.name,
-                            address: s.station.address,
-                          }))
-                        : chargingSuggestionStatus === 'ready' && chargingSuggestion
-                          ? [{
-                              id: chargingSuggestion.station.id,
-                              lat: chargingSuggestion.station.lat,
-                              lon: chargingSuggestion.station.lon,
-                              name: chargingSuggestion.station.name,
-                              address: chargingSuggestion.station.address,
-                            }]
-                          : []
-                    }
-                    onChargingStopClick={(stop) => {
-                      triggerHaptic('light', settings.hapticFeedback);
-                      const fromList = chargingStops.find(
-                        (s) => s.station.id === stop.id
-                          || (Math.abs(s.station.lat - stop.lat) < 1e-5 && Math.abs(s.station.lon - stop.lon) < 1e-5),
-                      );
-                      if (fromList) {
-                        setSelectedRouteStop(fromList);
-                        return;
-                      }
-                      if (
-                        chargingSuggestion
-                        && (chargingSuggestion.station.id === stop.id
-                          || (Math.abs(chargingSuggestion.station.lat - stop.lat) < 1e-5
-                            && Math.abs(chargingSuggestion.station.lon - stop.lon) < 1e-5))
-                      ) {
-                        setSelectedRouteStop({
-                          station: chargingSuggestion.station,
-                          connector: chargingSuggestion.connector,
-                          socAtStation: chargingSuggestion.socAtStation,
-                          targetSoc: chargingSuggestion.targetSoc,
-                          session: chargingSuggestion.session,
-                          finishSocAfterCharge: chargingSuggestion.finishSocAfterCharge,
-                        });
-                        return;
-                      }
-                      setSelectedRouteStop({
-                        station: {
-                          id: stop.id || `map:${stop.lat},${stop.lon}`,
-                          lat: stop.lat,
-                          lon: stop.lon,
-                          name: stop.name,
-                          address: stop.address || '',
-                          hasType2: false,
-                          hasCcs2: true,
-                          connectorTypeUnknown: true,
-                          distanceFromRouteKm: 0,
-                          distanceAlongRouteKm: 0,
-                        },
-                      });
-                    }}
+  const renderLoadingView = () => (
+    <div className="flex items-center gap-3 py-1">
+      <Loader2 className="h-5 w-5 shrink-0 animate-spin text-cyan-500" />
+      <div className="min-w-0">
+        <p className="text-[14px] font-bold">Считаем маршрут…</p>
+        <p className={`truncate text-[12px] ${muted}`}>{routeStatus || 'Подготавливаем расчёт…'}</p>
+      </div>
+    </div>
+  );
+
+  const renderResultView = () => {
+    if (!routeElevation || !routeForecast) return null;
+    const arrival = routeForecast.arrivalSoc;
+    const displayArrival = hasChargingAdjustedFinishSoc ? chargingFinishSoc! : arrival;
+    const tone = displayArrival >= 20 ? 'good' : displayArrival >= ARRIVAL_RESERVE_SOC ? 'ok' : 'low';
+    const needsCharge = arrival < CHARGE_SUGGEST_SOC;
+    const searching = chargingSuggestionStatus === 'loading';
+    const noStations = chargingSuggestionStatus === 'unavailable' || chargingSuggestionStatus === 'error';
+    const verdict =
+      tone === 'good'
+        ? planStops.length && !chargingSearchForced ? 'Доедете с зарядкой' : 'Доедете'
+        : tone === 'ok'
+          ? 'Впритык'
+          : searching
+            ? 'Ищем зарядку…'
+            : noStations
+              ? 'Не доедете: станций нет'
+              : 'Нужна зарядка в пути';
+    const toneColor =
+      tone === 'good' ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : tone === 'ok' ? 'text-amber-500' : 'text-rose-500';
+    const driveMinutes = routeWeather?.etaMinutes ?? Math.max(1, Math.round((routeElevation.distanceKm / Math.max(10, plannedSpeedKmH)) * 60));
+    const totalTripMinutes = driveMinutes + totalChargingMinutes;
+    const chargeLabel = searching
+      ? '…'
+      : planStops.length > 0
+        ? String(planStops.length)
+        : needsCharge
+          ? 'нужна'
+          : 'нет';
+    const chargeSub = searching
+      ? 'ищем зарядку'
+      : planStops.length > 0
+        ? planStops.length === 1 ? 'остановка' : planStops.length < 5 ? 'остановки' : 'остановок'
+        : needsCharge && noStations
+          ? 'станций нет'
+          : 'зарядка';
+
+    // SoC along the route: straight burn between points, vertical jump at every planned charge.
+    const totalKm = routeElevation.distanceKm;
+    const series: Array<{ km: number; soc: number }> = [{ km: 0, soc: Math.min(100, startSoc) }];
+    planStops.forEach((s) => {
+      const km = Math.max(0.1, Math.min(totalKm, s.station.distanceAlongRouteKm));
+      series.push({ km, soc: Math.max(0, s.socAtStation) });
+      if (!chargingSearchForced) series.push({ km: km + 0.01, soc: Math.min(100, s.targetSoc) });
+    });
+    series.push({ km: totalKm, soc: Math.max(0, Math.min(100, displayArrival)) });
+    const chartStroke = tone === 'low' ? '#f43f5e' : tone === 'ok' ? '#f59e0b' : '#06b6d4';
+
+    return (
+      <div id="route-result-main">
+        <div className="flex items-center justify-between gap-2">
+          <p className={`text-[13px] font-bold ${toneColor}`}>{verdict}</p>
+          <button
+            type="button"
+            onClick={() => { triggerHaptic('light', settings.hapticFeedback); resetRoute(); }}
+            aria-label="Сбросить маршрут"
+            className={`rounded-full p-1.5 ${isDark ? 'text-slate-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-100'}`}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-1 flex items-end gap-3">
+          <div className="shrink-0">
+            <div className={`font-mono text-[40px] font-black leading-none tabular-nums ${toneColor}`}>
+              <AnimatedNumber value={Math.round(displayArrival)} />%
+            </div>
+            <div className={`mt-1 text-[11px] leading-tight ${muted}`}>
+              на финише · старт {Math.round(startSoc)}%
+              {hasChargingAdjustedFinishSoc && Math.round(arrival) !== Math.round(displayArrival) && (
+                <span className="block">без зарядки {Math.round(arrival)}%</span>
+              )}
+            </div>
+          </div>
+          <div className="h-[72px] min-w-0 flex-1" aria-label="Заряд по маршруту">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={series} margin={{ top: 6, right: 4, left: 4, bottom: 0 }}>
+                <YAxis hide domain={[0, 100]} />
+                <XAxis dataKey="km" type="number" domain={[0, 'dataMax']} hide />
+                <ReferenceLine y={ARRIVAL_RESERVE_SOC} stroke={isDark ? '#475569' : '#cbd5e1'} strokeDasharray="3 3" />
+                {planStops.map((s, i) => (
+                  <ReferenceDot
+                    key={`${s.station.id}-${i}`}
+                    x={Math.max(0.1, Math.min(totalKm, s.station.distanceAlongRouteKm))}
+                    y={chargingSearchForced ? s.socAtStation : s.targetSoc}
+                    r={4}
+                    fill="#f59e0b"
+                    stroke={isDark ? '#0f172a' : '#ffffff'}
+                    strokeWidth={2}
                   />
-                </div>
+                ))}
+                <Area type="linear" dataKey="soc" stroke={chartStroke} fill={chartStroke} fillOpacity={0.16} strokeWidth={2.5} isAnimationActive={false} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
 
-                {selectedRouteStop && (
-                  <div className={`rounded-2xl border p-3 shadow-lg ${
-                    isDark ? 'border-amber-700/40 bg-slate-950' : 'border-amber-200 bg-white'
-                  }`}>
-                    <div className="flex items-start gap-2">
-                      <div className={`mt-0.5 rounded-lg p-1.5 ${isDark ? 'bg-amber-500/15 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>
-                        <PlugZap className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className={`truncate text-[13px] font-bold leading-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                              {selectedRouteStop.station.name}
-                            </p>
-                            {selectedRouteStop.station.address && (
-                              <p className={`truncate text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                {selectedRouteStop.station.address}
-                              </p>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedRouteStop(null)}
-                            className={`shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
-                          >
-                            Закрыть
-                          </button>
-                        </div>
-                        {selectedRouteStop.station.operator && (
-                          <p className={`mt-1.5 text-[12px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                            {selectedRouteStop.station.operator}
-                          </p>
-                        )}
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {selectedRouteStop.station.hasCcs2 && (
-                            <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>
-                              CCS{selectedRouteStop.station.ccs2PowerKw ? ` · ${Math.round(selectedRouteStop.station.ccs2PowerKw)} кВт` : ''}
-                            </span>
-                          )}
-                          {selectedRouteStop.station.hasGbt && (
-                            <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>
-                              GB/T{selectedRouteStop.station.gbtPowerKw ? ` · ${Math.round(selectedRouteStop.station.gbtPowerKw)} кВт` : ''}
-                            </span>
-                          )}
-                          {selectedRouteStop.station.hasType2 && (
-                            <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-100 text-slate-800'}`}>
-                              Type2{selectedRouteStop.station.type2PowerKw ? ` · ${Math.round(selectedRouteStop.station.type2PowerKw)} кВт` : ''}
-                            </span>
-                          )}
-                          {selectedRouteStop.connector && (
-                            <span className={`rounded-lg px-2 py-1 text-[11px] font-bold ${isDark ? 'bg-amber-900/50 text-amber-300' : 'bg-amber-100 text-amber-800'}`}>
-                              План: {selectedRouteStop.connector === 'gbt' ? 'GB/T' : selectedRouteStop.connector === 'ccs2' ? 'CCS' : 'Type2'}
-                            </span>
-                          )}
-                        </div>
-                        {(selectedRouteStop.socAtStation != null || selectedRouteStop.session) && (
-                          <p className={`mt-2 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                            {selectedRouteStop.socAtStation != null && <>Прибытие ~{Math.round(selectedRouteStop.socAtStation)}%</>}
-                            {selectedRouteStop.targetSoc != null && <> → {Math.round(selectedRouteStop.targetSoc)}%</>}
-                            {selectedRouteStop.session && <> · ~{selectedRouteStop.session.minutes} мин · {selectedRouteStop.session.energyKwh.toFixed(1)} кВт⋅ч</>}
-                            {selectedRouteStop.finishSocAfterCharge != null && <> · после ~{Math.round(selectedRouteStop.finishSocAfterCharge)}% на финише</>}
-                          </p>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            triggerHaptic('medium', settings.hapticFeedback);
-                            const { lat, lon } = selectedRouteStop.station;
-                            const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
-                            if (isMobile) {
-                              window.location.href = `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lon}`;
-                            } else {
-                              window.open(`https://yandex.ru/maps/?rtext=~${lat},${lon}&rtt=auto`, '_blank', 'noopener,noreferrer');
-                            }
-                          }}
-                          className={`mt-3 w-full rounded-xl px-3 py-2.5 text-[12px] font-bold ${
-                            isDark ? 'bg-cyan-600 text-white hover:bg-cyan-500' : 'bg-cyan-600 text-white hover:bg-cyan-500'
-                          }`}
-                        >
-                          Маршрут к станции
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+        <div className={`mt-3 grid grid-cols-3 divide-x rounded-xl py-2 text-center ${isDark ? 'bg-slate-800/50 divide-slate-700/60' : 'bg-slate-100 divide-slate-200'}`}>
+          <div className="px-2">
+            <div className="whitespace-nowrap text-[14px] font-bold tabular-nums">{routeElevation.distanceKm.toFixed(0)} км</div>
+            <div className={`text-[10px] ${muted}`}>{routeForecast.consumption.toFixed(1)} кВт⋅ч/100</div>
+          </div>
+          <div className="px-2">
+            <div className="whitespace-nowrap text-[14px] font-bold tabular-nums">{fmtDuration(totalTripMinutes)}</div>
+            <div className={`text-[10px] ${muted}`}>{totalChargingMinutes > 0 ? `с зарядкой ${totalChargingMinutes} мин` : 'в пути'}</div>
+          </div>
+          <div className="px-2">
+            <div className={`whitespace-nowrap text-[14px] font-bold ${planStops.length ? (isDark ? 'text-amber-400' : 'text-amber-600') : ''}`}>{chargeLabel}</div>
+            <div className={`text-[10px] ${muted}`}>{chargeSub}</div>
+          </div>
+        </div>
 
-                {/* Charging plan details (SOC/ETA already in the hero above) */}
-                <div className={`rounded-2xl border px-4 py-3 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'}`}>
-                  {routeForecast && (
-                    <div>
-                      <div className={`flex items-center gap-1.5 text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                        <PlugZap className="w-3.5 h-3.5" />
-                        {arrival < CHARGE_SUGGEST_SOC ? 'План зарядки в пути' : 'Зарядка по маршруту'}
-                      </div>
-                      {chargingSuggestionStatus === 'loading' && (
-                        <p className={`mt-1.5 text-[11px] flex items-center gap-1.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                          <Loader2 className="w-3 h-3 animate-spin" /> Ищем станции…
-                        </p>
-                      )}
-                      {arrival >= CHARGE_SUGGEST_SOC && chargingSuggestionStatus === 'idle' && (
-                        <button
-                          type="button"
-                          onClick={() => { triggerHaptic('light', settings.hapticFeedback); void searchChargingStations(); }}
-                          className={`mt-2 w-full rounded-lg px-3 py-2 text-[12px] font-semibold ${isDark ? 'bg-slate-900 text-slate-200' : 'bg-slate-100 text-slate-700'}`}
-                        >
-                          Найти зарядку по маршруту
-                        </button>
-                      )}
-                      {chargingSuggestionStatus === 'unavailable' && (
-                        <div className="mt-1.5 space-y-2">
-                          <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
-                            {stationsFoundAlongRoute > 0
-                              ? 'Подходящей остановки по правилам комфорта нет.'
-                              : 'Станций на маршруте не найдено.'}
-                          </p>
-                          {stationsFoundAlongRoute > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                triggerHaptic('light', settings.hapticFeedback);
-                                void searchChargingStations({ force: true });
-                              }}
-                              className={`w-full rounded-lg px-3 py-2 text-[12px] font-semibold ${
-                                isDark ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-50 text-cyan-800'
-                              }`}
-                            >
-                              Показать станции всё равно
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {chargingSuggestionStatus === 'error' && (
-                        <p className={`mt-1.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
-                          Не удалось загрузить станции.
-                        </p>
-                      )}
-                      {chargingSuggestionStatus === 'ready' && (chargingStops.length > 0 || chargingSuggestion) && (
-                        <div className="mt-2 space-y-2">
-                          {(chargingStops.length ? chargingStops : [{
-                            station: chargingSuggestion!.station,
-                            connector: chargingSuggestion!.connector,
-                            socAtStation: chargingSuggestion!.socAtStation,
-                            targetSoc: chargingSuggestion!.targetSoc,
-                            session: chargingSuggestion!.session,
-                            finishSocAfterCharge: chargingSuggestion!.finishSocAfterCharge,
-                          }]).map((stop, idx, arr) => (
-                            <div key={`${stop.station.id}-${idx}`} className={idx > 0 ? `pt-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}` : ''}>
-                              <p className={`text-[12px] leading-snug ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
-                                {arr.length > 1 && (
-                                  <span className={`mr-1.5 text-[10px] font-bold ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                                    {idx + 1}.
-                                  </span>
-                                )}
-                                <span className="font-semibold">{stop.station.name}</span>
-                                {stop.station.address ? ` · ${stop.station.address}` : ''}
-                                {' · '}~{Math.round(stop.station.distanceAlongRouteKm)} км
-                              </p>
-                              <p className={`mt-0.5 text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                                {stop.connector === 'gbt' ? 'GB/T' : stop.connector === 'ccs2' ? 'CCS' : 'Type2'}
-                                {(() => {
-                                  const kw =
-                                    stop.connector === 'gbt'
-                                      ? stop.station.gbtPowerKw ?? stop.station.ccs2PowerKw
-                                      : stop.connector === 'ccs2'
-                                        ? stop.station.ccs2PowerKw
-                                        : stop.station.type2PowerKw;
-                                  return kw ? ` · ${Math.round(kw)} кВт` : '';
-                                })()}
-                                {' · '}~{Math.round(stop.socAtStation)}%
-                                {!chargingSearchForced && <> → {Math.round(stop.targetSoc)}%</>}
-                                {' · '}{stop.session.minutes} мин
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-              );
-            })()}
-
-            {/* All secondary route info behind one control */}
-            <CollapsibleDetails
-              isDark={isDark}
-              label="Подробнее о маршруте"
-              open={routeDetailsOpen}
-              onToggle={() => setRouteDetailsOpen(v => !v)}
-              className="mt-1"
+        <div className="mt-3 flex gap-2">
+          {onSendToHud && destinationAddress.trim() && (
+            <button
+              type="button"
+              onClick={handleStartTrip}
+              className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-cyan-600 py-3 text-[13px] font-bold text-white shadow-sm shadow-cyan-600/20 hover:bg-cyan-500 active:scale-[0.98]"
             >
-              <div className="space-y-3">
+              <Navigation className="h-4 w-4 shrink-0" />
+              <span className="truncate">
+                {planStops.length > 0
+                  ? `Начать · ${planStops.length} зарядк${planStops.length === 1 ? 'а' : planStops.length < 5 ? 'и' : 'ок'}`
+                  : 'Начать поездку'}
+              </span>
+            </button>
+          )}
+          <a
+            href={typeof yandexNaviHref === 'string' ? '#' : yandexNaviHref.web}
+            onClick={openYandexNavi}
+            className={`flex shrink-0 items-center justify-center gap-1.5 rounded-xl border px-4 py-3 text-[13px] font-semibold active:scale-[0.98] ${
+              isDark ? 'border-slate-700 bg-slate-800/70 text-slate-200' : 'border-slate-200 bg-white text-slate-800'
+            }`}
+          >
+            <Route className="h-4 w-4" />
+            Навигатор
+          </a>
+        </div>
+
+        {finishArrivalDate && (
+          <p className={`mt-2 text-[11px] ${muted}`}>
+            Прибытие ~{finishArrivalDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+            {finishTemperature != null && <> · {finishTemperature >= 0 ? '+' : ''}{Math.round(finishTemperature)}°C</>}
+            {routeForecast.windLabel ? ` · ${routeForecast.windLabel}` : ''}
+          </p>
+        )}
+
+        {/* Charge stops — tap to open the station card (same as tapping the ⚡ on the map) */}
+        {planStops.length > 0 && (
+          <div className="-mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1 pb-1">
+            {planStops.map((s, i) => (
+              <button
+                key={`${s.station.id}-${i}`}
+                type="button"
+                onClick={() => { triggerHaptic('light', settings.hapticFeedback); setSelectedRouteStop(s); }}
+                className={`shrink-0 rounded-xl border px-2.5 py-1.5 text-left ${isDark ? 'border-amber-700/40 bg-amber-950/30' : 'border-amber-200 bg-amber-50'}`}
+              >
+                <div className="flex items-center gap-1 text-[12px] font-bold">
+                  <PlugZap className="h-3 w-3 text-amber-500" />
+                  <span className="max-w-[9.5rem] truncate">{s.station.name}</span>
+                </div>
+                <div className={`text-[11px] ${muted}`}>
+                  {Math.round(s.station.distanceAlongRouteKm)} км · {Math.round(s.socAtStation)}%{!chargingSearchForced && <> → {Math.round(s.targetSoc)}%</>} · {s.session.minutes} мин
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Charge search states that need an explicit action */}
+        {arrival >= CHARGE_SUGGEST_SOC && chargingSuggestionStatus === 'idle' && (
+          <button
+            type="button"
+            onClick={() => { triggerHaptic('light', settings.hapticFeedback); void searchChargingStations(); }}
+            className={`mt-2 w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold ${chipBg}`}
+          >
+            Найти зарядку по маршруту
+          </button>
+        )}
+        {chargingSuggestionStatus === 'unavailable' && (
+          <div className="mt-2 space-y-2">
+            <p className={`text-[12px] ${muted}`}>
+              {stationsFoundAlongRoute > 0 ? 'Подходящей остановки по правилам комфорта нет.' : 'Станций на маршруте не найдено.'}
+            </p>
+            {stationsFoundAlongRoute > 0 && (
+              <button
+                type="button"
+                onClick={() => { triggerHaptic('light', settings.hapticFeedback); void searchChargingStations({ force: true }); }}
+                className={`w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold ${isDark ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-50 text-cyan-800'}`}
+              >
+                Показать станции всё равно
+              </button>
+            )}
+          </div>
+        )}
+        {chargingSuggestionStatus === 'error' && <p className={`mt-2 text-[12px] ${muted}`}>Не удалось загрузить станции.</p>}
+
+
+        {routeElevation && !routeElevation.elevationAvailable && routeElevation.elevationNote && (
+          <div className={`mt-2 rounded-lg px-3 py-2 text-xs ${isDark ? 'bg-amber-950/40 text-amber-400' : 'bg-amber-50 text-amber-700'}`}>⚠ {routeElevation.elevationNote}</div>
+        )}
+
+        <div className="mt-3">
+          <CollapsibleDetails
+            isDark={isDark}
+            label="Подробности"
+            open={routeDetailsOpen}
+            onToggle={() => setRouteDetailsOpen((v) => !v)}
+          >
+            <div className="space-y-3">
                 {routeForecast?.breakdown && (
                   <div className={`rounded-xl border p-3 space-y-2 text-xs ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
                     <div className={`text-[11px] font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Что повлияло на расход</div>
@@ -2372,8 +2105,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                       <div className={`text-[11px] font-bold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Профиль высот</div>
                       <ResponsiveContainer width="100%" height="85%">
                         <AreaChart data={profilePoints} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
-                          <XAxis dataKey="distance" type="number" domain={[0, 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v} км`} interval="preserveStartEnd" />
-                          <Tooltip formatter={(v: number) => [`${Math.round(v)} м`, 'Высота']} labelFormatter={(v) => `${v} км`} />
+                          <XAxis dataKey="distance" type="number" domain={[0, 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${Math.round(Number(v))} км`} interval="preserveStartEnd" />
+                          <Tooltip formatter={(v: number) => [`${Math.round(v)} м`, 'Высота']} labelFormatter={(v) => `${Math.round(Number(v))} км`} />
                           <Area type="monotone" dataKey="elevation" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.18} strokeWidth={2} isAnimationActive={false} />
                         </AreaChart>
                       </ResponsiveContainer>
@@ -2386,8 +2119,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     <div className={`text-[11px] font-bold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Профиль скорости</div>
                     <ResponsiveContainer width="100%" height="85%">
                       <AreaChart data={routeForecast.breakdown.speedProfile.map((p) => ({ distance: p.distanceKm, speed: Math.round(p.speedKmH) }))} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
-                        <XAxis dataKey="distance" type="number" domain={[0, 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${v} км`} interval="preserveStartEnd" />
-                        <Tooltip formatter={(v: number) => [`${v} км/ч`, 'Скорость']} labelFormatter={(v) => `${v} км`} />
+                        <XAxis dataKey="distance" type="number" domain={[0, 'dataMax']} tick={{ fontSize: 10 }} tickFormatter={(v) => `${Math.round(Number(v))} км`} interval="preserveStartEnd" />
+                        <Tooltip formatter={(v: number) => [`${v} км/ч`, 'Скорость']} labelFormatter={(v) => `${Math.round(Number(v))} км`} />
                         <Area type="stepAfter" dataKey="speed" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.18} strokeWidth={2} isAnimationActive={false} />
                       </AreaChart>
                     </ResponsiveContainer>
@@ -2426,54 +2159,406 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     </div>
                   );
                 })()}
-              </div>
-            </CollapsibleDetails>
-          </>
-        )}
-      </section>
-
-      {/* Weather — collapsed by default */}
-      <CollapsibleDetails
-        isDark={isDark}
-        label={weatherMode === 'current' ? 'Погода · сейчас' : 'Погода · вручную'}
-        icon={<CloudSun className="w-4 h-4 text-cyan-500" />}
-        open={weatherPanelOpen}
-        onToggle={() => setWeatherPanelOpen(v => !v)}
-        className="rounded-2xl"
-      >
-        <div className="space-y-3">
-          <div className={`grid grid-cols-2 rounded-xl p-1 ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
-            <button type="button" onClick={() => setWeatherMode('current')} className={`rounded-lg py-2 text-xs font-semibold ${weatherMode === 'current' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>Сейчас</button>
-            <button type="button" onClick={() => setWeatherMode('planning')} className={`rounded-lg py-2 text-xs font-semibold ${weatherMode === 'planning' ? (isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500'}`}>Планирование</button>
-          </div>
-          {weatherMode === 'planning' && (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <label className="text-xs"><span className="block text-slate-500 mb-1">🌡️ °C</span><DecimalInput value={manualTemperature} onChange={setManualTemperature} min={-40} max={50} allowNegative className="w-full" /></label>
-                <label className="text-xs"><span className="block text-slate-500 mb-1">💨 м/с</span><DecimalInput value={manualWindSpeed} onChange={setManualWindSpeed} min={0} max={40} className="w-full" /></label>
-              </div>
-              <div className="flex items-center gap-2"><Navigation className="w-4 h-4 text-slate-400" style={{transform:`rotate(${manualWindDirection}deg)`}} /><span className="text-xs text-slate-500">Ветер</span><DecimalInput value={manualWindDirection} onChange={(v) => setManualWindDirection(((Math.round(v)%360)+360)%360)} min={0} max={359} className="ml-auto w-20 text-right" /><span className="text-xs text-slate-500">°</span></div>
-              <div><div className="text-[11px] text-slate-500 mb-1.5">Осадки</div><div className="grid grid-cols-3 gap-1">{([['none','Нет'],['rain','Дождь'],['snow','Снег']] as const).map(([v,label]) => <button key={v} type="button" onClick={() => setManualPrecipitationType(v)} className={`rounded-lg py-2 text-xs font-semibold border ${manualPrecipitationType===v ? 'border-cyan-500 bg-cyan-500/10 text-cyan-500' : (isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600')}`}>{label}</button>)}</div></div>
-              {manualPrecipitationType !== 'none' && (
-                <div className="grid grid-cols-3 gap-1">
-                  {(['light','moderate','heavy'] as const).map((v) => {
-                    const label = v === 'light' ? 'Лёгкая' : v === 'moderate' ? 'Умеренная' : 'Сильная';
-                    return (
-                      <button key={v} type="button" onClick={() => setManualPrecipitationIntensity(v)}
-                        className={`rounded-lg py-2 text-xs font-semibold border ${manualPrecipitationIntensity===v ? 'border-cyan-500 bg-cyan-500/10 text-cyan-500' : (isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600')}`}>
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
             </div>
-          )}
+          </CollapsibleDetails>
         </div>
-      </CollapsibleDetails>
+      </div>
+    );
+  };
+
+  const sheetView: 'station' | 'nearby' | 'loading' | 'result' | 'idle' = selectedRouteStop
+    ? 'station'
+    : nearbyFreeStatus !== 'idle'
+      ? 'nearby'
+      : routeLoading
+        ? 'loading'
+        : routeElevation && routeForecast
+          ? 'result'
+          : 'idle';
+
+  return (
+    <div
+      id="calculator-tab-container"
+      className={`calculator-map-shell relative mx-auto h-[calc(100dvh-11.5rem)] min-h-[480px] w-full overflow-hidden rounded-3xl border landscape:h-[max(26rem,calc(100dvh-8rem))] ${
+        isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-100'
+      }`}
+    >
+      {/* Map fills the whole screen from the start */}
+      <div className="absolute inset-0">
+        <RouteMap
+          points={routeElevation?.points ?? []}
+          isDark={isDark}
+          fill
+          currentPosition={gpsCoords}
+          focusPoint={gpsCoords}
+          chargingStops={mapStops}
+          onChargingStopClick={handleMapStopClick}
+        />
       </div>
 
+      {/* Top: A → B search + hidden-parameters button */}
+      <div className="pointer-events-none absolute inset-x-2 top-2 z-30 flex flex-col gap-1.5 landscape:right-auto landscape:w-[24rem]">
+        <div className="pointer-events-auto relative z-20 flex items-start gap-2">
+          <div className={`min-w-0 flex-1 rounded-2xl border shadow-lg ${surface}`}>
+            {/* A */}
+            <div className="relative flex items-center" onKeyDown={(e) => {
+              if (e.key === 'Enter' && startMode === 'address' && startAddress.trim() && destinationAddress.trim()) requestRecalc();
+            }}>
+              {startMode === 'gps' ? (
+                <button
+                  type="button"
+                  onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartMode('address'); }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
+                  aria-label="Указать точку А вручную"
+                >
+                  <span className={`inline-flex h-2.5 w-2.5 shrink-0 rounded-full ring-2 ${
+                    gpsStatus === 'ok' ? 'bg-cyan-500 ring-cyan-500/30' : gpsStatus === 'error' ? 'bg-rose-500 ring-rose-500/30' : 'animate-pulse bg-amber-500 ring-amber-500/30'
+                  }`} />
+                  <span className="truncate text-[14px]">Моя геопозиция</span>
+                  <span className={`ml-auto shrink-0 text-[11px] ${muted}`}>изменить</span>
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartMode('gps'); setStartAddress(''); setStartPin(null); }}
+                    aria-label="Начать от моей геопозиции"
+                    className="absolute left-2 z-10 rounded-full p-1 text-cyan-500"
+                  >
+                    <LocateFixed className="h-4 w-4" />
+                  </button>
+                  <AddressAutocomplete
+                    value={startAddress}
+                    onChange={(v) => { setStartAddress(v); setStartPin(null); }}
+                    onSelect={(s) => {
+                      setStartAddress(s.displayName);
+                      setStartPin({ lat: s.lat, lon: s.lon });
+                      if (destinationAddress.trim()) requestRecalc();
+                    }}
+                    placeholder="Откуда? Город, улица, дом"
+                    isDark={isDark}
+                    inputClassName={inputCls}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { triggerHaptic('light', settings.hapticFeedback); setPickerFor('start'); }}
+                    aria-label="Выбрать точку А на карте"
+                    className={`absolute right-2 z-10 rounded-lg p-1.5 ${startPin ? 'text-amber-500' : muted}`}
+                  >
+                    <Map className="h-4 w-4" />
+                  </button>
+                </>
+              )}
+            </div>
 
+            <div className={`relative mx-3 border-t ${isDark ? 'border-slate-700/60' : 'border-slate-200'}`}>
+              {startMode === 'address' && (startAddress || destinationAddress) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic('light', settings.hapticFeedback);
+                    const from = startAddress;
+                    const fromPin = startPin;
+                    setStartAddress(destinationAddress);
+                    setDestinationAddress(from);
+                    setStartPin(destinationPin);
+                    setDestinationPin(fromPin);
+                    if (from.trim() && destinationAddress.trim()) requestRecalc();
+                  }}
+                  aria-label="Поменять местами А и Б"
+                  className={`absolute -top-3 right-8 z-10 rounded-full border p-1 active:scale-90 ${isDark ? 'border-slate-600 bg-slate-800 text-slate-300' : 'border-slate-300 bg-white text-slate-500'}`}
+                >
+                  <ArrowUpDown className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+
+            {/* B */}
+            <div className="relative flex items-center" onKeyDown={(e) => {
+              if (e.key === 'Enter' && destinationAddress.trim() && !routeLoading) { e.preventDefault(); void calculateRouteProfile(); }
+            }}>
+              <MapPin className="pointer-events-none absolute left-2.5 z-10 h-4 w-4 text-rose-400" />
+              <AddressAutocomplete
+                value={destinationAddress}
+                onChange={(v) => { setDestinationAddress(v); setDestinationPin(null); }}
+                onSelect={(s) => {
+                  setDestinationAddress(s.displayName);
+                  setDestinationPin({ lat: s.lat, lon: s.lon });
+                  // Point B chosen → the route appears right away, no separate "calculate" step.
+                  void calculateRouteProfile({ lat: s.lat, lon: s.lon, displayName: s.displayName });
+                }}
+                placeholder="Куда едем?"
+                isDark={isDark}
+                inputClassName={inputCls}
+              />
+              <button
+                type="button"
+                onClick={() => { triggerHaptic('light', settings.hapticFeedback); setPickerFor('destination'); }}
+                aria-label="Выбрать точку Б на карте"
+                className={`absolute right-2 z-10 rounded-lg p-1.5 ${destinationPin ? 'text-amber-500' : muted}`}
+              >
+                <Map className="h-4 w-4" />
+              </button>
+            </div>
+            {destinationAddress.trim() && !destinationPin && !routeLoading && (
+              <div className="px-2 pb-2">
+                <button
+                  type="button"
+                  onClick={() => { void calculateRouteProfile(); }}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-600 py-2 text-[13px] font-bold text-white hover:bg-cyan-500 active:scale-[0.98]"
+                >
+                  <Navigation className="h-4 w-4" /> Построить маршрут
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => { triggerHaptic('light', settings.hapticFeedback); setParamsOpen(true); }}
+            aria-label="Параметры поездки"
+            className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border shadow-lg active:scale-95 ${surface}`}
+          >
+            <SlidersHorizontal className="h-5 w-5" />
+            {paramsModified && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-slate-900" />}
+          </button>
+        </div>
+
+        {routeError && (
+          <div className={`pointer-events-auto rounded-xl border px-3 py-2 text-[12px] font-medium shadow-lg ${
+            isDark ? 'border-rose-800/60 bg-rose-950/90 text-rose-200' : 'border-rose-200 bg-rose-50 text-rose-700'
+          }`}>
+            {routeError}
+          </div>
+        )}
+
+        {/* GPS + weather: one thin line instead of a card */}
+        {gpsStatus === 'error' && startMode === 'gps' ? (
+          <button
+            type="button"
+            onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartMode('address'); }}
+            className={`pointer-events-auto self-start rounded-full border px-3 py-1 text-[11px] font-bold shadow ${
+              isDark ? 'border-rose-700/50 bg-rose-950/80 text-rose-300' : 'border-rose-300 bg-rose-50 text-rose-700'
+            }`}
+          >
+            GPS недоступен — указать точку А
+          </button>
+        ) : quickWeather ? (
+          <div className={`pointer-events-none relative z-10 flex items-center gap-1.5 self-start rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow ${surface}`}>
+            {weatherIcon(quickWeather.weatherCode, 'w-3.5 h-3.5')}
+            {quickWeather.temperature >= 0 ? '+' : ''}{quickWeather.temperature}°C
+            <Wind className={`h-3 w-3 ${muted}`} />
+            {quickWeather.windSpeed} км/ч
+          </div>
+        ) : null}
+      </div>
+
+      {/* Bottom: quick chips + the single sheet (result / details / stations) */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex max-h-[68%] flex-col justify-end gap-2 p-2 pb-7 landscape:right-auto landscape:top-[9rem] landscape:max-h-none landscape:w-[24rem]">
+        <div className="pointer-events-auto flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => { triggerHaptic('light', settings.hapticFeedback); setParamsOpen(true); }}
+            aria-label="Заряд на старте"
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-bold shadow-lg active:scale-95 ${surface}`}
+          >
+            <BatteryCharging className="h-3.5 w-3.5 text-cyan-500" />
+            <span className="font-mono tabular-nums">{Math.round(startSoc)}%</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { triggerHaptic('medium', settings.hapticFeedback); setSelectedRouteStop(null); void searchNearbyFreeChargers(); }}
+            disabled={nearbyFreeStatus === 'loading'}
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-bold shadow-lg active:scale-95 disabled:opacity-70 ${surface}`}
+          >
+            {nearbyFreeStatus === 'loading'
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />
+              : <PlugZap className="h-3.5 w-3.5 text-emerald-500" />}
+            Ближайшие зарядки
+          </button>
+        </div>
+
+        <motion.div
+          key={sheetView}
+          initial={{ y: 16, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          className={`pointer-events-auto min-h-0 overflow-y-auto overscroll-contain rounded-2xl border p-3.5 shadow-2xl ${surface}`}
+        >
+          {sheetView === 'station' && renderStationCard()}
+          {sheetView === 'nearby' && renderNearbyView()}
+          {sheetView === 'loading' && renderLoadingView()}
+          {sheetView === 'result' && renderResultView()}
+          {sheetView === 'idle' && renderIdleView()}
+        </motion.div>
+      </div>
+
+      {/* Hidden parameters: speed, people, climate, weather — closed by default */}
+      <AnimatePresence>
+        {paramsOpen && (
+          <>
+            <motion.div
+              key="params-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={closeParams}
+              className="absolute inset-0 z-40 bg-black/50"
+            />
+            <motion.div
+              key="params-panel"
+              role="dialog"
+              aria-label="Параметры поездки"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+              className={`absolute inset-x-0 bottom-0 z-50 mx-auto max-h-[92%] w-full max-w-md overflow-y-auto overscroll-contain rounded-t-3xl border p-4 pb-6 shadow-2xl ${
+                isDark ? 'border-slate-700 bg-slate-900 text-slate-100' : 'border-slate-200 bg-white text-slate-900'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-[15px] font-bold">Параметры поездки</h2>
+                <button type="button" onClick={closeParams} aria-label="Закрыть параметры" className={`rounded-full p-1.5 ${isDark ? 'text-slate-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-100'}`}>
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <section className="mt-4">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[13px] font-semibold">Заряд на старте</span>
+                  <span className={`font-mono text-2xl font-black tabular-nums ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>{Math.round(startSoc)}%</span>
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <button type="button" onClick={() => updateRouteStartSoc(startSoc - 5)} className={`h-9 w-11 rounded-lg border text-xs font-bold ${isDark ? 'border-slate-700 bg-slate-950 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>−5</button>
+                  <input type="range" min={1} max={100} value={startSoc} onChange={(e) => updateRouteStartSoc(Number(e.target.value))} aria-label="Заряд на старте, %" className="h-1.5 flex-1 cursor-pointer rounded-lg accent-cyan-500" />
+                  <button type="button" onClick={() => updateRouteStartSoc(startSoc + 5)} className={`h-9 w-11 rounded-lg border text-xs font-bold ${isDark ? 'border-slate-700 bg-slate-950 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>+5</button>
+                </div>
+              </section>
+
+              <section className="mt-4 grid grid-cols-2 gap-2">
+                <div className={`flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 ${isDark ? 'border-slate-800 bg-slate-950/70' : 'border-slate-200 bg-slate-50'}`}>
+                  <span className={`text-[12px] font-semibold ${muted}`}>Люди</span>
+                  <div className="flex items-center gap-1.5">
+                    <button type="button" aria-label="Меньше людей" onClick={() => { setPassengers((p) => Math.max(1, p - 1)); dirty(); }} className={`h-8 w-8 rounded-lg border text-sm font-bold ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white'}`}>−</button>
+                    <span className="min-w-4 text-center font-mono font-bold">{passengers}</span>
+                    <button type="button" aria-label="Больше людей" onClick={() => { setPassengers((p) => Math.min(5, p + 1)); dirty(); }} className={`h-8 w-8 rounded-lg border text-sm font-bold ${isDark ? 'border-slate-700 bg-slate-900' : 'border-slate-200 bg-white'}`}>+</button>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-pressed={climateOn}
+                  onClick={() => { triggerHaptic('light', settings.hapticFeedback); setClimateOn((v) => !v); dirty(); }}
+                  className={`flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-[12px] font-bold ${
+                    climateOn
+                      ? isDark ? 'border-cyan-500/60 bg-cyan-950/70 text-cyan-300' : 'border-cyan-700 bg-cyan-600 text-white'
+                      : isDark ? 'border-slate-800 bg-slate-950 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-600'
+                  }`}
+                >
+                  <Power className="h-3.5 w-3.5" />
+                  {climateOn ? 'Климат · авто' : 'Без климата'}
+                </button>
+              </section>
+
+              <section className="mt-4 space-y-2">
+                <div className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-slate-50'}`}>
+                  <span className="text-[12px] font-semibold">Средняя скорость</span>
+                  <div className="flex items-center gap-1">
+                    <DecimalInput value={plannedSpeedKmH} onChange={(v) => { setPlannedSpeedKmH(v); setPlannedMaxSpeedKmH((prev) => Math.max(prev, v)); dirty(); }} min={20} max={140} className="w-20 text-right" />
+                    <span className={`shrink-0 whitespace-nowrap text-xs ${muted}`}>км/ч</span>
+                  </div>
+                </div>
+                <div className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-slate-50'}`}>
+                  <span className="text-[12px] font-semibold">Максимальная</span>
+                  <div className="flex items-center gap-1">
+                    <DecimalInput value={plannedMaxSpeedKmH} onChange={(v) => { setPlannedMaxSpeedKmH(Math.max(plannedSpeedKmH, Math.min(150, v))); dirty(); }} min={20} max={150} className="w-20 text-right" />
+                    <span className={`shrink-0 whitespace-nowrap text-xs ${muted}`}>км/ч</span>
+                  </div>
+                </div>
+              </section>
+
+              <section className="mt-4">
+                <div className="flex items-center gap-1.5 text-[13px] font-semibold">
+                  {weatherIcon(quickWeather?.weatherCode ?? 1, 'w-4 h-4 text-cyan-500')} Погода
+                </div>
+                <div className={`mt-2 grid grid-cols-2 rounded-xl p-1 ${isDark ? 'bg-slate-950' : 'bg-slate-100'}`}>
+                  <button type="button" onClick={() => { setWeatherMode('current'); dirty(); }} className={seg(weatherMode === 'current')}>По прогнозу</button>
+                  <button type="button" onClick={() => { setWeatherMode('planning'); dirty(); }} className={seg(weatherMode === 'planning')}>Задать вручную</button>
+                </div>
+                {weatherMode === 'planning' && (
+                  <div className="mt-3 space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="text-xs"><span className={`mb-1 block ${muted}`}>🌡️ °C</span><DecimalInput value={manualTemperature} onChange={(v) => { setManualTemperature(v); dirty(); }} min={-40} max={50} allowNegative className="w-full" /></label>
+                      <label className="text-xs"><span className={`mb-1 block ${muted}`}>💨 м/с</span><DecimalInput value={manualWindSpeed} onChange={(v) => { setManualWindSpeed(v); dirty(); }} min={0} max={40} className="w-full" /></label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Navigation className={`h-4 w-4 ${muted}`} style={{ transform: `rotate(${manualWindDirection}deg)` }} />
+                      <span className={`text-xs ${muted}`}>Ветер</span>
+                      <DecimalInput value={manualWindDirection} onChange={(v) => { setManualWindDirection(((Math.round(v) % 360) + 360) % 360); dirty(); }} min={0} max={359} className="ml-auto w-20 text-right" />
+                      <span className={`text-xs ${muted}`}>°</span>
+                    </div>
+                    <div>
+                      <div className={`mb-1.5 text-[11px] ${muted}`}>Осадки</div>
+                      <div className="grid grid-cols-3 gap-1">
+                        {([['none', 'Нет'], ['rain', 'Дождь'], ['snow', 'Снег']] as const).map(([v, label]) => (
+                          <button key={v} type="button" onClick={() => { setManualPrecipitationType(v); dirty(); }} className={optBtn(manualPrecipitationType === v)}>{label}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {manualPrecipitationType !== 'none' && (
+                      <div className="grid grid-cols-3 gap-1">
+                        {(['light', 'moderate', 'heavy'] as const).map((v) => (
+                          <button key={v} type="button" onClick={() => { setManualPrecipitationIntensity(v); dirty(); }} className={optBtn(manualPrecipitationIntensity === v)}>
+                            {v === 'light' ? 'Лёгкая' : v === 'moderate' ? 'Умеренная' : 'Сильная'}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+
+              <div className="mt-5 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { triggerHaptic('light', settings.hapticFeedback); resetAll(); }}
+                  className={`flex items-center gap-1.5 rounded-xl border px-3 py-3 text-[12px] font-semibold ${isDark ? 'border-slate-700 text-slate-300' : 'border-slate-200 text-slate-600'}`}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" /> Сбросить
+                </button>
+                <button
+                  type="button"
+                  onClick={closeParams}
+                  className="flex-1 rounded-xl bg-cyan-600 py-3 text-[14px] font-bold text-white hover:bg-cyan-500 active:scale-[0.98]"
+                >
+                  {paramsDirty && routeElevation ? 'Применить и пересчитать' : 'Готово'}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <LocationPickerModal
+        isOpen={pickerFor !== null}
+        isDark={isDark}
+        title={pickerFor === 'start' ? 'Точка А — откуда' : 'Точка Б — куда'}
+        initialCenter={(pickerFor === 'start' ? destinationPin : startPin) ?? gpsCoords ?? undefined}
+        hapticFeedback={settings.hapticFeedback}
+        onClose={() => setPickerFor(null)}
+        onConfirm={({ lat, lon, displayName }) => {
+          if (pickerFor === 'start') {
+            setStartAddress(displayName);
+            setStartPin({ lat, lon });
+            if (destinationAddress.trim()) requestRecalc();
+          } else if (pickerFor === 'destination') {
+            setDestinationAddress(displayName);
+            setDestinationPin({ lat, lon });
+            void calculateRouteProfile({ lat, lon, displayName });
+          }
+          setPickerFor(null);
+        }}
+      />
     </div>
   );
 };
