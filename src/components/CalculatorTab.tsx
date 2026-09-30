@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useLayoutEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Zap,
@@ -292,6 +292,47 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [speedProfileOpen, setSpeedProfileOpen] = useState(false);
   const [weatherPanelOpen, setWeatherPanelOpen] = useState(false);
   const [routeParamsOpen, setRouteParamsOpen] = useState(false);
+  /**
+   * The map card must end ABOVE the floating bottom navigation. Yandex's mandatory logo/© sits in the
+   * map's bottom corner; if the card extends under the nav the logo ends up drawn over the menu.
+   */
+  const shellRef = useRef<HTMLDivElement>(null);
+  const [shellHeight, setShellHeight] = useState<number | null>(null);
+  /** Pixels of `main`'s bottom padding the card would push the page by — cancelled with a negative margin. */
+  const [shellBleed, setShellBleed] = useState(0);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = shellRef.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top;
+      if (!(el.offsetParent || el.getClientRects().length)) return; // tab is hidden
+      const nav = (document.querySelector('#main-bottom-nav-wrap nav') ||
+        document.querySelector('nav')) as HTMLElement | null;
+      const navTop = nav ? nav.getBoundingClientRect().top : window.innerHeight;
+      if (!Number.isFinite(navTop) || navTop <= top) return;
+      const h = Math.max(360, Math.floor(navTop - top - 10));
+      setShellHeight((prev) => (prev !== null && Math.abs(prev - h) < 2 ? prev : h));
+      const main = el.closest('main');
+      const padBottom = main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
+      const bleed = Math.max(0, Math.min(padBottom, Math.ceil(top + window.scrollY + h + padBottom - window.innerHeight)));
+      setShellBleed((prev) => (Math.abs(prev - bleed) < 2 ? prev : bleed));
+    };
+    measure();
+    const t = window.setTimeout(measure, 350); // nav slides in with a spring animation
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    window.visualViewport?.addEventListener('resize', measure);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(document.body);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+      window.visualViewport?.removeEventListener('resize', measure);
+      ro?.disconnect();
+    };
+  }, []);
+
   /** Hidden-by-default parameters sheet (SoC, people, climate, speed, weather). */
   const [paramsOpen, setParamsOpen] = useState(false);
   /** True when a parameter that needs a recalculation changed while the sheet was open. */
@@ -2179,7 +2220,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   return (
     <div
       id="calculator-tab-container"
-      className={`calculator-map-shell relative mx-auto h-[calc(100dvh-11.5rem)] min-h-[480px] w-full overflow-hidden rounded-3xl border landscape:h-[max(26rem,calc(100dvh-8rem))] ${
+      ref={shellRef}
+      style={shellHeight ? { height: shellHeight, marginBottom: shellBleed ? -shellBleed : undefined } : undefined}
+      className={`calculator-map-shell relative isolate mx-auto h-[calc(100dvh-11.5rem)] min-h-[360px] w-full overflow-hidden rounded-3xl border landscape:h-[max(26rem,calc(100dvh-8rem))] ${
         isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-100'
       }`}
     >

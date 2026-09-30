@@ -13,6 +13,78 @@ import {
 } from '../utils/yandexMaps';
 import { TESLA_ROUTE_BLUE, TESLA_ROUTE_TRAVELED, TESLA_ROUTE_GLOW } from '../utils/mapStyleTesla';
 import { HeadingFilter, headingDelta } from '../utils/headingFilter';
+import {
+  CourseSmoother,
+  NAV_TILT_DEG,
+  angleDelta,
+  azimuthForCourse,
+  azimuthSignFromNorthVector,
+  routeHeadingAhead,
+  smoothScalar,
+  tiltRad,
+  wrapPi,
+  zoomForSpeed,
+} from '../utils/navCamera';
+import { Box, LocateFixed } from 'lucide-react';
+
+const CAM3D_KEY = 'vigo_hud_cam3d_v1';
+/** Gestures the app allows on route maps. Rotate/tilt are excluded: the navigation camera owns them. */
+const ROUTE_MAP_BEHAVIORS = ['drag', 'pinchZoom', 'scrollZoom', 'dblClick'];
+
+/**
+ * Measures which way positive `azimuth` turns the map, on the real map, once.
+ * Puts two invisible markers 150 m apart (A, and B due north of A), turns the camera to +90° and
+ * reads where B lands relative to A on screen. Resolves 1 (positive = counter-clockwise),
+ * −1 (positive = clockwise) or 0 when it could not be measured (then the caller must not rotate).
+ */
+async function probeAzimuthSign(bundle: any, container: HTMLElement): Promise<1 | -1 | 0> {
+  if (bundle?.apiVersion !== 3) return 0;
+  const map = bundle.map;
+  const { YMapMarker } = bundle.ymaps3;
+  const rect = container.getBoundingClientRect();
+  if (rect.width < 120 || rect.height < 120) return 0; // hidden tab / not laid out yet
+  const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+  const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+
+  let center: [number, number] = [27.5667, 53.9];
+  try { if (map.center) center = [map.center[0], map.center[1]]; } catch { /* ignore */ }
+  const mkEl = () => {
+    const d = document.createElement('div');
+    d.style.cssText = 'width:2px;height:2px;pointer-events:none;opacity:0;';
+    return d;
+  };
+  const elA = mkEl();
+  const elB = mkEl();
+  const mA = new YMapMarker({ coordinates: center }, elA);
+  const mB = new YMapMarker({ coordinates: [center[0], center[1] + 150 / 111320] }, elB);
+  const prevOpacity = container.style.opacity;
+  const prevTransition = container.style.transition;
+  try {
+    container.style.transition = 'none';
+    container.style.opacity = '0'; // the probe turns the map by 90° — keep it off screen
+    map.addChild(mA);
+    map.addChild(mB);
+    map.update({ camera: { azimuth: Math.PI / 2, tilt: 0, duration: 0 } });
+    let result: 1 | -1 | 0 = 0;
+    for (let attempt = 0; attempt < 4 && result === 0; attempt++) {
+      await frame();
+      await frame();
+      await wait(90);
+      const a = elA.getBoundingClientRect();
+      const b = elB.getBoundingClientRect();
+      result = azimuthSignFromNorthVector(b.left - a.left, b.top - a.top);
+    }
+    return result;
+  } catch {
+    return 0;
+  } finally {
+    try { map.update({ camera: { azimuth: 0, tilt: 0, duration: 0 } }); } catch { /* ignore */ }
+    try { map.removeChild(mA); } catch { /* ignore */ }
+    try { map.removeChild(mB); } catch { /* ignore */ }
+    container.style.opacity = prevOpacity;
+    container.style.transition = prevTransition;
+  }
+}
 
 export interface RouteMapChargingStop {
   lat: number;
@@ -101,6 +173,19 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   followModeRef.current = followMode;
   const moveSpeedRef = useRef(moveSpeedKmH);
   moveSpeedRef.current = moveSpeedKmH;
+  /** Course-up camera state. */
+  const courseRef = useRef(new CourseSmoother());
+  const routeIdxHintRef = useRef<number | null>(null);
+  /** null = not measured yet, 0 = measurement failed (no rotation), ±1 = measured. */
+  const azimuthSignRef = useRef<1 | -1 | 0 | null>(null);
+  const probingRef = useRef(false);
+  const [cam3d, setCam3d] = useState(() => {
+    try { return localStorage.getItem(CAM3D_KEY) !== '0'; } catch { return true; }
+  });
+  const cam3dRef = useRef(cam3d);
+  cam3dRef.current = cam3d;
+  /** True while the user has moved the map and follow is paused (drives the "recenter" button). */
+  const [followPaused, setFollowPaused] = useState(false);
 
   const positions = useMemo(
     () => points.map((p) => [p.lat, p.lon] as [number, number]),
@@ -139,6 +224,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       zoom: 12,
       isDark,
       showZoom: true,
+      behaviors: ROUTE_MAP_BEHAVIORS,
     })
       .then((bundle) => {
         if (cancelled) {
@@ -151,6 +237,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         const el = containerRef.current;
         const pauseFollow = () => {
           userNavPauseUntilRef.current = Date.now() + 8000;
+          if (followModeRef.current) setFollowPaused(true);
         };
         if (el) {
           el.addEventListener('pointerdown', pauseFollow, { passive: true });
@@ -598,6 +685,11 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, JSON.stringify(stops), onChargingStopClick]);
 
+  // A different route was drawn: forget where on the old one we were.
+  useEffect(() => {
+    routeIdxHintRef.current = null;
+  }, [positions]);
+
   // Push latest GPS sample into follow target (does not restart the render loop).
   useEffect(() => {
     if (
@@ -609,53 +701,31 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       return;
     }
 
-    // Course from movement only (HeadingFilter). Never trust compass / noisy coords.heading
-    // at low speed — that is what made the map spin at lights.
     const speedKmH =
       moveSpeedKmH != null && Number.isFinite(moveSpeedKmH) ? Number(moveSpeedKmH) : null;
+    // Course from movement only (HeadingFilter) — never the compass or coords.heading,
+    // which is garbage at low speed.
     const filtered = headingFilterRef.current.update(
       currentPosition.lat,
       currentPosition.lon,
       speedKmH,
     );
 
+    // Preferred: direction of the road ~45 m AHEAD on the planned route. Matching only moves
+    // forward along the polyline, so an out-and-back route cannot flip the camera 180°.
     let routeHeading: number | null = null;
-    const pts = positionsRef.current;
-    if (pts.length >= 2) {
-      let bestIdx = 0;
-      let bestD = Infinity;
-      for (let i = 0; i < pts.length; i++) {
-        const dLat = pts[i][0] - currentPosition.lat;
-        const dLon = pts[i][1] - currentPosition.lon;
-        const d = dLat * dLat + dLon * dLon;
-        if (d < bestD) {
-          bestD = d;
-          bestIdx = i;
-        }
-      }
-      // Only use route tangent when near the polyline (~80 m).
-      if (bestD < 0.0000007) {
-        const a = pts[Math.min(bestIdx, pts.length - 2)];
-        const b = pts[Math.min(bestIdx + 1, pts.length - 1)];
-        if (a && b && (a[0] !== b[0] || a[1] !== b[1])) {
-          const lat1 = (a[0] * Math.PI) / 180;
-          const lat2 = (b[0] * Math.PI) / 180;
-          const dLon = ((b[1] - a[1]) * Math.PI) / 180;
-          const y = Math.sin(dLon) * Math.cos(lat2);
-          const x =
-            Math.cos(lat1) * Math.sin(lat2) -
-            Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-          routeHeading = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
-        }
-      }
+    const rh = routeHeadingAhead(
+      positionsRef.current,
+      currentPosition.lat,
+      currentPosition.lon,
+      routeIdxHintRef.current,
+    );
+    if (rh) {
+      routeIdxHintRef.current = rh.idx;
+      routeHeading = rh.heading;
     }
 
-    const heading =
-      routeHeading != null && (speedKmH == null || speedKmH >= 11)
-        ? routeHeading
-        : headingFilterRef.current.ready
-          ? filtered
-          : null;
+    const heading = routeHeading ?? (headingFilterRef.current.ready ? filtered : null);
 
     followTargetRef.current = {
       lat: currentPosition.lat,
@@ -673,11 +743,16 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     }
   }, [currentPosition?.lat, currentPosition?.lon, moveSpeedKmH, positions]);
 
-  // Continuous follow loop: smooth marker + course-up camera. Independent of GPS tick rate.
+  /** Next camera update glides (600 ms) instead of snapping — used on toggle / recenter / start. */
+  const glideNextFrameRef = useRef(true);
+
+  // Continuous follow loop: smooth marker + Tesla-style camera (course-up, tilted, speed zoom).
+  // The camera is driven here, frame by frame, with duration 0 from our own smoothed state.
   useEffect(() => {
     const bundle = bundleRef.current;
     if (!bundle || !mapReady) return;
     const map = (bundle as any).map;
+    const isV3 = bundle.apiVersion === 3;
 
     const stopLoop = () => {
       if (followLoopRafRef.current != null) {
@@ -691,6 +766,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       displayPosRef.current = null;
       displayHeadingRef.current = null;
       headingFilterRef.current.reset();
+      courseRef.current.reset();
       camAzimuthReadyRef.current = false;
       camAzimuthDegRef.current = 0;
       removeObj(bundle, currentPosMarkerRef.current);
@@ -698,7 +774,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       return;
     }
 
-        const lastMarkerPushRef = { lat: NaN, lon: NaN, deg: NaN, t: 0 };
+    const lastMarkerPushRef = { lat: NaN, lon: NaN, deg: NaN, t: 0 };
     const ensureMarker = (lat: number, lon: number, arrowDeg: number) => {
       // Skip tiny updates — fewer Yandex marker writes → cooler phone, still looks continuous.
       const dLat = lat - lastMarkerPushRef.lat;
@@ -758,28 +834,26 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
     };
 
-    // North-up only: rotating the whole map (course-up) was chaotic with GPS noise.
-    // Smooth marker position + rotate the arrow; camera azimuth stays 0.
-    const POS_TAU_S = 0.55;
+    const POS_TAU_S = 0.4;
     const HEAD_LERP = 0.14;
     const HEAD_DEADZONE = 3;
-    const FRAME_MIN_MS = 33; // ~30 fps
-    const CENTER_MS = 1200;
-    const CAM_DURATION = 900;
+    const FRAME_MIN_MS = 40; // ~25 fps camera updates
+    const GLIDE_MS = 600;
     let lastFrameTs = 0;
+    let camZoom: number | null = null;
+    let zoomOffset = 0;
+    let wasPaused = false;
+    let suppressUntil = 0;
+    let lastMargin = -1;
+    const lastSent = { lat: NaN, lon: NaN, az: NaN, tilt: NaN, zoom: NaN };
 
-    if (bundle.apiVersion === 3) {
+    if (isV3 && !followModeRef.current) {
+      // Position dot only (no follow): keep the basemap flat and north-up.
       try {
-        if (typeof map.setCamera === 'function') {
-          map.setCamera({ azimuth: 0, tilt: 0, duration: 0 });
-        } else {
-          map.update({ camera: { azimuth: 0, tilt: 0, duration: 0 } });
-        }
+        map.update({ camera: { azimuth: 0, tilt: 0, duration: 0 } });
       } catch { /* ignore */ }
-      camAzimuthReadyRef.current = false;
-      camAzimuthDegRef.current = 0;
     }
-    lastCameraHeadingDegRef.current = 0;
+    glideNextFrameRef.current = true;
 
     const tick = () => {
       const target = followTargetRef.current;
@@ -793,11 +867,11 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         followLoopRafRef.current = requestAnimationFrame(tick);
         return;
       }
-      const dt = lastFrameTs ? Math.min(0.08, (now - lastFrameTs) / 1000) : 0.032;
+      const dt = lastFrameTs ? Math.min(0.1, (now - lastFrameTs) / 1000) : 0.04;
       lastFrameTs = now;
-      // Exponential smooth toward GPS target — independent of frame rate, less snap.
-      const posAlpha = 1 - Math.exp(-dt / POS_TAU_S);
 
+      // Marker/camera position follows the GPS target exponentially (frame-rate independent).
+      const posAlpha = 1 - Math.exp(-dt / POS_TAU_S);
       let disp = displayPosRef.current;
       if (!disp) {
         disp = { lat: target.lat, lon: target.lon };
@@ -807,7 +881,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         disp.lon += (target.lon - disp.lon) * posAlpha;
       }
 
-      // Display heading for north-up arrow only. Course-up keeps arrow at 0°.
+      // Arrow heading for north-up mode.
       if (target.heading != null && Number.isFinite(target.heading)) {
         const prev = displayHeadingRef.current;
         if (prev == null) {
@@ -820,45 +894,124 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         }
       }
       const headingSmooth = displayHeadingRef.current;
+      const speed = moveSpeedRef.current;
+      const following = followModeRef.current;
 
-      // North-up: arrow shows geographic heading; map never yaws.
-      const arrowDeg = headingSmooth ?? 0;
+      // Course for the camera: smoothed, rate-limited, frozen when (almost) stationary.
+      const camCourse = following ? courseRef.current.step(target.heading, dt, speed) : null;
+
+      // One-time measurement of which way +azimuth turns THIS map (see probeAzimuthSign).
+      const want3d = following && cam3dRef.current && isV3;
+      if (
+        want3d &&
+        azimuthSignRef.current === null &&
+        !probingRef.current &&
+        containerRef.current &&
+        document.visibilityState === 'visible'
+      ) {
+        probingRef.current = true;
+        void probeAzimuthSign(bundle, containerRef.current)
+          .then((sign) => {
+            const fails = ((bundle as any)._vigoProbeFails ?? 0) + (sign === 0 ? 1 : 0);
+            (bundle as any)._vigoProbeFails = fails;
+            if (sign !== 0) azimuthSignRef.current = sign;
+            else if (fails >= 3) {
+              azimuthSignRef.current = 0; // give up: tilted but north-up, never a wrong-way spin
+              console.warn('[hud-camera] azimuth direction could not be measured; course-up disabled');
+            }
+            glideNextFrameRef.current = true;
+          })
+          .finally(() => {
+            probingRef.current = false;
+          });
+      }
+      const calibrating = probingRef.current;
+
+      const sign = azimuthSignRef.current;
+      const rotating = want3d && (sign === 1 || sign === -1) && camCourse != null;
+
+      // Chevron: relative to the screen when the map turns with the car, geographic otherwise.
+      const arrowDeg = rotating && headingSmooth != null
+        ? angleDelta(camCourse as number, headingSmooth)
+        : rotating
+          ? 0
+          : headingSmooth ?? 0;
       ensureMarker(disp.lat, disp.lon, arrowDeg);
 
-      if (followModeRef.current && Date.now() >= userNavPauseUntilRef.current) {
-        if (now - lastCenterPushMsRef.current >= CENTER_MS) {
+      if (following && !calibrating) {
+        const paused = Date.now() < userNavPauseUntilRef.current;
+        if (paused) {
+          wasPaused = true;
+        } else if (isV3) {
+          const tilt = want3d ? tiltRad(NAV_TILT_DEG) : 0;
+          const az = rotating ? azimuthForCourse(camCourse as number, sign as 1 | -1) : 0;
+
+          // Speed-dependent zoom; a pinch by the user is kept as an offset instead of being overwritten.
+          const baseZoom = zoomForSpeed(speed);
+          let mapZoom = NaN;
+          try { mapZoom = typeof map.zoom === 'number' ? map.zoom : NaN; } catch { /* ignore */ }
+          let glide = glideNextFrameRef.current;
+          if (wasPaused) {
+            wasPaused = false;
+            setFollowPaused(false);
+            if (Number.isFinite(mapZoom)) {
+              zoomOffset = Math.max(-3, Math.min(2, mapZoom - baseZoom));
+              camZoom = mapZoom;
+            }
+            glide = true;
+          }
+          if (camZoom == null) camZoom = Number.isFinite(mapZoom) ? mapZoom : baseZoom;
+          camZoom = smoothScalar(camZoom, Math.max(11, Math.min(19, baseZoom + zoomOffset)), dt, 1.4);
+
+          // Car sits in the lower third: shrink the map's top margin instead of shifting the centre.
+          const el = containerRef.current;
+          const marginTop = want3d && el ? Math.round(el.clientHeight * 0.3) : 0;
+          if (Math.abs(marginTop - lastMargin) > 10) {
+            lastMargin = marginTop;
+            try { map.update({ margin: [marginTop, 0, 0, 0] }); } catch { /* ignore */ }
+          }
+
+          if (now >= suppressUntil) {
+            const moved =
+              !Number.isFinite(lastSent.lat) ||
+              Math.hypot(
+                (disp.lat - lastSent.lat) * 111320,
+                (disp.lon - lastSent.lon) * 111320 * Math.cos((disp.lat * Math.PI) / 180),
+              ) > 0.12;
+            const turned = !Number.isFinite(lastSent.az) || Math.abs(wrapPi(az - lastSent.az)) > 0.0009;
+            const tilted = !Number.isFinite(lastSent.tilt) || Math.abs(tilt - lastSent.tilt) > 0.002;
+            const zoomed = !Number.isFinite(lastSent.zoom) || Math.abs(camZoom - lastSent.zoom) > 0.004;
+            if (glide || moved || turned || tilted || zoomed) {
+              // The map tweens azimuth numerically. If the target is on the other side of the ±π seam
+              // it would sweep the long way round (a fast full spin) — snap instead; the seam is invisible.
+              let curAz = 0;
+              try { curAz = typeof map.azimuth === 'number' ? map.azimuth : 0; } catch { /* ignore */ }
+              const duration = glide && Math.abs(az - curAz) < Math.PI * 0.75 ? GLIDE_MS : 0;
+              try {
+                map.update({
+                  location: { center: toLonLat(disp.lat, disp.lon), zoom: camZoom, duration },
+                  camera: { azimuth: az, tilt, duration },
+                });
+              } catch { /* ignore */ }
+              lastSent.lat = disp.lat;
+              lastSent.lon = disp.lon;
+              lastSent.az = az;
+              lastSent.tilt = tilt;
+              lastSent.zoom = camZoom;
+              if (glide) {
+                glideNextFrameRef.current = false;
+                if (duration > 0) suppressUntil = now + GLIDE_MS + 30;
+              }
+            }
+          }
+        } else if (now - lastCenterPushMsRef.current >= 1200) {
+          // Yandex 2.1 fallback: centre only.
           lastCenterPushMsRef.current = now;
-          if (bundle.apiVersion === 3) {
-            const coords = toLonLat(disp.lat, disp.lon);
-            let zoom = 16;
-            try {
-              if (typeof map.zoom === 'number') zoom = map.zoom;
-              else if (typeof map.location?.zoom === 'number') zoom = map.location.zoom;
-            } catch { /* ignore */ }
-            // Pan only — lock azimuth/tilt so nothing can spin the basemap.
-            try {
-              map.update({
-                location: { center: coords, zoom, duration: CAM_DURATION },
-                camera: { azimuth: 0, tilt: 0, duration: 0 },
-              });
-            } catch {
-              try {
-                map.setLocation({ center: coords, zoom, duration: CAM_DURATION });
-                if (typeof map.setCamera === 'function') {
-                  map.setCamera({ azimuth: 0, tilt: 0, duration: 0 });
-                }
-              } catch { /* ignore */ }
-            }
-            lastCameraHeadingDegRef.current = headingSmooth ?? lastCameraHeadingDegRef.current;
-          } else {
-            try {
-              const z = typeof map.getZoom === 'function' ? map.getZoom() : 16;
-              map.setCenter([disp.lat, disp.lon], z, { duration: 0 });
-            } catch {
-              try {
-                (bundle as any).setLocation?.(disp.lat, disp.lon);
-              } catch { /* ignore */ }
-            }
+          try {
+            const z = typeof map.getZoom === 'function' ? map.getZoom() : 16;
+            map.setCenter([disp.lat, disp.lon], z, { duration: 0 });
+          } catch {
+            try { (bundle as any).setLocation?.(disp.lat, disp.lon); } catch { /* ignore */ }
           }
         }
       }
@@ -871,10 +1024,30 @@ export const RouteMap: React.FC<RouteMapProps> = ({
 
     return () => {
       stopLoop();
+      // Leave the map flat and north-up for whoever uses it next.
+      if (isV3) {
+        try {
+          map.update({ camera: { azimuth: 0, tilt: 0, duration: 0 }, margin: [0, 0, 0, 0] });
+        } catch { /* map may already be destroyed */ }
+      }
     };
     // Restart loop only when map readiness / follow mode flips — not on every GPS sample.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, followMode, !!currentPosition]);
+
+  const toggleCam3d = () => {
+    setCam3d((v) => {
+      const next = !v;
+      try { localStorage.setItem(CAM3D_KEY, next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+    glideNextFrameRef.current = true;
+  };
+  const recenter = () => {
+    userNavPauseUntilRef.current = 0;
+    glideNextFrameRef.current = true;
+    setFollowPaused(false);
+  };
 
   return (
     <div
@@ -891,6 +1064,37 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         {loadError && (
           <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-rose-300 bg-slate-950/85 whitespace-pre-wrap">
             {loadError}
+          </div>
+        )}
+        {fill && followMode && (
+          <div className="absolute left-3 top-1/2 z-[120] flex -translate-y-1/2 flex-col gap-2">
+            <button
+              type="button"
+              onClick={toggleCam3d}
+              aria-pressed={cam3d}
+              aria-label={cam3d ? 'Плоская карта, север сверху' : '3D-вид по ходу движения'}
+              className={`flex h-10 w-10 items-center justify-center rounded-full border shadow-lg active:scale-95 ${
+                cam3d
+                  ? 'border-blue-400/60 bg-blue-600/90 text-white'
+                  : isDark
+                    ? 'border-slate-600 bg-slate-900/85 text-slate-300'
+                    : 'border-slate-300 bg-white/90 text-slate-600'
+              }`}
+            >
+              <Box className="h-5 w-5" />
+            </button>
+            {followPaused && (
+              <button
+                type="button"
+                onClick={recenter}
+                aria-label="Вернуть карту к автомобилю"
+                className={`flex h-10 w-10 items-center justify-center rounded-full border shadow-lg active:scale-95 ${
+                  isDark ? 'border-slate-600 bg-slate-900/90 text-blue-300' : 'border-slate-300 bg-white/95 text-blue-600'
+                }`}
+              >
+                <LocateFixed className="h-5 w-5" />
+              </button>
+            )}
           </div>
         )}
         {/* Hidden in fullscreen HUD (fill) — overlaps bottom trip telemetry */}
