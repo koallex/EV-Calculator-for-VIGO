@@ -203,6 +203,9 @@ input[type=range]::-moz-range-thumb {
 
 .route-map-shell {
   border-radius: 0;
+  /* Yandex renders its logo/© with its own z-index. Contain it, otherwise it can paint over
+     the floating bottom navigation (z-50) that overlaps the map card. */
+  isolation: isolate;
 }
 
 /* Dark theme for Yandex Maps 2.1 — invert ONLY basemap tiles.
@@ -808,4 +811,15 @@ html.native-app-lite *::after {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   filter: none !important;
+}
+
+/* Calculator search card: inputs sit inside a rounded card, so use an inset ring instead of the
+   global rectangular outline (unlayered, so Tailwind's outline-none cannot override it). */
+.calculator-map-shell {
+  isolation: isolate;
+}
+.calculator-map-shell input:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(6, 182, 212, 0.45);
+  border-radius: 0.75rem;
 }
