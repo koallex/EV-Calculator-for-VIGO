@@ -1,0 +1,819 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+}
+
+/* Theme-specific custom styles */
+html.light {
+  color-scheme: light;
+}
+
+html.light body {
+  background-color: #f0f6fb;
+  color: #0b1220;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+html.dark body {
+  background-color: #0b1220;
+  color: #e8eef7;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Range input styling */
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: #334155;
+  border-radius: 9999px;
+}
+
+.light input[type=range] {
+  background: #cbd5e1;
+}
+
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #22d3ee;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.4);
+  border: 2px solid #ffffff;
+}
+
+input[type=range]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #22d3ee;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.4);
+  border: 2px solid #ffffff;
+}
+
+
+/* Compact interactive route map */
+.route-map {
+  position: relative;
+  height: 380px;
+}
+.route-map--compact {
+  height: 160px;
+}
+@media (min-width: 480px) {
+  .route-map--compact {
+    height: 200px;
+  }
+}
+.route-map-shell--fill,
+.route-map--fill {
+  height: 100%;
+  width: 100%;
+}
+.route-map-yandex {
+  height: 100%;
+  width: 100%;
+  background: #e2e8f0;
+}
+/* Yandex's logo, copyright and "Открыть в Яндекс Картах" control render bottom-left by
+   default and must stay visible and unobstructed per the free-tier license — so our legend
+   lives top-left instead of bottom-left (where it sat for the old Leaflet map). */
+.route-map-legend {
+  position: absolute;
+  z-index: 100;
+  left: 10px;
+  top: 10px;
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9999px;
+  background: rgba(15,23,42,.82);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+}
+.route-map-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.route-dot { width: 7px; height: 7px; border-radius: 9999px; display: inline-block; }
+.route-dot-start { background: #22d3ee; }
+.route-dot-end { background: #ef4444; }
+.route-map-charge-pin {
+  width: 28px; height: 28px; border-radius: 9999px;
+  background: #f59e0b; border: 3px solid #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; line-height: 1;
+}
+
+/* Minimal mobile-first information hierarchy. The functionality stays intact; only the visual
+   order and density are changed. Calculator: inputs first, then route/result, then secondary
+   conditions. HUD: destination/range first, then live speed and secondary telemetry. */
+.calculator-minimal-shell > .calculator-status { order: 0; }
+.calculator-minimal-shell > .calculator-start-soc { order: 1; }
+.calculator-minimal-shell > .calculator-passengers { order: 2; }
+.calculator-minimal-shell > .calculator-route { order: 3; }
+.calculator-minimal-shell > .calculator-climate { order: 4; }
+.calculator-minimal-shell > .calculator-weather { order: 5; }
+.calculator-minimal-shell > div:nth-of-type(1) { order: 6; }
+.calculator-minimal-shell > div:nth-of-type(2) { order: 7; }
+.calculator-minimal-shell > div:nth-of-type(3) { order: 8; }
+.calculator-minimal-shell > section:not(.calculator-status):not(.calculator-start-soc):not(.calculator-passengers):not(.calculator-route):not(.calculator-climate):not(.calculator-weather) { order: 9; }
+
+.calculator-minimal-shell > section {
+  margin: 0;
+  box-shadow: none;
+}
+.calculator-minimal-shell > section.calculator-status {
+  background: transparent;
+  border-color: transparent;
+}
+@media (max-width: 640px) {
+  .calculator-minimal-shell { gap: .5rem; }
+  .calculator-minimal-shell > section { border-radius: 1rem; }
+  .calculator-minimal-shell .text-5xl { font-size: 2.75rem; line-height: 1; }
+  .calculator-minimal-shell .route-map { height: 360px; }
+}
+
+/* HUD hierarchy */
+.hud-minimal-shell > .hud-topbar { order: 0; }
+.hud-minimal-shell > .hud-range-block { order: 1; }
+.hud-minimal-shell > .hud-speed-block { order: 2; }
+.hud-minimal-shell > .hud-wind-block { order: 3; }
+.hud-minimal-shell > .hud-passengers-block { order: 4; }
+.hud-minimal-shell > .hud-factors-block { order: 5; }
+.hud-minimal-shell > .hud-trip-stats { order: 6; }
+
+.hud-minimal-shell { justify-content: flex-start !important; }
+.hud-range-block { margin-top: .15rem; }
+.hud-range-block .uppercase { letter-spacing: .08em; }
+.hud-factors-block { opacity: .9; }
+@media (max-width: 640px) {
+  .hud-minimal-shell { min-height: calc(100dvh - 1rem); padding: .75rem; }
+  .hud-minimal-shell .hud-range-block { padding: .65rem; }
+  .hud-minimal-shell .hud-range-block > div:first-child { margin-bottom: .35rem; }
+  .hud-minimal-shell .hud-range-block .text-4xl { font-size: 2.15rem; line-height: 1; }
+  .hud-minimal-shell .hud-speed-block { padding-top: .25rem; padding-bottom: .25rem; }
+  .hud-minimal-shell .hud-speed-block .text-8xl { font-size: 5.25rem; line-height: .9; }
+  .hud-minimal-shell .hud-factors-block { padding: .65rem; }
+}
+.calculator-minimal-shell > .calculator-battery { order: 6; }
+.calculator-minimal-shell > .calculator-metrics { order: 7; }
+.calculator-minimal-shell > .calculator-controls { order: 8; }
+.calculator-minimal-shell > div:not(.calculator-battery):not(.calculator-metrics):not(.calculator-controls) { order: 9; }
+
+/* Subtle interactive press feedback for cards / chips that don't use motion */
+.pressable {
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.pressable:active {
+  transform: scale(0.985);
+}
+
+/* Soft focus ring for keyboard users */
+:focus-visible {
+  outline: 2px solid rgb(16 185 129 / 0.55);
+  outline-offset: 2px;
+}
+
+.route-map-shell {
+  border-radius: 0;
+}
+
+/* Dark theme for Yandex Maps 2.1 — invert ONLY basemap tiles.
+   Do NOT invert controls/copyrights: that made "Открыть в Яндекс.Картах" stay pure white. */
+.vigo-ymaps-dark .ymaps-2-1-79-ground-pane,
+.vigo-ymaps-dark .ymaps-2-1-79-areas-pane,
+.vigo-ymaps-dark [class*="ymaps-"][class*="-ground-pane"],
+.vigo-ymaps-dark [class*="ymaps-"][class*="-areas-pane"] {
+  filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.92);
+}
+.vigo-ymaps-dark .ymaps-2-1-79-controls-pane,
+.vigo-ymaps-dark [class*="ymaps-"][class*="-controls-pane"],
+.vigo-ymaps-dark .ymaps-2-1-79-copyrights-pane,
+.vigo-ymaps-dark [class*="ymaps-"][class*="-copyrights-pane"] {
+  filter: none !important;
+}
+
+/*
+ * Hide promo "Открыть / Показать в Яндекс.Картах".
+ * Class hashes change between API builds — match by partial class + links.
+ * JS scrubYandexOpenMapsPromo() is the hard guarantee; CSS is the first line.
+ */
+[class*="gotoymaps"],
+[class*="goto-ymaps"],
+[class*="GotoYmaps"],
+[class*="map-copyrights-promo"],
+[class*="copyrights-promo"],
+[class*="gototech"],
+.ymaps-2-1-79-map-copyrights-promo,
+[class*="ymaps-"][class*="-map-copyrights-promo"],
+[class*="ymaps-"][class*="-gotoymaps"],
+.route-map-shell a[href*="maps.yandex"],
+.route-map-shell a[href*="yandex.ru/maps"],
+.route-map-shell a[href*="yandex.com/maps"],
+.route-map-yandex a[href*="maps.yandex"],
+.route-map-yandex a[href*="yandex.ru/maps"],
+.route-map-yandex a[href*="yandex.com/maps"],
+.route-map-shell [class*="copyrights-pane"] a,
+.route-map-yandex [class*="copyrights-pane"] a {
+  display: none !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  height: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  left: -9999px !important;
+}
+
+/* Remaining required © / logo — muted, no white frame */
+.route-map-shell [class*="copyrights"],
+.route-map-shell [class*="copyright"],
+.route-map-yandex [class*="copyrights"],
+.route-map-yandex [class*="copyright"] {
+  color: #64748b !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+  -webkit-text-fill-color: #64748b !important;
+  opacity: 0.85 !important;
+}
+.route-map-shell [class*="copyrights"] a,
+.route-map-shell [class*="copyright"] a {
+  color: #64748b !important;
+  -webkit-text-fill-color: #64748b !important;
+  background: transparent !important;
+  border: none !important;
+}
+.route-map-shell.vigo-ymaps-dark [class*="copyrights"],
+.route-map-shell.vigo-ymaps-dark [class*="copyright"],
+.vigo-ymaps-dark [class*="copyrights"],
+.vigo-ymaps-dark [class*="copyright"] {
+  color: #94a3b8 !important;
+  -webkit-text-fill-color: #94a3b8 !important;
+  background: transparent !important;
+  border: none !important;
+  opacity: 0.8 !important;
+}
+.route-map-shell.vigo-ymaps-dark [class*="copyrights"] a,
+.route-map-shell.vigo-ymaps-dark [class*="copyright"] a,
+.vigo-ymaps-dark [class*="copyrights"] a,
+.vigo-ymaps-dark [class*="copyright"] a {
+  color: #94a3b8 !important;
+  -webkit-text-fill-color: #94a3b8 !important;
+}
+.route-map-shell img[class*="logo"],
+.route-map-yandex img[class*="logo"] {
+  opacity: 0.7;
+  filter: none !important;
+}
+
+/* User geolocation pin on EZS map — distinct from operator station dots */
+.vigo-user-pulse-ring {
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.45);
+  animation: vigo-user-pulse 1.6s ease-out infinite;
+}
+.vigo-user-dot {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #38bdf8;
+  border: 3px solid #ffffff;
+  box-shadow: 0 0 0 2px #0284c7, 0 2px 10px rgba(0, 0, 0, 0.5);
+}
+@keyframes vigo-user-pulse {
+  0% { transform: scale(0.55); opacity: 0.75; }
+  70% { transform: scale(1.4); opacity: 0; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+
+
+
+/*
+ * ========== Adaptive breakpoints (VIGO) ==========
+ * Width tokens (match Tailwind-ish scale used in components):
+ *   xs  ≥ 360px   narrow phones
+ *   sm  ≥ 480px   large phones
+ *   md  ≥ 640px   phablet / small tablet
+ *   lg  ≥ 900px   tablet / landscape phone wide
+ *   xl  ≥ 1100px  desktop / large tablet
+ *
+ * Height / orientation:
+ *   landscape              any landscape
+ *   landscape-short        landscape && height ≤ 430px
+ *   landscape-comfortable  landscape && height ≥ 500px
+ *
+ * CSS variables drive density; media queries only override tokens.
+ */
+:root {
+  --bp-xs: 360px;
+  --bp-sm: 480px;
+  --bp-md: 640px;
+  --bp-lg: 900px;
+  --bp-xl: 1100px;
+
+  --layout-content-max: 36rem;
+  --layout-content-pad-x: 0.75rem;
+  --layout-nav-clearance: 5.5rem;
+  --ui-font-size: 16px;
+  --ui-card-pad: 1rem;
+  --ui-stack-gap: 0.75rem;
+  --ui-control-min-h: 2.5rem;
+  --ui-btn-py: 0.55rem;
+  --ui-nav-scale: 1;
+}
+
+html {
+  font-size: var(--ui-font-size);
+}
+
+/* ---- Portrait width steps ---- */
+@media (max-width: 359.98px) {
+  :root {
+    --ui-font-size: 14.5px;
+    --layout-content-max: 100%;
+    --ui-card-pad: 0.7rem;
+    --ui-stack-gap: 0.55rem;
+    --ui-control-min-h: 2.25rem;
+  }
+}
+
+@media (min-width: 480px) {
+  :root {
+    --layout-content-max: 28rem;
+    --layout-content-pad-x: 1rem;
+  }
+}
+
+@media (min-width: 640px) {
+  :root {
+    --layout-content-max: 36rem;
+    --ui-font-size: 16px;
+  }
+}
+
+@media (min-width: 900px) {
+  :root {
+    --layout-content-max: 42rem;
+    --layout-content-pad-x: 1.25rem;
+  }
+}
+
+@media (min-width: 1100px) {
+  :root {
+    --layout-content-max: 48rem;
+  }
+}
+
+/* ---- Landscape (base) ---- */
+@media (orientation: landscape) {
+  :root {
+    --ui-font-size: 15px;
+    --layout-content-max: min(40rem, 92vw);
+    --layout-nav-clearance: 4.25rem;
+    --ui-card-pad: 0.65rem;
+    --ui-stack-gap: 0.55rem;
+    --ui-control-min-h: 2.15rem;
+    --ui-btn-py: 0.4rem;
+  }
+
+  #calculator-tab-container,
+  #history-tab-container,
+  #settings-tab-container {
+    max-width: var(--layout-content-max);
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-bottom: var(--layout-nav-clearance);
+    padding-left: var(--layout-content-pad-x);
+    padding-right: var(--layout-content-pad-x);
+    box-sizing: border-box;
+  }
+
+  #calculator-tab-container.calculator-minimal-shell {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: var(--ui-stack-gap);
+    align-items: stretch;
+  }
+
+  #calculator-tab-container > div,
+  #calculator-tab-container > section,
+  #calculator-tab-container .grid.grid-cols-2 {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  #calculator-tab-container section,
+  #calculator-tab-container > div.rounded-2xl,
+  #settings-tab-container > div.rounded-2xl,
+  #settings-tab-container > form > div.rounded-2xl,
+  #history-tab-container .rounded-2xl {
+    padding: var(--ui-card-pad) calc(var(--ui-card-pad) + 0.1rem) !important;
+  }
+
+  /* Only guarantee a touch-friendly minimum height; each button keeps its own padding
+     (forcing padding with !important used to flatten primary buttons). */
+  #calculator-tab-container button,
+  #settings-tab-container button,
+  #history-tab-container button {
+    min-height: var(--ui-control-min-h);
+  }
+  /* Big action buttons (py-3 / py-3.5) get a moderate, fixed padding in landscape */
+  #calculator-tab-container button[class*="py-3"],
+  #settings-tab-container button[class*="py-3"],
+  #history-tab-container button[class*="py-3"] {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+
+  /*
+   * Don't stretch primary action buttons edge-to-edge in landscape.
+   * Keep full width in portrait. Skip list rows (text-left / justify-between).
+   */
+  button.w-full.rounded-xl:not(.text-left):not([class*="justify-between"]),
+  button.w-full.rounded-2xl:not(.text-left):not([class*="justify-between"]),
+  button.w-full.rounded-lg:not(.text-left):not([class*="justify-between"]),
+  a.block.w-full.rounded-xl,
+  a.block.w-full.rounded-lg,
+  a.w-full.rounded-xl.text-center {
+    width: fit-content !important;
+    min-width: min(14rem, 100%);
+    max-width: min(20rem, 100%);
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1.5rem !important;
+    padding-right: 1.5rem !important;
+  }
+
+  #calculator-tab-container input,
+  #settings-tab-container input,
+  #history-tab-container input,
+  #calculator-tab-container select,
+  #settings-tab-container select {
+    min-height: var(--ui-control-min-h);
+    font-size: 0.875rem !important;
+  }
+
+  #settings-tab-container,
+  #settings-tab-container > form {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: var(--ui-stack-gap);
+  }
+  #settings-tab-container > form > * {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  #settings-tab-container .grid.grid-cols-2,
+  #settings-tab-container .grid.grid-cols-1.sm\:grid-cols-2 {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem;
+  }
+
+  #history-tab-container {
+    gap: var(--ui-stack-gap);
+  }
+
+  #charging-tab-container {
+    max-width: none !important;
+    height: 100%;
+    min-height: 100%;
+    padding-bottom: 0 !important;
+  }
+  #charging-tab-container > .flex.p-1 {
+    max-width: 18rem;
+    margin: 0.4rem auto 0;
+  }
+
+  #main-bottom-nav {
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+  }
+  #main-bottom-nav button {
+    min-height: 44px;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+  }
+  #main-bottom-nav button span {
+    font-size: 10px !important;
+    margin-top: 2px !important;
+  }
+
+  .route-map-shell,
+  [data-tab-panel='charging'] {
+    --vigo-nav-clearance: var(--layout-nav-clearance);
+  }
+
+  #hud-tab-container {
+    max-width: 100%;
+  }
+  #hud-tab-container .pb-12,
+  #hud-tab-container .pb-14 {
+    padding-bottom: var(--layout-nav-clearance) !important;
+  }
+}
+
+/* landscape-short: phone on side, very little vertical room */
+@media (orientation: landscape) and (max-height: 430px) {
+  :root {
+    --ui-font-size: 14.5px;
+    --ui-card-pad: 0.5rem;
+    --ui-stack-gap: 0.4rem;
+    --ui-control-min-h: 2.4rem;
+    --ui-btn-py: 0.4rem;
+    --layout-nav-clearance: 4.5rem;
+    --ui-nav-scale: 1;
+  }
+}
+
+/* landscape-comfortable: enough height to breathe */
+@media (orientation: landscape) and (min-height: 500px) {
+  :root {
+    --ui-font-size: 15px;
+    --ui-card-pad: 0.75rem;
+    --ui-stack-gap: 0.65rem;
+    --ui-control-min-h: 2.25rem;
+  }
+}
+
+/* landscape + lg width */
+@media (orientation: landscape) and (min-width: 900px) {
+  :root {
+    --layout-content-max: min(44rem, 70vw);
+    --ui-font-size: 15.5px;
+    --layout-content-pad-x: 1rem;
+  }
+}
+
+/* landscape + xl */
+@media (orientation: landscape) and (min-width: 1100px) {
+  :root {
+    --layout-content-max: min(48rem, 62vw);
+    --ui-font-size: 16px;
+  }
+}
+
+/* Utility helpers (optional use in components) */
+.vigo-content-column {
+  max-width: var(--layout-content-max);
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: var(--layout-content-pad-x);
+  box-sizing: border-box;
+}
+.vigo-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ui-stack-gap);
+}
+
+/*
+ * ========== Landscape two-column screens ==========
+ * Target: iPhone 16 Pro landscape (874x402 standalone, ~874x330 in Safari) and any
+ * landscape viewport >= 640px wide. Portrait layout is not touched at all.
+ *  - side paddings respect the notch / Dynamic Island (safe-area-inset-left/right)
+ *  - Calculator: left column = inputs (SoC, people, climate, mode), right = route / manual form
+ *  - History / Settings / Charging cost: two columns
+ *  - bottom nav becomes a slim one-row pill so it does not eat ~70px of height
+ */
+@media (orientation: landscape) and (min-width: 640px) {
+  #app-main:not([data-tab="hud"]):not([data-tab="charging"]) {
+    padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+    padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+    padding-bottom: calc(var(--layout-nav-clearance) + 0.25rem);
+  }
+  [data-tab-panel='calculator'],
+  [data-tab-panel='history'],
+  [data-tab-panel='settings'] {
+    max-width: min(64rem, 100%);
+  }
+
+  /* ---- Calculator ---- */
+  #calculator-tab-container.calculator-minimal-shell {
+    display: grid !important;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    grid-template-rows: repeat(5, auto) 1fr;
+    column-gap: 0.75rem;
+    row-gap: 0.4rem;
+    align-items: start;
+    max-width: 100%;
+    padding: 0 0 0.5rem 0;
+  }
+  .calculator-minimal-shell > .calculator-status { grid-column: 1; grid-row: 1; }
+  .calculator-minimal-shell > .calculator-conditions { grid-column: 1; grid-row: 2; }
+  .calculator-minimal-shell > .calculator-reset { grid-column: 1; grid-row: 3; margin: 0 !important; }
+  .calculator-minimal-shell > .calculator-mode-switch { grid-column: 1; grid-row: 4; }
+  .calculator-minimal-shell > .calculator-mode-hint { grid-column: 1; grid-row: 5; margin: 0 !important; }
+  .calculator-minimal-shell > .calculator-mode-content { grid-column: 2; grid-row: 1 / 7; min-width: 0; }
+  .calculator-minimal-shell > .calculator-guide { grid-column: 1 / -1; grid-row: 7; }
+
+  /* Primary buttons fill their column (global landscape rule shrinks them to fit-content) */
+  #calculator-tab-container .calculator-mode-content button.w-full {
+    width: 100% !important;
+    min-width: 0;
+    max-width: none;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  /* Manual mode: inputs first (they are what you type), result right below */
+  .calculator-mode-content > * { order: 3; }
+  .calculator-mode-content > .calculator-manual-inputs { order: 1; }
+  .calculator-mode-content > .calculator-hero { order: 2; }
+
+  /* ---- History ---- */
+  #history-tab-container {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 0.75rem;
+    row-gap: 0.5rem;
+    align-items: start;
+    max-width: 100%;
+    padding: 0 0 0.5rem 0;
+  }
+  #history-tab-container > .history-actions,
+  #history-tab-container > .history-list { grid-column: 1 / -1; }
+  #history-tab-container > * { margin: 0 !important; min-width: 0; }
+  .history-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.5rem 0.75rem;
+    align-items: start;
+  }
+  .history-list > * { margin: 0 !important; min-width: 0; }
+  .history-list > *:only-child { grid-column: 1 / -1; }
+
+  /* ---- Settings ---- */
+  #settings-tab-container {
+    max-width: 100%;
+    padding: 0 0 0.5rem 0;
+  }
+  #settings-tab-container > form {
+    display: block !important;
+    column-count: 2;
+    column-gap: 0.75rem;
+  }
+  #settings-tab-container > form > * {
+    break-inside: avoid;
+    margin-bottom: 0.5rem;
+  }
+
+  /* ---- Charging: cost calculator view (map view is full-bleed and handled separately) ---- */
+  #charging-tab-container[data-view="calc"] {
+    max-width: min(64rem, 100%) !important;
+    height: auto;
+    min-height: 0;
+    column-count: 2;
+    column-gap: 0.75rem;
+    padding: max(0.5rem, env(safe-area-inset-top, 0px))
+             max(0.75rem, env(safe-area-inset-right, 0px))
+             calc(var(--layout-nav-clearance) + 0.25rem)
+             max(0.75rem, env(safe-area-inset-left, 0px)) !important;
+    box-sizing: border-box;
+  }
+  #charging-tab-container[data-view="calc"] > * {
+    break-inside: avoid;
+    margin-bottom: 0.5rem;
+  }
+  #charging-tab-container[data-view="calc"] > :first-child {
+    column-span: all;
+    max-width: 18rem;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  /* ---- HUD / map overlays: keep clear of the notch and the rounded corners ---- */
+  #hud-tab-container > .absolute.left-2 { left: max(0.5rem, env(safe-area-inset-left, 0px)) !important; }
+  #hud-tab-container > .absolute.right-2 { right: max(0.5rem, env(safe-area-inset-right, 0px)) !important; }
+  #hud-tab-container > .absolute.inset-x-0 {
+    padding-left: max(0.625rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.625rem, env(safe-area-inset-right, 0px));
+  }
+}
+
+/* ---- Compact landscape: phones on their side (height <= 520px) ---- */
+@media (orientation: landscape) and (min-width: 640px) and (max-height: 520px) {
+  :root { --layout-nav-clearance: 68px; --ui-font-size: 14.5px; }
+
+  .calculator-minimal-shell > .calculator-guide,
+  .calculator-minimal-shell > .calculator-mode-hint { display: none; }
+
+  /* Calculator: tighten cards, no vertical rhythm from portrait */
+  #calculator-tab-container .calculator-status { padding: 0.35rem 0.6rem !important; }
+  #calculator-tab-container .calculator-conditions,
+  #calculator-tab-container .calculator-route {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.5rem 0.6rem !important;
+  }
+  #calculator-tab-container .calculator-conditions > *,
+  #calculator-tab-container .calculator-route > * { margin-block: 0 !important; }
+  #calculator-tab-container .calculator-mode-switch { padding: 0.2rem !important; }
+  #calculator-tab-container .calculator-mode-switch button { min-height: 2.4rem; font-size: 0.8125rem; }
+  #calculator-tab-container .calculator-mode-content { gap: 0.4rem; }
+  #calculator-tab-container .calculator-route input { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
+  #calculator-tab-container .calculator-manual-inputs { padding: 0.5rem 0.6rem !important; }
+  #calculator-tab-container .calculator-manual-inputs > * + * { margin-top: 0.4rem !important; }
+  #calculator-tab-container .calculator-hero { padding: 0.5rem !important; }
+  #calculator-tab-container .calculator-hero .text-5xl { font-size: 2.25rem; line-height: 1.05; }
+  #calculator-tab-container .calculator-hero > * { margin-top: 0.25rem !important; }
+
+  /* Bottom nav: same icon-over-label pill as portrait, just narrower and never scaled/squeezed */
+  #main-bottom-nav-wrap { padding-bottom: max(6px, calc(env(safe-area-inset-bottom, 0px) * 0.4)) !important; }
+  #main-bottom-nav {
+    width: min(30rem, calc(100vw - 2rem)) !important;
+    padding: 4px !important;
+  }
+  #main-bottom-nav button {
+    min-height: 44px;
+    padding: 4px 2px !important;
+  }
+  #main-bottom-nav button span { font-size: 10px !important; margin-top: 2px !important; }
+  #main-bottom-nav button svg { width: 20px; height: 20px; }
+}
+
+/* ========== Capacitor / APK only (old Android WebView safe) ========== */
+html.native-app,
+html.native-app body {
+  background-color: #0b1220 !important;
+  color: #e8eef7 !important;
+}
+
+html.native-app #main-header {
+  padding-top: 28px !important;
+  background-color: #0b1220 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  opacity: 1 !important;
+}
+
+html.native-app #main-bottom-nav,
+html.native-app nav#main-bottom-nav {
+  padding-bottom: 20px !important;
+  background-color: #0b1220 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  opacity: 1 !important;
+}
+
+html.native-app main {
+  padding-bottom: 6rem !important;
+  min-height: 50vh;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Kill blur/filter effects that paint black on old Mali/Adreno GPUs */
+html.native-app-lite *,
+html.native-app-lite *::before,
+html.native-app-lite *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
+}
+
+/* Calculator search card: inputs sit inside a rounded card, so use an inset ring instead of the
+   global rectangular outline (unlayered, so Tailwind's outline-none cannot override it). */
+.calculator-map-shell input:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px rgba(6, 182, 212, 0.45);
+  border-radius: 0.75rem;
+}
