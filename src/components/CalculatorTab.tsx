@@ -29,6 +29,7 @@ import {
   History,
   Route,
   BatteryCharging,
+  ChevronUp,
 } from 'lucide-react';
 import { UserSettings, RoadType, TripSession } from '../types';
 import { BatteryVisual } from './BatteryVisual';
@@ -44,6 +45,17 @@ import { findNearbyFreeCcsChargers, FreeChargerResult } from '../services/nearby
 import { resolveEffectiveConnectors } from '../data/vehicleProfiles';
 import { estimateChargingSession, findOptimalChargeTargetSoc, DEFAULT_UNKNOWN_STATION_POWER_KW, ChargeConnector } from '../utils/chargingPlanner';
 import { RouteMap } from './RouteMap';
+import {
+  computeMapInsets,
+  insetsKey,
+  resolveHandleGesture,
+  SWIPE_THRESHOLD_PX,
+  sheetMaxHeightPx,
+  shortPlaceLabel,
+  ZERO_INSETS,
+  type MapInsets,
+  type SheetMode,
+} from '../utils/calculatorSheet';
 import { LocationPickerModal } from './LocationPickerModal';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine, ReferenceDot } from 'recharts';
 import { CollapsibleDetails, SecondaryStatRow, ChipRow } from './ui/CollapsibleDetails';
@@ -355,8 +367,65 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     try { return localStorage.getItem('ev_guide_tip_dismissed') !== '1'; } catch { return true; }
   });
   /** Detailed route info (map, elevation, breakdown) — collapsed after calc */
-  const [routeDetailsOpen, setRouteDetailsOpen] = useState(false);
+  /** Положение нижней панели результата: свёрнута / наполовину / раскрыта («Подробности»). */
+  const [sheetMode, setSheetMode] = useState<SheetMode>('peek');
+  /** После расчёта верхняя карточка сворачивается в одну строку; тап по ней возвращает поля. */
+  const [searchEditing, setSearchEditing] = useState(false);
+  /** Сколько карты закрыто карточками — по этим отступам маршрут вписывается в видимое окно. */
+  const [mapInsets, setMapInsets] = useState<MapInsets>(ZERO_INSETS);
+  const topPanelRef = useRef<HTMLDivElement>(null);
+  const bottomPanelRef = useRef<HTMLDivElement>(null);
+  const insetsFrozenRef = useRef(false);
+  const hasRoute = !!(routeElevation && routeForecast);
+  /** Подписи А → Б для свёрнутой верхней карточки: снимаются в момент готовности маршрута, чтобы не расходиться с ним. */
+  const [routeLabels, setRouteLabels] = useState({ start: '', dest: '' });
+  const handleDragRef = useRef<{ y: number } | null>(null);
   const [manualDetailsOpen, setManualDetailsOpen] = useState(false);
+
+  // Пришёл новый результат расчёта: панель — в свёрнутое положение, верхняя карточка — в одну строку.
+  useEffect(() => {
+    if (routeElevation) {
+      setSheetMode('peek');
+      setSearchEditing(false);
+      setRouteLabels({
+        start: startMode === 'gps' ? 'Моя геопозиция' : shortPlaceLabel(startAddress, 'Точка А'),
+        dest: shortPlaceLabel(destinationAddress, 'Точка Б'),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeElevation]);
+
+  // Замер занятого карточками места. Пока открыта карточка станции / список зарядок / идёт расчёт,
+  // отступы не обновляем: иначе карта «прыгала» бы при каждом тапе по ⚡.
+  useLayoutEffect(() => {
+    const measure = () => {
+      const shell = shellRef.current;
+      if (!shell || insetsFrozenRef.current) return;
+      if (!(shell.offsetParent || shell.getClientRects().length)) return; // вкладка скрыта
+      const sr = shell.getBoundingClientRect();
+      if (sr.width < 50 || sr.height < 50) return;
+      const landscape = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches;
+      const next = computeMapInsets({
+        shell: sr,
+        topPanel: topPanelRef.current ? topPanelRef.current.getBoundingClientRect() : null,
+        bottomPanel: bottomPanelRef.current ? bottomPanelRef.current.getBoundingClientRect() : null,
+        landscape,
+      });
+      setMapInsets((prev) => (insetsKey(prev, 8) === insetsKey(next, 8) ? prev : next));
+    };
+    measure();
+    const t = window.setTimeout(measure, 350);
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    [shellRef.current, topPanelRef.current, bottomPanelRef.current].forEach((el) => { if (el) ro?.observe(el); });
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+      ro?.disconnect();
+    };
+  }, []);
   /** Brief highlight pulse on the result card after a successful route calc */
   const [resultHighlight, setResultHighlight] = useState(false);
   /** Reserve SoC kept as safety buffer when interpreting arrival forecast.
@@ -1228,7 +1297,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       });
       // Keep secondary panels collapsed so the hero result stays in view
       setConsumptionOpen(false);
-      setRouteDetailsOpen(false);
+      setSheetMode('peek');
       setRouteStatus('Готово');
       triggerHaptic('success', settings.hapticFeedback);
       setResultHighlight(true);
@@ -1417,7 +1486,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     setChargingSuggestionStatus('idle');
     setSelectedRouteStop(null);
     setStationsFoundAlongRoute(0);
-    setRouteDetailsOpen(false);
+    setSheetMode('peek');
+    setSearchEditing(false);
     setChargingSearchForced(false);
   };
 
@@ -1796,7 +1866,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         <p className={`mt-3 text-[12px] ${muted}`}>{nearbyFreeError}</p>
       )}
       {nearbyFreeList.length > 0 && (
-        <ul className="mt-2 space-y-1.5">
+        <ul className="mt-2 max-h-[13rem] space-y-1.5 overflow-y-auto overscroll-contain">
           {nearbyFreeList.map((item) => {
             const isActive = selectedRouteStop?.station.id === item.station.id;
             const kw = item.matchedConnector === 'gbt' ? item.station.gbtPowerKw ?? item.station.ccs2PowerKw : item.station.ccs2PowerKw;
@@ -1911,8 +1981,80 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     series.push({ km: totalKm, soc: Math.max(0, Math.min(100, displayArrival)) });
     const chartStroke = tone === 'low' ? '#f43f5e' : tone === 'ok' ? '#f59e0b' : '#06b6d4';
 
+    const chargesWord = `${planStops.length} зарядк${planStops.length === 1 ? 'а' : planStops.length < 5 ? 'и' : 'ок'}`;
+
+    // Ручка панели: тап — свернуть/развернуть, свайп вверх/вниз — следующее/предыдущее положение.
+    const sheetHandle = (
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={sheetMode === 'peek' ? 'Развернуть панель маршрута' : 'Свернуть панель маршрута'}
+        onPointerDown={onHandlePointerDown}
+        onPointerUp={onHandlePointerUp}
+        onPointerCancel={onHandlePointerCancel}
+        onKeyDown={onHandleKeyDown}
+        className="-mt-2 mb-1 flex cursor-grab touch-none justify-center py-2.5"
+      >
+        <span className={`h-1 w-10 rounded-full ${isDark ? 'bg-slate-600' : 'bg-slate-300'}`} />
+      </div>
+    );
+
+    // Свёрнутое положение: процент и вердикт + «Начать», ниже одна строка «км · время · зарядки».
+    if (sheetMode === 'peek') {
+      const expand = () => { triggerHaptic('light', settings.hapticFeedback); setSheetMode('half'); };
+      return (
+        <div id="route-result-main">
+          {sheetHandle}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={expand}
+              aria-label="Показать детали расчёта"
+              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+            >
+              <div className={`shrink-0 font-mono text-[32px] font-black leading-none tabular-nums ${toneColor}`}>
+                <AnimatedNumber value={Math.round(displayArrival)} />%
+              </div>
+              <p className={`min-w-0 text-[13px] font-bold leading-tight ${toneColor}`}>{verdict}</p>
+            </button>
+            {onSendToHud && destinationAddress.trim() ? (
+              <button
+                type="button"
+                onClick={handleStartTrip}
+                className="flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-cyan-600 px-4 py-2.5 text-[13px] font-bold text-white shadow-sm shadow-cyan-600/20 hover:bg-cyan-500 active:scale-[0.98]"
+              >
+                <Navigation className="h-4 w-4 shrink-0" />
+                Начать
+              </button>
+            ) : (
+              <a
+                href={typeof yandexNaviHref === 'string' ? '#' : yandexNaviHref.web}
+                onClick={openYandexNavi}
+                className={`flex shrink-0 items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-[13px] font-semibold active:scale-[0.98] ${
+                  isDark ? 'border-slate-700 bg-slate-800/70 text-slate-200' : 'border-slate-200 bg-white text-slate-800'
+                }`}
+              >
+                <Route className="h-4 w-4" />
+                Навигатор
+              </a>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={expand}
+            aria-label="Показать детали расчёта"
+            className={`mt-2 block w-full truncate text-left text-[11px] ${muted}`}
+          >
+            на финише · {routeElevation.distanceKm.toFixed(0)} км · {fmtDuration(totalTripMinutes)}
+            {planStops.length > 0 && <> · {chargesWord}</>}
+          </button>
+        </div>
+      );
+    }
+
     return (
       <div id="route-result-main">
+        {sheetHandle}
         <div className="flex items-center justify-between gap-2">
           <p className={`text-[13px] font-bold ${toneColor}`}>{verdict}</p>
           <button
@@ -2069,8 +2211,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           <CollapsibleDetails
             isDark={isDark}
             label="Подробности"
-            open={routeDetailsOpen}
-            onToggle={() => setRouteDetailsOpen((v) => !v)}
+            open={sheetMode === 'full'}
+            onToggle={() => { triggerHaptic('light', settings.hapticFeedback); setSheetMode((m) => (m === 'full' ? 'half' : 'full')); }}
           >
             <div className="space-y-3">
                 {routeForecast?.breakdown && (
@@ -2217,6 +2359,40 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           ? 'result'
           : 'idle';
 
+  // ── Нижняя панель и верхняя карточка после расчёта ─────────────────────────────────────────
+  insetsFrozenRef.current = !!selectedRouteStop || nearbyFreeStatus !== 'idle' || routeLoading;
+  const searchCollapsed = hasRoute && !searchEditing;
+  const sheetIsResult = sheetView === 'result';
+  const sheetFull = sheetIsResult && sheetMode === 'full';
+  const sheetMaxPx = sheetIsResult && sheetMode !== 'peek'
+    ? sheetMaxHeightPx(sheetMode, shellHeight ?? 560, mapInsets.top)
+    : undefined;
+
+  const onHandlePointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    handleDragRef.current = { y: e.clientY };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  };
+  const onHandlePointerUp = (e: React.PointerEvent<HTMLElement>) => {
+    const d = handleDragRef.current;
+    handleDragRef.current = null;
+    if (!d) return;
+    const next = resolveHandleGesture(sheetMode, e.clientY - d.y);
+    if (next !== sheetMode) { triggerHaptic('light', settings.hapticFeedback); setSheetMode(next); }
+  };
+  const onHandlePointerCancel = () => { handleDragRef.current = null; };
+  const onHandleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setSheetMode(resolveHandleGesture(sheetMode, 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSheetMode(resolveHandleGesture(sheetMode, -SWIPE_THRESHOLD_PX));
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSheetMode(resolveHandleGesture(sheetMode, SWIPE_THRESHOLD_PX));
+    }
+  };
+
   return (
     <div
       id="calculator-tab-container"
@@ -2236,13 +2412,43 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           focusPoint={gpsCoords}
           chargingStops={mapStops}
           onChargingStopClick={handleMapStopClick}
+          viewportInsets={mapInsets}
         />
       </div>
 
       {/* Top: A → B search + hidden-parameters button */}
-      <div className="pointer-events-none absolute inset-x-2 top-2 z-30 flex flex-col gap-1.5 landscape:right-auto landscape:w-[24rem]">
+      <div ref={topPanelRef} className="pointer-events-none absolute inset-x-2 top-2 z-30 flex flex-col gap-1.5 landscape:right-auto landscape:w-[24rem]">
         <div className="pointer-events-auto relative z-20 flex items-start gap-2">
-          <div className={`min-w-0 flex-1 rounded-2xl border shadow-lg ${surface}`}>
+          {searchCollapsed && (
+            <div className={`flex min-w-0 flex-1 items-center rounded-2xl border shadow-lg ${surface}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('light', settings.hapticFeedback);
+                  setSearchEditing(true);
+                  if (sheetMode === 'full') setSheetMode('half');
+                }}
+                aria-label="Изменить маршрут"
+                className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left"
+              >
+                <span className="inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-cyan-500 ring-2 ring-cyan-500/30" />
+                <span className="min-w-0 truncate text-[13px] font-semibold">{routeLabels.start}</span>
+                <span className={`shrink-0 text-[13px] ${muted}`}>→</span>
+                <span className="min-w-0 truncate text-[13px] font-semibold">{routeLabels.dest}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { triggerHaptic('light', settings.hapticFeedback); resetRoute(); }}
+                aria-label="Сбросить маршрут"
+                className={`mr-1.5 shrink-0 rounded-full p-2 ${isDark ? 'text-slate-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-100'}`}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+          {/* Поля А/Б остаются смонтированными и просто скрываются: иначе при возврате из «пилюли»
+              автоподсказки адреса заново искали бы уже выбранный адрес и раскрывались сами. */}
+          <div className={`min-w-0 flex-1 rounded-2xl border shadow-lg ${surface} ${searchCollapsed ? 'hidden' : ''}`}>
             {/* A */}
             <div className="relative flex items-center" onKeyDown={(e) => {
               if (e.key === 'Enter' && startMode === 'address' && startAddress.trim() && destinationAddress.trim()) requestRecalc();
@@ -2343,6 +2549,18 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 <Map className="h-4 w-4" />
               </button>
             </div>
+            {hasRoute && searchEditing && (
+              <div className="flex justify-end px-2 pb-1.5">
+                <button
+                  type="button"
+                  onClick={() => { triggerHaptic('light', settings.hapticFeedback); setSearchEditing(false); }}
+                  aria-label="Свернуть поля маршрута"
+                  className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold ${muted}`}
+                >
+                  <ChevronUp className="h-3.5 w-3.5" /> Свернуть
+                </button>
+              </div>
+            )}
             {destinationAddress.trim() && !destinationPin && !routeLoading && (
               <div className="px-2 pb-2">
                 <button
@@ -2386,7 +2604,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           >
             GPS недоступен — указать точку А
           </button>
-        ) : quickWeather ? (
+        ) : quickWeather && !hasRoute ? (
           <div className={`pointer-events-none relative z-10 flex items-center gap-1.5 self-start rounded-full border px-2.5 py-1 text-[11px] font-semibold shadow ${surface}`}>
             {weatherIcon(quickWeather.weatherCode, 'w-3.5 h-3.5')}
             {quickWeather.temperature >= 0 ? '+' : ''}{quickWeather.temperature}°C
@@ -2396,44 +2614,51 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         ) : null}
       </div>
 
-      {/* Bottom: quick chips + the single sheet (result / details / stations) */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex max-h-[68%] flex-col justify-end gap-2 p-2 pb-7 landscape:right-auto landscape:top-[9rem] landscape:max-h-none landscape:w-[24rem]">
-        <div className="pointer-events-auto flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={() => { triggerHaptic('light', settings.hapticFeedback); setParamsOpen(true); }}
-            aria-label="Заряд на старте"
-            className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-bold shadow-lg active:scale-95 ${surface}`}
-          >
-            <BatteryCharging className="h-3.5 w-3.5 text-cyan-500" />
-            <span className="font-mono tabular-nums">{Math.round(startSoc)}%</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => { triggerHaptic('medium', settings.hapticFeedback); setSelectedRouteStop(null); void searchNearbyFreeChargers(); }}
-            disabled={nearbyFreeStatus === 'loading'}
-            className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-bold shadow-lg active:scale-95 disabled:opacity-70 ${surface}`}
-          >
-            {nearbyFreeStatus === 'loading'
-              ? <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />
-              : <PlugZap className="h-3.5 w-3.5 text-emerald-500" />}
-            Ближайшие зарядки
-          </button>
-        </div>
+      {/* Bottom: the single sheet (result / details / stations) + quick buttons floating above it */}
+      <div className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex ${sheetFull ? 'max-h-[86%]' : 'max-h-[68%]'} flex-col justify-end p-2 pb-7 landscape:right-auto landscape:top-[9rem] landscape:max-h-none landscape:w-[24rem]`}>
+        <div ref={bottomPanelRef} className="relative flex min-h-0 flex-col">
+          {/* Portrait: a compact column on the right, hovering over the map just above the sheet (takes no layout height).
+              Landscape: a plain row above the sheet, as before. Hidden while the sheet is fully expanded. */}
+          {!sheetFull && (
+            <div className="pointer-events-auto absolute bottom-full right-0 z-10 mb-2 flex flex-col items-end gap-2 landscape:static landscape:mb-2 landscape:flex-row landscape:items-center">
+              <button
+                type="button"
+                onClick={() => { triggerHaptic('light', settings.hapticFeedback); setParamsOpen(true); }}
+                aria-label="Заряд на старте"
+                className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-bold shadow-lg active:scale-95 ${surface}`}
+              >
+                <BatteryCharging className="h-3.5 w-3.5 text-cyan-500" />
+                <span className="font-mono tabular-nums">{Math.round(startSoc)}%</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { triggerHaptic('medium', settings.hapticFeedback); setSelectedRouteStop(null); void searchNearbyFreeChargers(); }}
+                disabled={nearbyFreeStatus === 'loading'}
+                className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-bold shadow-lg active:scale-95 disabled:opacity-70 ${surface}`}
+              >
+                {nearbyFreeStatus === 'loading'
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />
+                  : <PlugZap className="h-3.5 w-3.5 text-emerald-500" />}
+                Ближайшие зарядки
+              </button>
+            </div>
+          )}
 
-        <motion.div
-          key={sheetView}
-          initial={{ y: 16, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-          className={`pointer-events-auto min-h-0 overflow-y-auto overscroll-contain rounded-2xl border p-3.5 shadow-2xl ${surface}`}
-        >
-          {sheetView === 'station' && renderStationCard()}
-          {sheetView === 'nearby' && renderNearbyView()}
-          {sheetView === 'loading' && renderLoadingView()}
-          {sheetView === 'result' && renderResultView()}
-          {sheetView === 'idle' && renderIdleView()}
-        </motion.div>
+          <motion.div
+            key={sheetView}
+            initial={{ y: 16, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            style={sheetMaxPx ? { maxHeight: sheetMaxPx } : undefined}
+            className={`pointer-events-auto min-h-0 overflow-y-auto overscroll-contain rounded-2xl border p-3.5 shadow-2xl ${surface}`}
+          >
+            {sheetView === 'station' && renderStationCard()}
+            {sheetView === 'nearby' && renderNearbyView()}
+            {sheetView === 'loading' && renderLoadingView()}
+            {sheetView === 'result' && renderResultView()}
+            {sheetView === 'idle' && renderIdleView()}
+          </motion.div>
+        </div>
       </div>
 
       {/* Hidden parameters: speed, people, climate, weather — closed by default */}

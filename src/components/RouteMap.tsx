@@ -26,6 +26,7 @@ import {
   zoomForSpeed,
 } from '../utils/navCamera';
 import { Box, LocateFixed } from 'lucide-react';
+import { insetsKey, type MapInsets } from '../utils/calculatorSheet';
 
 const CAM3D_KEY = 'vigo_hud_cam3d_v1';
 /** Gestures the app allows on route maps. Rotate/tilt are excluded: the navigation camera owns them. */
@@ -86,6 +87,54 @@ async function probeAzimuthSign(bundle: any, container: HTMLElement): Promise<1 
   }
 }
 
+/** Токен последнего вписывания (v3): отменяет устаревший повтор на следующем кадре. */
+let fitSeq = 0;
+
+/**
+ * Вписывает маршрут в карту с учётом закрытых карточками краёв (`insets`).
+ * v3: margin карты сдвигает «видимое окно», границы считает сама карта.
+ * v2.1: тот же эффект через zoomMargin.
+ */
+function fitRouteToView(
+  bundle: AnyMapBundle,
+  positions: Array<[number, number]>,
+  insets: MapInsets | null,
+  duration: number,
+): void {
+  if (positions.length < 2) return;
+  const map = (bundle as any).map;
+  const lats = positions.map(([la]) => la);
+  const lons = positions.map(([, lo]) => lo);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLon = Math.min(...lons);
+  const maxLon = Math.max(...lons);
+  if (bundle.apiVersion === 3) {
+    const seq = ++fitSeq;
+    const bounds = [toLonLat(minLat, minLon), toLonLat(maxLat, maxLon)];
+    if (insets) {
+      try { map.update({ margin: [insets.top, insets.right, insets.bottom, insets.left] }); } catch { /* ignore */ }
+    }
+    map.setLocation({ bounds, duration });
+    // Страховка: если карта применила margin уже после setLocation, повторяем вписывание на следующем кадре.
+    // Токен не даёт устаревшему вызову перебить более свежий.
+    if (duration === 0 && insets && typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        if (seq !== fitSeq) return;
+        try { map.setLocation({ bounds, duration: 0 }); } catch { /* ignore */ }
+      });
+    }
+  } else {
+    const m = insets
+      ? [insets.top, insets.right, insets.bottom, insets.left].map((v) => Math.max(24, v))
+      : 36;
+    map.setBounds(
+      [[minLat, minLon], [maxLat, maxLon]],
+      { checkZoomRange: true, zoomMargin: m, duration },
+    );
+  }
+}
+
 export interface RouteMapChargingStop {
   lat: number;
   lon: number;
@@ -119,6 +168,12 @@ interface RouteMapProps {
    * start screen). Ignored as soon as a route with 2+ points is drawn.
    */
   focusPoint?: { lat: number; lon: number } | null;
+  /**
+   * Сколько пикселей карты закрыто карточками поверх неё (верх/низ/лево/право). Если передано,
+   * маршрут вписывается в оставшееся видимое окно, а не в весь размер карты. Не передано —
+   * поведение прежнее (HUD не затронут).
+   */
+  viewportInsets?: MapInsets | null;
 }
 
 export const RouteMap: React.FC<RouteMapProps> = ({
@@ -134,6 +189,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   fill = false,
   onChargingStopClick,
   focusPoint = null,
+  viewportInsets = null,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const bundleRef = useRef<AnyMapBundle | null>(null);
@@ -194,6 +250,13 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   /** Route polyline for stable course-up heading (preferred over noisy GPS). */
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
+
+  /** Актуальные отступы для вписывания маршрута; ref, чтобы их смена не перерисовывала линию. */
+  const insetsRef = useRef<MapInsets | null>(viewportInsets);
+  insetsRef.current = viewportInsets;
+  const insetsK = viewportInsets ? insetsKey(viewportInsets) : '';
+  /** Ключ отступов, с которыми маршрут был вписан в последний раз. */
+  const lastFitInsetsKeyRef = useRef('');
 
   const start = positions[0];
   const end = positions[positions.length - 1];
@@ -382,16 +445,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
 
       if (!followMode) {
-        const lats = positions.map(([la]) => la);
-        const lons = positions.map(([, lo]) => lo);
         try {
-          map.setLocation({
-            bounds: [
-              toLonLat(Math.min(...lats), Math.min(...lons)),
-              toLonLat(Math.max(...lats), Math.max(...lons)),
-            ],
-            duration: 0,
-          });
+          fitRouteToView(bundle, positions, insetsRef.current, 0);
+          lastFitInsetsKeyRef.current = insetsRef.current ? insetsKey(insetsRef.current) : '';
         } catch {
           bundle.setLocation(start![0], start![1], 11);
         }
@@ -467,15 +523,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
       if (!followMode) {
         try {
-          const lats = positions.map(([la]) => la);
-          const lons = positions.map(([, lo]) => lo);
-          map.setBounds(
-            [
-              [Math.min(...lats), Math.min(...lons)],
-              [Math.max(...lats), Math.max(...lons)],
-            ],
-            { checkZoomRange: true, zoomMargin: 36 },
-          );
+          fitRouteToView(bundle, positions, insetsRef.current, 0);
+          lastFitInsetsKeyRef.current = insetsRef.current ? insetsKey(insetsRef.current) : '';
         } catch { /* ignore */ }
       }
 
@@ -516,6 +565,30 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, JSON.stringify(positions), compact, fill, followMode, isDark]);
+
+  // Карточки/панель поменяли размер (свёрнута ↔ раскрыта): заново вписываем уже нарисованный
+  // маршрут в свободное окно. Саму линию не перерисовываем.
+  useEffect(() => {
+    const bundle = bundleRef.current;
+    if (!bundle || !mapReady || followMode || !insetsRef.current || positions.length < 2) return;
+    if (insetsK === lastFitInsetsKeyRef.current) return;
+    try {
+      fitRouteToView(bundle, positionsRef.current, insetsRef.current, 250);
+      lastFitInsetsKeyRef.current = insetsK;
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, insetsK, followMode, positions.length >= 2]);
+
+  // Маршрут убран — возвращаем карте нулевой margin (только если отступы вообще использовались).
+  useEffect(() => {
+    const bundle = bundleRef.current;
+    if (!bundle || !mapReady || positions.length >= 2 || !insetsRef.current) return;
+    lastFitInsetsKeyRef.current = '';
+    if (bundle.apiVersion === 3) {
+      try { (bundle as any).map.update({ margin: [0, 0, 0, 0] }); } catch { /* ignore */ }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, positions.length >= 2]);
 
   // Progress along route: update geometry in place (no remove/add) to avoid track flicker.
   useEffect(() => {
