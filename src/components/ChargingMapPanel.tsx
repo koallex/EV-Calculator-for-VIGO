@@ -16,6 +16,7 @@ import {
   makeChargerMarkerEl,
   makeClusterMarkerEl,
   clusterPointsByZoom,
+  resetClusterEnterAnimations,
   toLonLat,
   type AnyMapBundle,
 } from '../utils/yandexMaps';
@@ -369,6 +370,14 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const [nearestFreeOpen, setNearestFreeOpen] = useState(false);
   const [stations, setStations] = useState<MapStation[]>([]);
   const [mapZoom, setMapZoom] = useState(12);
+  const stationsSigRef = useRef('');
+  useEffect(() => {
+    const sig = stations.map((s) => s.id).join('|');
+    if (sig !== stationsSigRef.current) {
+      stationsSigRef.current = sig;
+      resetClusterEnterAnimations();
+    }
+  }, [stations]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<MapStation | null>(null);
@@ -797,7 +806,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           (typeof map.location?.zoom === 'number' && map.location.zoom) ||
           null;
         if (typeof z === 'number' && Number.isFinite(z)) {
-          setMapZoom((prev) => (Math.abs(prev - z) >= 0.25 ? z : prev));
+          setMapZoom((prev) => (Math.abs(prev - z) >= 0.45 ? z : prev));
         }
       } catch { /* ignore */ }
     }, 450);
@@ -842,7 +851,8 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       lon: s.lon,
       recommended: false,
     }));
-    const buckets = clusterPointsByZoom(points, mapZoom);
+    const zCluster = Math.round(mapZoom * 2) / 2;
+    const buckets = clusterPointsByZoom(points, zCluster);
 
     for (const bucket of buckets) {
       if (bucket.type === 'cluster') {
@@ -851,6 +861,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           const el = makeClusterMarkerEl({
             count: bucket.count,
             title: `${bucket.count} станций — приблизьте`,
+            stableKey: `map:${bucket.cellKey}:${bucket.count}`,
           });
           el.addEventListener('click', (ev) => {
             ev.stopPropagation();

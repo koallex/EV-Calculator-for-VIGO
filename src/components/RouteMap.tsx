@@ -8,6 +8,7 @@ import {
   makeChargerMarkerEl,
   makeClusterMarkerEl,
   clusterPointsByZoom,
+  resetClusterEnterAnimations,
   makeNavArrowEl,
   normalizeDeg180,
   scrubYandexOpenMapsPromo,
@@ -724,6 +725,13 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   }, [mapReady, currentPosition?.lat, currentPosition?.lon, followMode, JSON.stringify(positions), isDark]);
 
 
+
+  // New stop set → allow cluster enter animation again for new cells only
+  const stopsSig = JSON.stringify(stops.map((s) => [s.id, s.lat, s.lon, s.recommended]));
+  useEffect(() => {
+    resetClusterEnterAnimations();
+  }, [stopsSig]);
+
   // Track zoom for charger clustering (no animation — redraw must stay quiet).
   useEffect(() => {
     if (!mapReady) return;
@@ -737,7 +745,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           (typeof map?.location?.zoom === 'number' && map.location.zoom) ||
           null;
         if (typeof z === 'number' && Number.isFinite(z)) {
-          setMapZoom((prev) => (Math.abs(prev - z) >= 0.25 ? z : prev));
+          setMapZoom((prev) => (Math.abs(prev - z) >= 0.45 ? z : prev));
         }
       } catch { /* ignore */ }
     };
@@ -763,9 +771,11 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     chargerMarkersRef.current = [];
 
     const ordered = [...stops].sort((a, b) => Number(!!a.recommended) - Number(!!b.recommended));
+    // Half-step zoom → fewer cluster rebuilds while pinching
+    const zCluster = Math.round(mapZoom * 2) / 2;
     const buckets = clusterPointsByZoom(
       ordered.map((s) => ({ ...s, lat: s.lat, lon: s.lon, recommended: !!s.recommended })),
-      mapZoom,
+      zCluster,
     );
 
     const zoomInto = (lat: number, lon: number) => {
@@ -786,6 +796,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             count: bucket.count,
             recommended: bucket.recommended,
             title: `${bucket.count} станций — приблизьте`,
+            stableKey: `rt:${bucket.cellKey}:${bucket.count}`,
           });
           el.addEventListener('click', (ev: Event) => {
             ev.stopPropagation();

@@ -560,7 +560,7 @@ function ensureChargerMarkerCss() {
   border: 1px solid rgba(148, 163, 184, 0.4);
 }
 .vigo-chg-cluster {
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%) scale(1);
   cursor: pointer;
   pointer-events: auto;
   user-select: none;
@@ -575,12 +575,21 @@ function ensureChargerMarkerCss() {
   color: #f8fafc;
   border: 2px solid rgba(255,255,255,0.9);
   box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  /* resting state always fully visible — no opacity:0 (prevents flicker on redraw) */
 }
 .vigo-chg-cluster--rec {
   background: #d97706;
 }
 .vigo-chg-cluster--dim {
   background: #475569;
+}
+/* Scale-only enter; runs at most once per stableKey (see makeClusterMarkerEl). */
+@keyframes vigoClusterIn {
+  from { transform: translate(-50%, -50%) scale(0.72); }
+  to   { transform: translate(-50%, -50%) scale(1); }
+}
+.vigo-chg-cluster--enter {
+  animation: vigoClusterIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) 1 forwards;
 }
 `;
   document.head.appendChild(s);
@@ -620,17 +629,41 @@ export function makeChargerMarkerEl(opts: {
   return el;
 }
 
-/** Cluster bubble with station count. */
+/** Keys already enter-animated this page session — skip on marker rebuild. */
+const clusterEnterPlayed = new Set<string>();
+
+/** Call when the underlying station set changes (new route / new fetch). */
+export function resetClusterEnterAnimations() {
+  clusterEnterPlayed.clear();
+}
+
+/** Cluster bubble with station count. Scale-in once per stableKey; never starts hidden. */
 export function makeClusterMarkerEl(opts: {
   count: number;
   recommended?: boolean;
   title?: string;
+  /** Same cell across redraws — prevents replaying enter animation. */
+  stableKey?: string;
 }): HTMLElement {
   ensureChargerMarkerCss();
   const el = document.createElement('div');
-  el.className = 'vigo-chg-cluster ' + (opts.recommended ? 'vigo-chg-cluster--rec' : 'vigo-chg-cluster--dim');
+  const key = opts.stableKey || `c:${opts.count}:${opts.recommended ? 1 : 0}`;
+  const playEnter = !clusterEnterPlayed.has(key);
+  if (playEnter) clusterEnterPlayed.add(key);
+  el.className =
+    'vigo-chg-cluster ' +
+    (opts.recommended ? 'vigo-chg-cluster--rec' : 'vigo-chg-cluster--dim') +
+    (playEnter ? ' vigo-chg-cluster--enter' : '');
   el.textContent = String(opts.count);
   el.title = opts.title || `${opts.count} станций`;
+  // Drop enter class after animation so a later classList tweak cannot restart it
+  if (playEnter) {
+    const done = () => {
+      el.classList.remove('vigo-chg-cluster--enter');
+      el.removeEventListener('animationend', done);
+    };
+    el.addEventListener('animationend', done);
+  }
   return el;
 }
 
@@ -643,21 +676,28 @@ export type ClusterablePoint = {
 
 export type ClusterBucket<T extends ClusterablePoint> =
   | { type: 'point'; item: T }
-  | { type: 'cluster'; lat: number; lon: number; count: number; recommended: boolean; items: T[] };
+  | {
+      type: 'cluster';
+      lat: number;
+      lon: number;
+      count: number;
+      recommended: boolean;
+      items: T[];
+      /** Grid cell id for stable animation keys */
+      cellKey: string;
+    };
 
 /**
- * Grid cluster by map zoom. Below ~12.5 markers merge; closer zoom → individuals.
+ * Grid cluster by map zoom. Zoom is quantized to 0.5 steps by callers to limit redraw churn.
  */
 export function clusterPointsByZoom<T extends ClusterablePoint>(
   points: T[],
   zoom: number,
 ): ClusterBucket<T>[] {
   if (!points.length) return [];
-  // Always show individually when zoomed in enough or few points
   if (zoom >= 13.2 || points.length <= 3) {
     return points.map((item) => ({ type: 'point' as const, item }));
   }
-  // Cell size in degrees shrinks as zoom grows
   const cell = Math.max(0.008, 0.55 / Math.pow(2, Math.max(0, zoom - 9)));
   const bins = new Map<string, T[]>();
   for (const p of points) {
@@ -668,7 +708,7 @@ export function clusterPointsByZoom<T extends ClusterablePoint>(
     else bins.set(key, [p]);
   }
   const out: ClusterBucket<T>[] = [];
-  for (const group of bins.values()) {
+  for (const [cellKey, group] of bins) {
     if (group.length === 1) {
       out.push({ type: 'point', item: group[0] });
       continue;
@@ -688,6 +728,7 @@ export function clusterPointsByZoom<T extends ClusterablePoint>(
       count: group.length,
       recommended: rec,
       items: group,
+      cellKey,
     });
   }
   return out;
