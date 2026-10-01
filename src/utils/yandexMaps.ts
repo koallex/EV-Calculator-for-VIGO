@@ -499,43 +499,6 @@ export function makeDotMarkerEl(
   return el;
 }
 
-
-/** Compact charging-station marker: power is shown directly on the map. */
-export function makeChargingMarkerEl(
-  powerKw?: number,
-  recommended = false,
-): HTMLElement {
-  const el = document.createElement('div');
-  const power = Number.isFinite(powerKw) && (powerKw as number) > 0
-    ? `${Math.round(powerKw as number)} кВт`
-    : 'ЭЗС';
-  el.setAttribute('data-vigo-charger-marker', recommended ? 'recommended' : 'all');
-  el.style.cssText = [
-    'display:flex',
-    'align-items:center',
-    'gap:4px',
-    'height:24px',
-    'padding:0 7px 0 5px',
-    `background:${recommended ? '#f59e0b' : '#334155'}`,
-    `border:2px solid ${recommended ? '#fef3c7' : '#e2e8f0'}`,
-    `color:${recommended ? '#111827' : '#f8fafc'}`,
-    'border-radius:999px',
-    'font:800 10px/20px system-ui,sans-serif',
-    'white-space:nowrap',
-    'box-shadow:0 2px 7px rgba(0,0,0,.38)',
-    'transform:translate(-50%,-50%)',
-    'cursor:pointer',
-    'user-select:none',
-  ].join(';');
-  const bolt = document.createElement('span');
-  bolt.textContent = '⚡';
-  bolt.style.cssText = 'font-size:11px;line-height:1;';
-  const label = document.createElement('span');
-  label.textContent = power;
-  el.append(bolt, label);
-  return el;
-}
-
 export function makeLabelMarkerEl(text: string, color: string): HTMLElement {
   const el = document.createElement('div');
   el.textContent = text;

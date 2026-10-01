@@ -5,7 +5,6 @@ import {
   headingDegToAzimuthRad,
   makeDotMarkerEl,
   makeLabelMarkerEl,
-  makeChargingMarkerEl,
   makeNavArrowEl,
   normalizeDeg180,
   scrubYandexOpenMapsPromo,
@@ -143,10 +142,6 @@ export interface RouteMapChargingStop {
   address?: string;
   /** Optional id to match station in parent state when marker is tapped. */
   id?: string;
-  /** Maximum known charging power at this station. */
-  powerKw?: number;
-  /** Planned/comfortable stop selected by the route charging algorithm. */
-  isRecommended?: boolean;
 }
 
 interface RouteMapProps {
@@ -729,7 +724,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     stops.forEach((stop) => {
       if (bundle.apiVersion === 3) {
         const { YMapMarker } = (bundle as any).ymaps3;
-        const el = makeChargingMarkerEl(stop.powerKw, !!stop.isRecommended);
+        const el = makeLabelMarkerEl('⚡', '#fbbf24');
         el.title = stop.name;
         el.style.cursor = 'pointer';
         if (onChargingStopClick) {
@@ -746,13 +741,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         const m = new ymaps.Placemark(
           [stop.lat, stop.lon],
           { hintContent: stop.name, balloonContent: stop.name },
-          {
-            preset: 'islands#circleIcon',
-            iconContent: Number.isFinite(stop.powerKw) && (stop.powerKw as number) > 0
-              ? `${Math.round(stop.powerKw as number)}`
-              : '⚡',
-            iconColor: stop.isRecommended ? '#f59e0b' : '#64748b',
-          },
+          { preset: 'islands#darkOrangeStretchyIcon', iconContent: '⚡' },
         );
         if (onChargingStopClick) {
           m.events.add('click', () => onChargingStopClick(stop));
