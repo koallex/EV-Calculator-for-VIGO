@@ -500,7 +500,7 @@ export function makeDotMarkerEl(
 }
 
 
-/** Inject once: appear + soft pulse for plan stops */
+/** Inject once: staggered appear + soft pulse for plan stops */
 let chargerMarkerCssReady = false;
 function ensureChargerMarkerCss() {
   if (chargerMarkerCssReady || typeof document === 'undefined') return;
@@ -509,75 +509,87 @@ function ensureChargerMarkerCss() {
   s.setAttribute('data-vigo-charger-marker', '1');
   s.textContent = `
 @keyframes vigoChargerIn {
-  from { opacity: 0; transform: translate(-50%,-50%) scale(0.55); }
+  from { opacity: 0; transform: translate(-50%,-50%) scale(0.4); }
   to   { opacity: 1; transform: translate(-50%,-50%) scale(1); }
 }
 @keyframes vigoChargerPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.45); }
-  50%      { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); }
+  50%      { box-shadow: 0 0 0 5px rgba(245,158,11,0); }
 }
 .vigo-chg-marker {
   transform: translate(-50%, -50%);
   cursor: pointer;
   pointer-events: auto;
   user-select: none;
-  animation: vigoChargerIn 0.35s cubic-bezier(0.22,1,0.36,1) both;
+  opacity: 0;
+  animation: vigoChargerIn 0.32s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 .vigo-chg-marker__disc {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 20px;
+  height: 20px;
   border-radius: 999px;
-  white-space: nowrap;
-  font-family: system-ui, sans-serif;
+  box-sizing: border-box;
+}
+.vigo-chg-marker__disc svg {
+  display: block;
+  flex-shrink: 0;
 }
 .vigo-chg-marker--rec .vigo-chg-marker__disc {
-  min-width: 24px;
-  height: 24px;
-  padding: 0 6px;
+  width: 22px;
+  height: 22px;
   background: #f59e0b;
-  color: #0f172a;
-  font-weight: 700;
-  font-size: 10px;
-  line-height: 24px;
   border: 1.5px solid rgba(255,255,255,0.95);
-  animation: vigoChargerPulse 2.4s ease-in-out 0.4s infinite;
+  animation: vigoChargerPulse 2.6s ease-in-out infinite;
+  animation-delay: inherit;
 }
 .vigo-chg-marker--dim .vigo-chg-marker__disc {
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
-  background: rgba(15, 23, 42, 0.82);
-  color: #94a3b8;
-  font-weight: 600;
-  font-size: 8px;
-  line-height: 18px;
-  border: 1px solid rgba(148, 163, 184, 0.55);
+  width: 16px;
+  height: 16px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.5);
 }
 `;
   document.head.appendChild(s);
 }
 
+const BOLT_SVG = (fill: string, size: number) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">` +
+  `<path fill="${fill}" d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg>`;
+
 /**
- * SVG-free compact disc: power kW when known.
- * recommended → amber + pulse; others → muted slate.
+ * Minimal bolt marker. `index` staggers appear so markers do not pop in together.
+ * recommended → amber disc + pulse; others → small slate disc.
+ * Power stays in title only (tooltip).
  */
 export function makeChargerMarkerEl(opts: {
   powerKw?: number | null;
   recommended?: boolean;
   title?: string;
+  /** 0-based order along the route — drives animation-delay */
+  index?: number;
 }): HTMLElement {
   ensureChargerMarkerCss();
   const power = opts.powerKw != null && Number.isFinite(opts.powerKw) && opts.powerKw > 0
     ? Math.round(Number(opts.powerKw))
     : null;
   const rec = !!opts.recommended;
+  const idx = Math.max(0, Math.min(40, opts.index ?? 0));
+  // ~45ms steps, cap so long routes still finish in ~1.2s
+  const delayMs = Math.min(idx * 45, 1200);
+
   const el = document.createElement('div');
   el.className = 'vigo-chg-marker ' + (rec ? 'vigo-chg-marker--rec' : 'vigo-chg-marker--dim');
+  el.style.animationDelay = `${delayMs}ms`;
   el.title = opts.title || (power != null ? `${power} кВт` : '');
+
   const disc = document.createElement('div');
   disc.className = 'vigo-chg-marker__disc';
-  disc.textContent = power != null ? String(power) : (rec ? '•' : '·');
+  // Pulse on the disc should start after the appear delay
+  if (rec) disc.style.animationDelay = `${delayMs + 320}ms`;
+  disc.innerHTML = BOLT_SVG(rec ? '#0f172a' : '#94a3b8', rec ? 12 : 9);
   el.appendChild(disc);
   return el;
 }

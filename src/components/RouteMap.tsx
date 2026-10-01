@@ -726,9 +726,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     chargerMarkersRef.current.forEach((m) => removeObj(bundle, m));
     chargerMarkersRef.current = [];
 
-    // Recommended stops last so they paint above nearby non-plan stations.
+    // Dim first, recommended last (paint on top). Stagger index = final draw order.
     const ordered = [...stops].sort((a, b) => Number(!!a.recommended) - Number(!!b.recommended));
-    ordered.forEach((stop) => {
+    ordered.forEach((stop, index) => {
       const power =
         stop.powerKw != null && Number.isFinite(stop.powerKw) && stop.powerKw > 0
           ? Math.round(Number(stop.powerKw))
@@ -740,6 +740,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           powerKw: stop.powerKw,
           recommended: stop.recommended,
           title: stop.name + (power != null ? ` · ${power} кВт` : ''),
+          index,
         });
         if (onChargingStopClick) {
           el.addEventListener('click', (ev: Event) => {
