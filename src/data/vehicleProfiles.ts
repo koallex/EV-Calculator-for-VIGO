@@ -395,6 +395,24 @@ export function getVehicleVariant(
   return profile.variants.find((v) => v.default) || profile.variants[0];
 }
 
+/**
+ * Vehicle-side charge limits for the charge-time model: the user's value from the car profile
+ * (Settings) when set, otherwise the selected variant's default.
+ */
+export function resolveChargeLimits(settings: {
+  vehicleProfileId?: string | null;
+  vehicleVariantId?: string | null;
+  dcMaxKw?: number;
+  acMaxKw?: number;
+}): { dcMaxKw: number; acMaxKw: number } {
+  const variant = getVehicleVariant(settings.vehicleProfileId, settings.vehicleVariantId);
+  const valid = (v: number | undefined): v is number => Number.isFinite(v) && (v as number) > 0;
+  return {
+    dcMaxKw: valid(settings.dcMaxKw) ? settings.dcMaxKw : variant.dcMaxKw,
+    acMaxKw: valid(settings.acMaxKw) ? settings.acMaxKw : variant.acMaxKw,
+  };
+}
+
 /** Apply selected profile/variant onto settings fields used by the calculator. */
 export function applyVehicleVariantToSettings<T extends {
   vehicleProfileId?: string;

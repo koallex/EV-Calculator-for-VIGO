@@ -1,21 +1,26 @@
-// Charging-time modeling for the Dongfeng Vigo (51.87 kWh LFP) — kept as its own documented,
-// separately-calibratable term, same philosophy as the consumption model in storage.ts.
+// Charging-time modeling — kept as its own documented, separately-calibratable set of terms,
+// same philosophy as the consumption model in storage.ts.
 //
 // ⚠️ NOT yet calibrated against a real logged fast-charging session on Александр's own car.
-// Anchored instead to two published spec figures for the Vigo E2+ (CCS Type 2):
+// Every constant below is a placeholder until there is a real SoC/time log.
+//
+// Model (all terms separate, none folded into a blanket multiplier):
+//   power(soc) = min( stationMaxPowerKw × STATION_DELIVERY_EFFICIENCY,
+//                     vehicleCurve(soc) × (dcMaxKw / 167) × temperaturePowerFactor )
+//   chargeMinutes = ∫ dE / power(soc)               (1%-SoC steps)
+//   stop minutes  = chargeMinutes + PLUG_IN_OVERHEAD_MIN + detour driving time
+//
+// Vehicle curve shape is anchored to two published spec figures for the Vigo E2+ (CCS Type 2):
 //   - 167 kW peak DC charging power
 //   - 30% → 80% SoC in ~18 minutes
-// Both spec figures assume a ~160 kW+ station with the car as the only vehicle drawing power
-// from it (no power-sharing with a neighbouring stall). A real public station is very often
-// slower than that — either rated below 160 kW to begin with, or a shared-power unit that
-// derates when another car is charging alongside — in which case the curve below is correctly
-// capped by `stationMaxPowerKw` in chargePowerKwAtSoc, and the resulting session will (rightly)
-// take longer than the 18-minute headline figure. The curve below is a piecewise-linear shape
-// picked to reproduce that 18-minute window at full, uncontended station power (it comes out to
-// ~17 min for the same 30→80% span — within the spread you'd expect reverse-engineering a curve
-// from two spec numbers). Treat every number here as a placeholder until there's a real SoC/time
-// log from an actual DC fast-charge session — the same way the consumption model itself only
-// became trustworthy after real-trip confirmation.
+// Both assume a ~160 kW+ station with no power-sharing. The curve is a piecewise-linear shape
+// that reproduces ~18 min for 30→80% at full, uncontended station power. It is expressed for the
+// Vigo's 167 kW and scaled linearly by the profile's `dcMaxKw` (Settings → car profile), so
+// dcMaxKw = 167 reproduces the original numbers exactly and a car with a lower limit gets a
+// proportionally compressed curve.
+export const VIGO_REFERENCE_DC_MAX_KW = 167;
+export const VIGO_REFERENCE_AC_MAX_KW = 6.6;
+
 export const VIGO_DC_CHARGE_CURVE_KW: { soc: number; powerKw: number }[] = [
   { soc: 0, powerKw: 70 },
   { soc: 10, powerKw: 120 },
@@ -25,19 +30,45 @@ export const VIGO_DC_CHARGE_CURVE_KW: { soc: number; powerKw: number }[] = [
   { soc: 100, powerKw: 12 },
 ];
 
-// Type 2 AC is capped by the car's onboard charger, not by the DC curve above.
-const VIGO_AC_MAX_POWER_KW = 6.6;
-
-// Most Belarusian stations in OSM don't have a tagged power rating yet (the project's own
-// notes flag OSM/Overpass coverage there as still thin). Leaving `stationMaxPowerKw` undefined
-// in that case would let the curve run at the car's own peak (up to 167 kW) — i.e. silently
-// assume a top-tier ultra-fast charger. That's the wrong default: most public DC stations
-// Александр is likely to actually plug into are well under that. 50 kW is a conservative,
-// still-fairly-common "at least this much" floor for a public CCS lot; callers should also
-// surface to the user that this is an assumption, not a real reading, when it's used.
+// Most Belarusian stations in OSM don't have a tagged power rating yet. Leaving the station
+// limit undefined would let the curve run at the car's own peak — i.e. silently assume a
+// top-tier ultra-fast charger. 50 kW is a conservative, still-fairly-common floor for a public
+// CCS lot; callers should surface that this is an assumption, not a real reading.
 export const DEFAULT_UNKNOWN_STATION_POWER_KW = 50;
 
+/** Share of the station's rated power that actually reaches the battery (cable / conversion
+ *  losses, real-world derating). Applied only to the station-side limit. */
+export const STATION_DELIVERY_EFFICIENCY = 0.92;
+/** Time to park, plug in, authorize and start the session — added once per stop. */
+export const PLUG_IN_OVERHEAD_MIN = 5;
+/** Straight-line distance-from-route → road distance. */
+export const DETOUR_ROAD_FACTOR = 1.3;
+/** Average speed on the detour to/from the station. */
+export const DETOUR_SPEED_KMH = 40;
+
 export type ChargeConnector = 'ccs2' | 'type2' | 'gbt';
+
+/** Vehicle-side charging limits, taken from the car profile (Settings). */
+export interface ChargeVehicleLimits {
+  /** Max DC charge power the car accepts (kW). */
+  dcMaxKw?: number;
+  /** Onboard AC charger limit (kW). */
+  acMaxKw?: number;
+}
+
+/** Everything that determines the charge power at a given SoC. One object instead of
+ *  positional arguments — positional slots were a source of silent bugs before. */
+export interface ChargePowerParams {
+  connector: ChargeConnector;
+  /** Rated power of the specific station/connector (kW). Undefined = car-limited. */
+  stationMaxPowerKw?: number;
+  /** Outside temperature at the stop (°C). Undefined = no temperature limit. */
+  temperatureC?: number;
+  vehicle?: ChargeVehicleLimits;
+}
+
+const positiveOr = (value: number | undefined, fallback: number): number =>
+  Number.isFinite(value) && (value as number) > 0 ? (value as number) : fallback;
 
 const interpolateCurve = (curve: { soc: number; powerKw: number }[], soc: number): number => {
   const s = Math.max(0, Math.min(100, soc));
@@ -52,82 +83,108 @@ const interpolateCurve = (curve: { soc: number; powerKw: number }[], soc: number
   return curve[curve.length - 1].powerKw;
 };
 
-/** Charging power actually available at a given SoC: the vehicle's own curve (or the AC
- *  onboard-charger cap for Type 2), further capped by whatever the specific station/connector
- *  can deliver — a 50 kW public CCS lot won't give 167 kW just because the car could take it. */
-export const chargePowerKwAtSoc = (soc: number, connector: ChargeConnector, stationMaxPowerKw?: number): number => {
-  const vehiclePowerKw = connector === 'type2'
-    ? Math.min(interpolateCurve(VIGO_DC_CHARGE_CURVE_KW, soc), VIGO_AC_MAX_POWER_KW)
-    : interpolateCurve(VIGO_DC_CHARGE_CURVE_KW, soc);
-  return stationMaxPowerKw ? Math.min(vehiclePowerKw, stationMaxPowerKw) : vehiclePowerKw;
-};
-
-export interface ChargeSessionEstimate { minutes: number; energyKwh: number; avgPowerKw: number; }
-
 /**
- * Base temperature correction for an en-route charging stop. The car is assumed to arrive
- * at the charger after driving, so the battery is partially warmed "from the wheels".
- * This is deliberately a moderate correction until real Vigo charging logs are available.
- * Values are the extra charging time versus the warm-weather baseline.
+ * Battery-side power limit from temperature (fraction of the warm-weather curve). The car is
+ * assumed to arrive at the charger after driving, so the pack is partly warmed "from the
+ * wheels". This limits POWER, not time: on a slow station the station is the bottleneck and
+ * cold does not stretch the session; on a fast one it caps what the pack accepts.
+ * Placeholder values until real cold-weather charging logs exist.
  */
-export const VIGO_EN_ROUTE_CHARGE_TEMP_POINTS: { temperatureC: number; timeMultiplier: number }[] = [
-  { temperatureC: -20, timeMultiplier: 1.30 },
-  { temperatureC: -15, timeMultiplier: 1.22 },
-  { temperatureC: -10, timeMultiplier: 1.15 },
-  { temperatureC: -5, timeMultiplier: 1.10 },
-  { temperatureC: 0, timeMultiplier: 1.06 },
-  { temperatureC: 5, timeMultiplier: 1.03 },
-  { temperatureC: 15, timeMultiplier: 1.00 },
-  { temperatureC: 30, timeMultiplier: 1.00 },
-  { temperatureC: 35, timeMultiplier: 1.05 },
+export const VIGO_EN_ROUTE_CHARGE_TEMP_POWER_POINTS: { temperatureC: number; powerFactor: number }[] = [
+  { temperatureC: -20, powerFactor: 0.68 },
+  { temperatureC: -15, powerFactor: 0.74 },
+  { temperatureC: -10, powerFactor: 0.80 },
+  { temperatureC: -5, powerFactor: 0.86 },
+  { temperatureC: 0, powerFactor: 0.92 },
+  { temperatureC: 5, powerFactor: 0.96 },
+  { temperatureC: 15, powerFactor: 1.00 },
+  { temperatureC: 30, powerFactor: 1.00 },
+  { temperatureC: 35, powerFactor: 0.95 },
 ];
 
-export const getEnRouteChargeTemperatureMultiplier = (temperatureC?: number): number => {
+export const getEnRouteChargePowerFactor = (temperatureC?: number): number => {
   if (!Number.isFinite(temperatureC)) return 1;
   const t = temperatureC as number;
-  const points = VIGO_EN_ROUTE_CHARGE_TEMP_POINTS;
-  if (t <= points[0].temperatureC) return points[0].timeMultiplier;
-  if (t >= points[points.length - 1].temperatureC) return points[points.length - 1].timeMultiplier;
+  const points = VIGO_EN_ROUTE_CHARGE_TEMP_POWER_POINTS;
+  if (t <= points[0].temperatureC) return points[0].powerFactor;
+  if (t >= points[points.length - 1].temperatureC) return points[points.length - 1].powerFactor;
   for (let i = 1; i < points.length; i++) {
     if (t <= points[i].temperatureC) {
       const a = points[i - 1];
       const b = points[i];
       const f = (t - a.temperatureC) / Math.max(0.001, b.temperatureC - a.temperatureC);
-      return a.timeMultiplier + (b.timeMultiplier - a.timeMultiplier) * f;
+      return a.powerFactor + (b.powerFactor - a.powerFactor) * f;
     }
   }
   return 1;
 };
 
-/** Integrates the charge curve in 1%-SoC steps from fromSoc to toSoc.
- * `temperatureC` is the outside temperature at the en-route charging stop.
- */
-export const estimateChargingSession = (
-  fromSoc: number,
-  toSoc: number,
-  batteryCapacityKwh: number,
-  connector: ChargeConnector,
-  stationMaxPowerKw?: number,
-  temperatureC?: number,
-): ChargeSessionEstimate => {
-  const from = Math.max(0, Math.min(100, fromSoc));
-  const to = Math.max(from, Math.min(100, toSoc));
+/** Charging power (kW into the battery) at a given SoC: the vehicle's own curve — scaled to
+ *  the profile's dcMaxKw, capped by the onboard AC charger for Type 2, reduced by temperature —
+ *  further capped by what the station actually delivers. */
+export const chargePowerKwAtSoc = (soc: number, params: ChargePowerParams): number => {
+  const dcMaxKw = positiveOr(params.vehicle?.dcMaxKw, VIGO_REFERENCE_DC_MAX_KW);
+  const acMaxKw = positiveOr(params.vehicle?.acMaxKw, VIGO_REFERENCE_AC_MAX_KW);
+  const curveKw = interpolateCurve(VIGO_DC_CHARGE_CURVE_KW, soc) * (dcMaxKw / VIGO_REFERENCE_DC_MAX_KW);
+  const tempFactor = getEnRouteChargePowerFactor(params.temperatureC);
+  const vehicleKw = (params.connector === 'type2' ? Math.min(curveKw, acMaxKw) : curveKw) * tempFactor;
+  return params.stationMaxPowerKw
+    ? Math.min(vehicleKw, params.stationMaxPowerKw * STATION_DELIVERY_EFFICIENCY)
+    : vehicleKw;
+};
+
+export interface ChargeSessionEstimate {
+  /** Total time of the stop: charging + plug-in overhead + detour. */
+  minutes: number;
+  /** Pure charging time. */
+  chargeMinutes: number;
+  /** Parking / plug-in / authorization. */
+  overheadMinutes: number;
+  /** Extra driving to reach the station and return to the route. */
+  detourMinutes: number;
+  energyKwh: number;
+  /** Average power over the charging part only. */
+  avgPowerKw: number;
+}
+
+export interface ChargeSessionParams extends ChargePowerParams {
+  fromSoc: number;
+  toSoc: number;
+  batteryCapacityKwh: number;
+  /** One-way distance of the station from the route (km). */
+  detourKm?: number;
+  overheadMinutes?: number;
+}
+
+/** Integrates the charge curve in 1%-SoC steps from fromSoc to toSoc. */
+export const estimateChargingSession = (params: ChargeSessionParams): ChargeSessionEstimate => {
+  const from = Math.max(0, Math.min(100, params.fromSoc));
+  const to = Math.max(from, Math.min(100, params.toSoc));
   const STEP = 1;
   let hours = 0;
   let energyKwh = 0;
   for (let soc = from; soc < to; soc += STEP) {
     const stepSoc = Math.min(STEP, to - soc);
-    const powerKw = chargePowerKwAtSoc(soc + stepSoc / 2, connector, stationMaxPowerKw);
-    const stepEnergyKwh = (stepSoc / 100) * batteryCapacityKwh;
+    const powerKw = chargePowerKwAtSoc(soc + stepSoc / 2, params);
+    const stepEnergyKwh = (stepSoc / 100) * params.batteryCapacityKwh;
     energyKwh += stepEnergyKwh;
     hours += powerKw > 0 ? stepEnergyKwh / powerKw : 0;
   }
-  const temperatureMultiplier = getEnRouteChargeTemperatureMultiplier(temperatureC);
-  const adjustedHours = hours * temperatureMultiplier;
+  const chargeMinutes = Math.round(hours * 60);
+  // A stop that adds nothing stays at 0 so callers can still filter it out.
+  const hasStop = chargeMinutes > 0;
+  const overheadMinutes = hasStop ? Math.round(params.overheadMinutes ?? PLUG_IN_OVERHEAD_MIN) : 0;
+  const detourKm = Number.isFinite(params.detourKm) ? Math.max(0, params.detourKm as number) : 0;
+  const detourMinutes = hasStop
+    ? Math.round(((2 * detourKm * DETOUR_ROAD_FACTOR) / DETOUR_SPEED_KMH) * 60)
+    : 0;
   return {
-    minutes: Math.round(adjustedHours * 60),
+    minutes: chargeMinutes + overheadMinutes + detourMinutes,
+    chargeMinutes,
+    overheadMinutes,
+    detourMinutes,
     energyKwh: Number(energyKwh.toFixed(2)),
-    avgPowerKw: adjustedHours > 0 ? Number((energyKwh / adjustedHours).toFixed(1)) : 0,
+    avgPowerKw: hours > 0 ? Number((energyKwh / hours).toFixed(1)) : 0,
   };
 };
 
@@ -135,24 +192,23 @@ export const estimateChargingSession = (
  * Picks a charge target that balances "enough to safely finish the trip" against "don't keep
  * charging once the marginal rate has collapsed". Starting from max(fromSoc, minRequiredSoc),
  * it walks forward in 1% steps while the charging power at that SoC is still at least
- * `marginalRateThreshold` (default 50%) of the curve's peak power for this connector/station;
- * it stops as soon as that condition fails. `minRequiredSoc` always wins over the efficiency
- * cutoff — necessity (reaching point B with reserve) is never traded away for a faster stop.
+ * `marginalRateThreshold` (default 50%) of the curve's peak power for this car/station; it stops
+ * as soon as that condition fails. `minRequiredSoc` always wins over the efficiency cutoff —
+ * necessity (reaching point B with reserve) is never traded away for a faster stop.
  */
 export const findOptimalChargeTargetSoc = (
   fromSoc: number,
   minRequiredSoc: number,
-  connector: ChargeConnector,
-  stationMaxPowerKw?: number,
+  power: ChargePowerParams,
   options: { maxTargetSoc?: number; marginalRateThreshold?: number } = {},
 ): number => {
   const maxTargetSoc = options.maxTargetSoc ?? 90;
   const marginalRateThreshold = options.marginalRateThreshold ?? 0.5;
-  const peakPowerKw = Math.max(...VIGO_DC_CHARGE_CURVE_KW.map(p => chargePowerKwAtSoc(p.soc, connector, stationMaxPowerKw)));
+  const peakPowerKw = Math.max(...VIGO_DC_CHARGE_CURVE_KW.map(p => chargePowerKwAtSoc(p.soc, power)));
   const floor = Math.max(fromSoc, minRequiredSoc);
   let efficientTarget = Math.min(maxTargetSoc, floor);
   for (let soc = floor; soc <= maxTargetSoc; soc += 1) {
-    const powerKw = chargePowerKwAtSoc(soc, connector, stationMaxPowerKw);
+    const powerKw = chargePowerKwAtSoc(soc, power);
     if (powerKw < peakPowerKw * marginalRateThreshold) break;
     efficientTarget = soc;
   }

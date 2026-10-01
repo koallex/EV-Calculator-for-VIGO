@@ -890,6 +890,57 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             )}
 
             <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-xs">
+                <label className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                  Макс. скорость зарядки (DC):
+                </label>
+                <span className={`font-mono font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
+                  {Math.round(form.dcMaxKw || getVehicleVariant(form.vehicleProfileId, form.vehicleVariantId).dcMaxKw)} кВт
+                </span>
+              </div>
+              <DecimalInput
+                value={form.dcMaxKw ?? getVehicleVariant(form.vehicleProfileId, form.vehicleVariantId).dcMaxKw}
+                onChange={(val) => setForm({ ...form, dcMaxKw: val > 0 ? val : undefined })}
+                min={10}
+                max={400}
+                suffix="кВт"
+                className={`w-full border px-3 py-2 rounded-xl text-sm font-mono font-bold focus:outline-none transition-colors ${
+                  isDark
+                    ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
+                }`}
+              />
+              <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                Пиковая мощность, которую принимает авто на быстрой зарядке. От неё строится кривая
+                зарядки в расчёте времени стопов (у Vigo — 167 кВт). Реальная скорость ограничена ещё
+                мощностью станции, уровнем заряда и температурой.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-xs">
+                <label className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                  Макс. мощность AC (бортовое):
+                </label>
+                <span className={`font-mono font-bold ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`}>
+                  {form.acMaxKw || getVehicleVariant(form.vehicleProfileId, form.vehicleVariantId).acMaxKw} кВт
+                </span>
+              </div>
+              <DecimalInput
+                value={form.acMaxKw ?? getVehicleVariant(form.vehicleProfileId, form.vehicleVariantId).acMaxKw}
+                onChange={(val) => setForm({ ...form, acMaxKw: val > 0 ? val : undefined })}
+                min={1}
+                max={50}
+                suffix="кВт"
+                className={`w-full border px-3 py-2 rounded-xl text-sm font-mono font-bold focus:outline-none transition-colors ${
+                  isDark
+                    ? 'bg-slate-950 border-slate-700 text-white focus:border-cyan-500'
+                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
+                }`}
+              />
+            </div>
+
+            <div className="space-y-1.5">
               <label className={`text-xs font-semibold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
                 Порт зарядки
               </label>

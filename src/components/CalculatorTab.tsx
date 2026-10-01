@@ -42,8 +42,8 @@ import { AddressAutocomplete } from './AddressAutocomplete';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
 import { fetchChargingStationsAlongRoute, stationSupportsConnectors, ChargingStation } from '../services/chargingStations';
 import { findNearbyFreeCcsChargers, FreeChargerResult } from '../services/nearbyFreeCharging';
-import { resolveEffectiveConnectors } from '../data/vehicleProfiles';
-import { estimateChargingSession, findOptimalChargeTargetSoc, DEFAULT_UNKNOWN_STATION_POWER_KW, ChargeConnector } from '../utils/chargingPlanner';
+import { resolveEffectiveConnectors, resolveChargeLimits } from '../data/vehicleProfiles';
+import { estimateChargingSession, findOptimalChargeTargetSoc, DEFAULT_UNKNOWN_STATION_POWER_KW, ChargeConnector, ChargePowerParams, ChargeSessionEstimate } from '../utils/chargingPlanner';
 import { RouteMap } from './RouteMap';
 import {
   computeMapInsets,
@@ -257,7 +257,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     socAtStation: number;
     targetSoc: number;
     minRequiredSoc: number;
-    session: { minutes: number; energyKwh: number; avgPowerKw: number };
+    session: ChargeSessionEstimate;
     chargeAddedSoc: number;
     finishSocAfterCharge: number;
     /** True when the station has no power tag in OSM, so the session estimate above used the
@@ -274,7 +274,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     connector: ChargeConnector;
     socAtStation: number;
     targetSoc: number;
-    session: { minutes: number; energyKwh: number; avgPowerKw: number };
+    session: ChargeSessionEstimate;
     finishSocAfterCharge: number;
   }>>([]);
   /** How many VIGO-compatible stations were found along the corridor before usefulness filtering. */
@@ -288,7 +288,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     connector?: ChargeConnector;
     socAtStation?: number;
     targetSoc?: number;
-    session?: { minutes: number; energyKwh: number; avgPowerKw: number };
+    session?: ChargeSessionEstimate;
     finishSocAfterCharge?: number;
   } | null>(null);
 
@@ -597,6 +597,34 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       const vigoStations = stations.filter((s) => stationSupportsConnectors(s, vehicleConnectors));
       setStationsFoundAlongRoute(vigoStations.length);
       const batteryCap = settings.batteryCapacityKwh || 51.87;
+      // Vehicle-side limits come from the car profile (Settings); the temperature is the one
+      // forecast at the stop. Both are bundled into one object so no positional slot can be
+      // mixed up between the target-SoC and session calls.
+      const chargeLimits = resolveChargeLimits(settings);
+      const chargePower = (
+        connector: ChargeConnector,
+        stationMaxPowerKw: number | undefined,
+        distanceAlongRouteKm: number,
+      ): ChargePowerParams => ({
+        connector,
+        stationMaxPowerKw,
+        temperatureC: getChargingTemperatureAtDistance(distanceAlongRouteKm),
+        vehicle: chargeLimits,
+      });
+      const chargeSession = (
+        fromSoc: number,
+        toSoc: number,
+        connector: ChargeConnector,
+        stationMaxPowerKw: number | undefined,
+        station: { distanceAlongRouteKm: number; distanceFromRouteKm: number },
+      ): ChargeSessionEstimate =>
+        estimateChargingSession({
+          fromSoc,
+          toSoc,
+          batteryCapacityKwh: batteryCap,
+          ...chargePower(connector, stationMaxPowerKw, station.distanceAlongRouteKm),
+          detourKm: station.distanceFromRouteKm,
+        });
       const totalDistanceKm = routeElevation.distanceKm;
       const totalEnergyKwh = routeForecast.energyKwh;
       const socAtDistance = (distanceKm: number) =>
@@ -682,8 +710,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             : findOptimalChargeTargetSoc(
                 socAtStation,
                 desiredTarget,
-                connector,
-                stationMaxPowerKw,
+                chargePower(connector, stationMaxPowerKw, station.distanceAlongRouteKm),
                 {
                   // Allow only a tiny efficiency pad above the true need.
                   maxTargetSoc: Math.min(90, Math.max(desiredTarget, desiredTarget + 3)),
@@ -691,7 +718,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 },
               );
           const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
-          const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw, getChargingTemperatureAtDistance(station.distanceAlongRouteKm));
+          const session = chargeSession(socAtStation, targetSoc, connector, stationMaxPowerKw, station);
           // Finish SOC = leave station at targetSoc, then burn energy for the remaining km to B.
           // (Old formula arrivalSoc + chargeAdded was wrong: early charge + long remaining leg
           // still looked almost like the unassisted arrival.)
@@ -707,7 +734,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           const detourPenalty = station.distanceFromRouteKm * 5;
           const earlyStopPenalty = Math.max(0, 0.35 * totalDistanceKm - station.distanceAlongRouteKm) * 0.15;
           const score =
-            session.minutes +
+            session.chargeMinutes +
             detourPenalty +
             socWindowPenalty +
             highSocPenalty +
@@ -776,8 +803,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             const targetSoc = findOptimalChargeTargetSoc(
               socAtStation,
               desiredTarget,
-              connector,
-              stationMaxPowerKw,
+              chargePower(connector, stationMaxPowerKw, station.distanceAlongRouteKm),
               {
                 maxTargetSoc: Math.min(90, Math.max(desiredTarget, desiredTarget + 3)),
                 marginalRateThreshold: 0.5,
@@ -786,14 +812,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
             // When we must charge, even a 5% top-up is better than "no plan".
             if (chargeAddedSoc < (mustCharge ? 5 : 3)) return null;
-            const session = estimateChargingSession(socAtStation, targetSoc, batteryCap, connector, stationMaxPowerKw, getChargingTemperatureAtDistance(station.distanceAlongRouteKm));
+            const session = chargeSession(socAtStation, targetSoc, connector, stationMaxPowerKw, station);
             if (session.minutes <= 0) return null;
             const finishSocAfterCharge = Math.max(
               0,
               Math.min(100, targetSoc - (remainingEnergyKwh / batteryCap) * 100),
             );
             const score =
-              session.minutes +
+              session.chargeMinutes +
               station.distanceFromRouteKm * 5 +
               Math.abs(socAtStation - IDEAL_ARRIVAL_SOC) * 1.0 +
               Math.abs(station.distanceAlongRouteKm - totalDistanceKm * 0.45) * 0.2;
@@ -898,21 +924,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         const desiredTarget = cannotReachBAlone
           ? Math.min(90, Math.max(socAtStation + MIN_USEFUL_CHARGE_SOC, 80))
           : minRequiredSoc;
-        const targetSoc = findOptimalChargeTargetSoc(socAtStation, desiredTarget, connector, stationMaxPowerKw, {
+        const targetSoc = findOptimalChargeTargetSoc(socAtStation, desiredTarget, chargePower(connector, stationMaxPowerKw, station.distanceAlongRouteKm), {
           maxTargetSoc: Math.min(90, Math.max(desiredTarget, desiredTarget + 3)),
           marginalRateThreshold: 0.5,
         });
         const chargeAddedSoc = Math.max(0, targetSoc - socAtStation);
         const minCharge = opts?.minChargeSoc ?? MIN_USEFUL_CHARGE_SOC;
         if (chargeAddedSoc < minCharge) return null;
-        const session = estimateChargingSession(
-          socAtStation,
-          targetSoc,
-          batteryCap,
-          connector,
-          stationMaxPowerKw,
-          getChargingTemperatureAtDistance(station.distanceAlongRouteKm),
-        );
+        const session = chargeSession(socAtStation, targetSoc, connector, stationMaxPowerKw, station);
         if (session.minutes <= 0) return null;
         const finishSocAfterCharge = Math.max(
           0,
@@ -921,7 +940,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         // Prefer stops that leave a workable pack for the next leg when B is still far.
         const unreachablePenalty = cannotReachBAlone ? 40 : 0;
         const score =
-          session.minutes +
+          session.chargeMinutes +
           station.distanceFromRouteKm * 5 +
           Math.abs(socAtStation - IDEAL_ARRIVAL_SOC) * 1.5 +
           (socAtStation > 50 ? (socAtStation - 50) * 1.2 : 0) +
@@ -1038,18 +1057,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               : connector === 'ccs2'
                 ? prev.station.ccs2PowerKw
                 : prev.station.type2PowerKw) ?? DEFAULT_UNKNOWN_STATION_POWER_KW;
-          const targetSoc = findOptimalChargeTargetSoc(prev.socAtStation, bumpTarget, connector, stationMax, {
+          const targetSoc = findOptimalChargeTargetSoc(prev.socAtStation, bumpTarget, chargePower(connector, stationMax, prev.station.distanceAlongRouteKm), {
             maxTargetSoc: Math.min(90, Math.max(bumpTarget, bumpTarget + 3)),
             marginalRateThreshold: 0.5,
           });
-          const session = estimateChargingSession(
-            prev.socAtStation,
-            targetSoc,
-            batteryCap,
-            connector,
-            stationMax,
-            getChargingTemperatureAtDistance(prev.station.distanceAlongRouteKm),
-          );
+          const session = chargeSession(prev.socAtStation, targetSoc, connector, stationMax, prev.station);
           const finishSocAfterCharge = Math.max(
             0,
             Math.min(100, targetSoc - (remainingEnergyPrev / batteryCap) * 100),
@@ -1104,7 +1116,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       }
     }
     return () => { cancelled = true; };
-  }, [routeElevation, routeForecast, routeWeather, startSoc, settings.batteryCapacityKwh, getChargingTemperatureAtDistance]);
+  }, [routeElevation, routeForecast, routeWeather, startSoc, settings.batteryCapacityKwh, settings.vehicleProfileId, settings.vehicleVariantId, settings.connectorOverride, settings.dcMaxKw, settings.acMaxKw, getChargingTemperatureAtDistance]);
 
   // Automatic search is deliberately limited to the low-arrival-SOC case.
   useEffect(() => {
@@ -1815,6 +1827,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             {selectedRouteStop.socAtStation != null && <>Прибытие ~{Math.round(selectedRouteStop.socAtStation)}%</>}
             {selectedRouteStop.targetSoc != null && <> → {Math.round(selectedRouteStop.targetSoc)}%</>}
             {selectedRouteStop.session && <> · ~{selectedRouteStop.session.minutes} мин · {selectedRouteStop.session.energyKwh.toFixed(1)} кВт⋅ч</>}
+            {selectedRouteStop.session && selectedRouteStop.session.minutes !== selectedRouteStop.session.chargeMinutes && (
+              <> (зарядка {selectedRouteStop.session.chargeMinutes} + подключение {selectedRouteStop.session.overheadMinutes}{selectedRouteStop.session.detourMinutes > 0 ? ` + съезд ${selectedRouteStop.session.detourMinutes}` : ''} мин)</>
+            )}
             {selectedRouteStop.finishSocAfterCharge != null && <> · на финише ~{Math.round(selectedRouteStop.finishSocAfterCharge)}%</>}
           </p>
         )}
