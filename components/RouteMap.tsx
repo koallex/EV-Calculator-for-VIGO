@@ -3,6 +3,7 @@ import type { RoutePoint } from '../services/routeElevation';
 import {
   createBestMap,
   headingDegToAzimuthRad,
+  makeChargerMarkerEl,
   makeDotMarkerEl,
   makeLabelMarkerEl,
   makeNavArrowEl,
@@ -10,6 +11,7 @@ import {
   scrubYandexOpenMapsPromo,
   toLonLat,
   type AnyMapBundle,
+  type ChargerMarkerRole,
 } from '../utils/yandexMaps';
 import { TESLA_ROUTE_BLUE, TESLA_ROUTE_TRAVELED, TESLA_ROUTE_GLOW } from '../utils/mapStyleTesla';
 import { HeadingFilter, headingDelta } from '../utils/headingFilter';
@@ -142,6 +144,10 @@ export interface RouteMapChargingStop {
   address?: string;
   /** Optional id to match station in parent state when marker is tapped. */
   id?: string;
+  /** Visual role on the route map. */
+  role?: ChargerMarkerRole;
+  /** Peak power (kW) for the badge on the marker. */
+  powerKw?: number;
 }
 
 interface RouteMapProps {
@@ -721,27 +727,55 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     chargerMarkersRef.current.forEach((m) => removeObj(bundle, m));
     chargerMarkersRef.current = [];
 
-    stops.forEach((stop) => {
+    // Draw context first, then planned, then optimal — so recommended pins sit on top.
+    const roleOrder = (r?: string) => (r === 'optimal' ? 2 : r === 'planned' ? 1 : 0);
+    const ordered = [...stops].sort((a, b) => roleOrder(a.role) - roleOrder(b.role));
+
+    ordered.forEach((stop) => {
+      const role = stop.role || 'context';
+      const powerKw = stop.powerKw;
       if (bundle.apiVersion === 3) {
-        const { YMapMarker } = (bundle as any).ymaps3;
-        const el = makeLabelMarkerEl('⚡', '#fbbf24');
-        el.title = stop.name;
-        el.style.cursor = 'pointer';
+        const YMapMarker = (bundle as any).ymaps3?.YMapMarker;
+        if (typeof YMapMarker !== 'function') {
+          console.warn('[RouteMap] YMapMarker unavailable, skip charger marker', stop.name);
+          return;
+        }
+        const el = makeChargerMarkerEl({
+          role,
+          powerKw,
+          title: stop.name,
+        });
         if (onChargingStopClick) {
           el.addEventListener('click', (ev: Event) => {
             ev.stopPropagation();
             onChargingStopClick(stop);
           });
         }
-        const m = new YMapMarker({ coordinates: toLonLat(stop.lat, stop.lon) }, el);
-        map.addChild(m);
-        chargerMarkersRef.current.push(m);
+        try {
+          const m = new YMapMarker({ coordinates: toLonLat(stop.lat, stop.lon) }, el);
+          map.addChild(m);
+          chargerMarkersRef.current.push(m);
+        } catch (err) {
+          console.warn('[RouteMap] charger marker failed', stop.name, err);
+        }
       } else {
         const ymaps = (bundle as any).ymaps;
+        const color =
+          role === 'optimal' ? '#f59e0b' : role === 'planned' ? '#06b6d4' : '#64748b';
+        const iconContent =
+          powerKw != null && powerKw > 0 ? `⚡${Math.round(powerKw)}` : '⚡';
         const m = new ymaps.Placemark(
           [stop.lat, stop.lon],
-          { hintContent: stop.name, balloonContent: stop.name },
-          { preset: 'islands#darkOrangeStretchyIcon', iconContent: '⚡' },
+          {
+            hintContent: stop.name,
+            balloonContent: stop.name,
+            iconContent,
+          },
+          {
+            preset: 'islands#stretchyIcon',
+            iconColor: color,
+            zIndex: role === 'optimal' ? 700 : role === 'planned' ? 650 : 600,
+          },
         );
         if (onChargingStopClick) {
           m.events.add('click', () => onChargingStopClick(stop));
