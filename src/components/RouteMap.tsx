@@ -6,6 +6,8 @@ import {
   makeDotMarkerEl,
   makeLabelMarkerEl,
   makeChargerMarkerEl,
+  makeClusterMarkerEl,
+  clusterPointsByZoom,
   makeNavArrowEl,
   normalizeDeg180,
   scrubYandexOpenMapsPromo,
@@ -207,6 +209,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   const chargerMarkersRef = useRef<any[]>([]);
   const [loadError, setLoadError] = useState('');
   const [mapReady, setMapReady] = useState(false);
+  const [mapZoom, setMapZoom] = useState(12);
+  const onChargingStopClickRef = useRef(onChargingStopClick);
+  onChargingStopClickRef.current = onChargingStopClick;
   /** After user pans/zooms, pause GPS follow so gestures are not fought. */
   const userNavPauseUntilRef = useRef(0);
   /** Last route progress index applied to polylines — skip redraw when unchanged. */
@@ -718,6 +723,37 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, currentPosition?.lat, currentPosition?.lon, followMode, JSON.stringify(positions), isDark]);
 
+
+  // Track zoom for charger clustering (no animation — redraw must stay quiet).
+  useEffect(() => {
+    if (!mapReady) return;
+    const bundle = bundleRef.current as any;
+    if (!bundle) return;
+    const readZoom = () => {
+      try {
+        const map = bundle.map;
+        const z =
+          (typeof map?.zoom === 'number' && map.zoom) ||
+          (typeof map?.location?.zoom === 'number' && map.location.zoom) ||
+          null;
+        if (typeof z === 'number' && Number.isFinite(z)) {
+          setMapZoom((prev) => (Math.abs(prev - z) >= 0.25 ? z : prev));
+        }
+      } catch { /* ignore */ }
+    };
+    readZoom();
+    const id = window.setInterval(readZoom, 450);
+    const el = containerRef.current;
+    const onUser = () => readZoom();
+    el?.addEventListener('pointerup', onUser, { passive: true });
+    el?.addEventListener('wheel', onUser, { passive: true });
+    return () => {
+      window.clearInterval(id);
+      el?.removeEventListener('pointerup', onUser);
+      el?.removeEventListener('wheel', onUser);
+    };
+  }, [mapReady]);
+
   useEffect(() => {
     const bundle = bundleRef.current;
     if (!bundle || !mapReady) return;
@@ -726,49 +762,84 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     chargerMarkersRef.current.forEach((m) => removeObj(bundle, m));
     chargerMarkersRef.current = [];
 
-    // Dim first, recommended last (paint on top). Stagger index = final draw order.
     const ordered = [...stops].sort((a, b) => Number(!!a.recommended) - Number(!!b.recommended));
-    ordered.forEach((stop, index) => {
+    const buckets = clusterPointsByZoom(
+      ordered.map((s) => ({ ...s, lat: s.lat, lon: s.lon, recommended: !!s.recommended })),
+      mapZoom,
+    );
+
+    const zoomInto = (lat: number, lon: number) => {
+      try {
+        if (bundle.apiVersion === 3) {
+          map.setLocation?.({ center: toLonLat(lat, lon), zoom: Math.min(16, mapZoom + 2), duration: 300 });
+        } else {
+          bundle.setLocation?.(lat, lon, Math.min(16, mapZoom + 2));
+        }
+      } catch { /* ignore */ }
+    };
+
+    buckets.forEach((bucket) => {
+      if (bucket.type === 'cluster') {
+        if (bundle.apiVersion === 3) {
+          const { YMapMarker } = (bundle as any).ymaps3;
+          const el = makeClusterMarkerEl({
+            count: bucket.count,
+            recommended: bucket.recommended,
+            title: `${bucket.count} станций — приблизьте`,
+          });
+          el.addEventListener('click', (ev: Event) => {
+            ev.stopPropagation();
+            zoomInto(bucket.lat, bucket.lon);
+          });
+          const m = new YMapMarker({ coordinates: toLonLat(bucket.lat, bucket.lon) }, el);
+          map.addChild(m);
+          chargerMarkersRef.current.push(m);
+        } else {
+          const ymaps = (bundle as any).ymaps;
+          const m = new ymaps.Placemark(
+            [bucket.lat, bucket.lon],
+            { iconContent: String(bucket.count), hintContent: `${bucket.count} станций` },
+            { preset: bucket.recommended ? 'islands#orangeCircleIcon' : 'islands#grayCircleIcon' },
+          );
+          m.events.add('click', () => zoomInto(bucket.lat, bucket.lon));
+          map.geoObjects.add(m);
+          chargerMarkersRef.current.push(m);
+        }
+        return;
+      }
+      const stop = bucket.item;
       const power =
-        stop.powerKw != null && Number.isFinite(stop.powerKw) && stop.powerKw > 0
+        stop.powerKw != null && Number.isFinite(Number(stop.powerKw)) && Number(stop.powerKw) > 0
           ? Math.round(Number(stop.powerKw))
           : null;
-      const label = power != null ? `${power}` : '⚡';
       if (bundle.apiVersion === 3) {
         const { YMapMarker } = (bundle as any).ymaps3;
         const el = makeChargerMarkerEl({
-          powerKw: stop.powerKw,
-          recommended: stop.recommended,
-          title: stop.name + (power != null ? ` · ${power} кВт` : ''),
-          index,
+          powerKw: stop.powerKw as number | null | undefined,
+          recommended: !!stop.recommended,
+          title: String(stop.name || '') + (power != null ? ` · ${power} кВт` : ''),
         });
-        if (onChargingStopClick) {
-          el.addEventListener('click', (ev: Event) => {
-            ev.stopPropagation();
-            onChargingStopClick(stop);
-          });
-        }
+        el.addEventListener('click', (ev: Event) => {
+          ev.stopPropagation();
+          onChargingStopClickRef.current?.(stop as any);
+        });
         const m = new YMapMarker({ coordinates: toLonLat(stop.lat, stop.lon) }, el);
         map.addChild(m);
         chargerMarkersRef.current.push(m);
       } else {
         const ymaps = (bundle as any).ymaps;
-        const color = stop.recommended ? '#f59e0b' : '#64748b';
         const m = new ymaps.Placemark(
           [stop.lat, stop.lon],
           {
             hintContent: stop.name,
-            balloonContent: stop.name + (power != null ? `<br/>${power} кВт` : ''),
-            iconContent: label,
+            balloonContent: String(stop.name || '') + (power != null ? `<br/>${power} кВт` : ''),
+            iconContent: power != null ? String(power) : '⚡',
           },
           {
             preset: stop.recommended ? 'islands#orangeCircleIcon' : 'islands#grayCircleIcon',
-            iconColor: color,
           },
         );
-        if (onChargingStopClick) {
-          m.events.add('click', () => onChargingStopClick(stop));
-        }
+        m.events.add('click', () => onChargingStopClickRef.current?.(stop as any));
         map.geoObjects.add(m);
         chargerMarkersRef.current.push(m);
       }
@@ -779,7 +850,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       chargerMarkersRef.current = [];
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, JSON.stringify(stops), onChargingStopClick]);
+  }, [mapReady, JSON.stringify(stops), mapZoom]);
 
   // A different route was drawn: forget where on the old one we were.
   useEffect(() => {

@@ -500,7 +500,7 @@ export function makeDotMarkerEl(
 }
 
 
-/** Inject once: staggered appear + soft pulse for plan stops */
+/** Static CSS for charger / cluster markers (no enter animation — avoids flicker on redraw). */
 let chargerMarkerCssReady = false;
 function ensureChargerMarkerCss() {
   if (chargerMarkerCssReady || typeof document === 'undefined') return;
@@ -508,21 +508,15 @@ function ensureChargerMarkerCss() {
   const s = document.createElement('style');
   s.setAttribute('data-vigo-charger-marker', '1');
   s.textContent = `
-@keyframes vigoChargerIn {
-  from { opacity: 0; transform: translate(-50%,-50%) scale(0.4); }
-  to   { opacity: 1; transform: translate(-50%,-50%) scale(1); }
-}
-@keyframes vigoChargerPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); }
-  50%      { box-shadow: 0 0 0 5px rgba(245,158,11,0); }
-}
 .vigo-chg-marker {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 3px;
   transform: translate(-50%, -50%);
   cursor: pointer;
   pointer-events: auto;
   user-select: none;
-  opacity: 0;
-  animation: vigoChargerIn 0.32s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 .vigo-chg-marker__disc {
   display: flex;
@@ -532,24 +526,61 @@ function ensureChargerMarkerCss() {
   height: 20px;
   border-radius: 999px;
   box-sizing: border-box;
-}
-.vigo-chg-marker__disc svg {
-  display: block;
   flex-shrink: 0;
+}
+.vigo-chg-marker__disc svg { display: block; }
+.vigo-chg-marker__kw {
+  font: 700 9px/1 system-ui, sans-serif;
+  padding: 2px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+  letter-spacing: -0.02em;
 }
 .vigo-chg-marker--rec .vigo-chg-marker__disc {
   width: 22px;
   height: 22px;
   background: #f59e0b;
   border: 1.5px solid rgba(255,255,255,0.95);
-  animation: vigoChargerPulse 2.6s ease-in-out infinite;
-  animation-delay: inherit;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+}
+.vigo-chg-marker--rec .vigo-chg-marker__kw {
+  background: rgba(245, 158, 11, 0.95);
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 .vigo-chg-marker--dim .vigo-chg-marker__disc {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.55);
+}
+.vigo-chg-marker--dim .vigo-chg-marker__kw {
   background: rgba(15, 23, 42, 0.88);
-  border: 1px solid rgba(148, 163, 184, 0.5);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+}
+.vigo-chg-cluster {
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 800 11px/1 system-ui, sans-serif;
+  color: #f8fafc;
+  border: 2px solid rgba(255,255,255,0.9);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+.vigo-chg-cluster--rec {
+  background: #d97706;
+}
+.vigo-chg-cluster--dim {
+  background: #475569;
 }
 `;
   document.head.appendChild(s);
@@ -560,15 +591,12 @@ const BOLT_SVG = (fill: string, size: number) =>
   `<path fill="${fill}" d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg>`;
 
 /**
- * Minimal bolt marker. `index` staggers appear so markers do not pop in together.
- * recommended → amber disc + pulse; others → small slate disc.
- * Power stays in title only (tooltip).
+ * Bolt + optional power (kW). No CSS enter animation — map often rebuilds markers.
  */
 export function makeChargerMarkerEl(opts: {
   powerKw?: number | null;
   recommended?: boolean;
   title?: string;
-  /** 0-based order along the route — drives animation-delay */
   index?: number;
 }): HTMLElement {
   ensureChargerMarkerCss();
@@ -576,22 +604,93 @@ export function makeChargerMarkerEl(opts: {
     ? Math.round(Number(opts.powerKw))
     : null;
   const rec = !!opts.recommended;
-  const idx = Math.max(0, Math.min(40, opts.index ?? 0));
-  // ~45ms steps, cap so long routes still finish in ~1.2s
-  const delayMs = Math.min(idx * 45, 1200);
-
   const el = document.createElement('div');
   el.className = 'vigo-chg-marker ' + (rec ? 'vigo-chg-marker--rec' : 'vigo-chg-marker--dim');
-  el.style.animationDelay = `${delayMs}ms`;
   el.title = opts.title || (power != null ? `${power} кВт` : '');
-
   const disc = document.createElement('div');
   disc.className = 'vigo-chg-marker__disc';
-  // Pulse on the disc should start after the appear delay
-  if (rec) disc.style.animationDelay = `${delayMs + 320}ms`;
-  disc.innerHTML = BOLT_SVG(rec ? '#0f172a' : '#94a3b8', rec ? 12 : 9);
+  disc.innerHTML = BOLT_SVG(rec ? '#0f172a' : '#94a3b8', rec ? 11 : 9);
   el.appendChild(disc);
+  if (power != null) {
+    const kw = document.createElement('span');
+    kw.className = 'vigo-chg-marker__kw';
+    kw.textContent = String(power);
+    el.appendChild(kw);
+  }
   return el;
+}
+
+/** Cluster bubble with station count. */
+export function makeClusterMarkerEl(opts: {
+  count: number;
+  recommended?: boolean;
+  title?: string;
+}): HTMLElement {
+  ensureChargerMarkerCss();
+  const el = document.createElement('div');
+  el.className = 'vigo-chg-cluster ' + (opts.recommended ? 'vigo-chg-cluster--rec' : 'vigo-chg-cluster--dim');
+  el.textContent = String(opts.count);
+  el.title = opts.title || `${opts.count} станций`;
+  return el;
+}
+
+export type ClusterablePoint = {
+  lat: number;
+  lon: number;
+  recommended?: boolean;
+  [key: string]: unknown;
+};
+
+export type ClusterBucket<T extends ClusterablePoint> =
+  | { type: 'point'; item: T }
+  | { type: 'cluster'; lat: number; lon: number; count: number; recommended: boolean; items: T[] };
+
+/**
+ * Grid cluster by map zoom. Below ~12.5 markers merge; closer zoom → individuals.
+ */
+export function clusterPointsByZoom<T extends ClusterablePoint>(
+  points: T[],
+  zoom: number,
+): ClusterBucket<T>[] {
+  if (!points.length) return [];
+  // Always show individually when zoomed in enough or few points
+  if (zoom >= 13.2 || points.length <= 3) {
+    return points.map((item) => ({ type: 'point' as const, item }));
+  }
+  // Cell size in degrees shrinks as zoom grows
+  const cell = Math.max(0.008, 0.55 / Math.pow(2, Math.max(0, zoom - 9)));
+  const bins = new Map<string, T[]>();
+  for (const p of points) {
+    if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
+    const key = `${Math.floor(p.lat / cell)}_${Math.floor(p.lon / cell)}`;
+    const arr = bins.get(key);
+    if (arr) arr.push(p);
+    else bins.set(key, [p]);
+  }
+  const out: ClusterBucket<T>[] = [];
+  for (const group of bins.values()) {
+    if (group.length === 1) {
+      out.push({ type: 'point', item: group[0] });
+      continue;
+    }
+    let lat = 0;
+    let lon = 0;
+    let rec = false;
+    for (const g of group) {
+      lat += g.lat;
+      lon += g.lon;
+      if (g.recommended) rec = true;
+    }
+    out.push({
+      type: 'cluster',
+      lat: lat / group.length,
+      lon: lon / group.length,
+      count: group.length,
+      recommended: rec,
+      items: group,
+    });
+  }
+  return out;
 }
 
 export function makeLabelMarkerEl(text: string, color: string): HTMLElement {

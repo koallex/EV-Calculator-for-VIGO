@@ -13,6 +13,9 @@ import { UserSettings } from '../types';
 import {
   createBestMap,
   makeDotMarkerEl,
+  makeChargerMarkerEl,
+  makeClusterMarkerEl,
+  clusterPointsByZoom,
   toLonLat,
   type AnyMapBundle,
 } from '../utils/yandexMaps';
@@ -365,6 +368,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const [nearestFreeList, setNearestFreeList] = useState<FreeChargerResult[]>([]);
   const [nearestFreeOpen, setNearestFreeOpen] = useState(false);
   const [stations, setStations] = useState<MapStation[]>([]);
+  const [mapZoom, setMapZoom] = useState(12);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<MapStation | null>(null);
@@ -780,6 +784,26 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+
+  // Zoom for clustering
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const b = bundleRef.current as any;
+      if (!b?.map) return;
+      try {
+        const map = b.map;
+        const z =
+          (typeof map.zoom === 'number' && map.zoom) ||
+          (typeof map.location?.zoom === 'number' && map.location.zoom) ||
+          null;
+        if (typeof z === 'number' && Number.isFinite(z)) {
+          setMapZoom((prev) => (Math.abs(prev - z) >= 0.25 ? z : prev));
+        }
+      } catch { /* ignore */ }
+    }, 450);
+    return () => window.clearInterval(id);
+  }, []);
+
   // Update markers when stations / filters change
   useEffect(() => {
     const bundle = bundleRef.current as any;
@@ -798,22 +822,76 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     });
     markersLayerRef.current = [];
 
-    for (const s of visible) {
-      // Base color = operator; live status adjusts brightness via border in makeDotMarkerEl
-      let color = operatorColor(s.operator);
-      let border = '#0f172a';
-      if (s.liveChecked) {
-        const free =
-          (profileConnectors.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
-          (profileConnectors.includes('gbt') && (s.freeGbt ?? 0) > 0) ||
-          (profileConnectors.includes('type2') && (s.freeType2 ?? 0) > 0);
-        border = free ? '#ecfdf5' : '#450a0a';
+    const zoomInto = (lat: number, lon: number) => {
+      try {
+        if (bundle.apiVersion === 3) {
+          map.setLocation?.({
+            center: toLonLat(lat, lon),
+            zoom: Math.min(16, (mapZoom || 12) + 2),
+            duration: 280,
+          });
+        } else {
+          bundle.setLocation?.(lat, lon, Math.min(16, (mapZoom || 12) + 2));
+        }
+      } catch { /* ignore */ }
+    };
+
+    const points = visible.map((s) => ({
+      ...s,
+      lat: s.lat,
+      lon: s.lon,
+      recommended: false,
+    }));
+    const buckets = clusterPointsByZoom(points, mapZoom);
+
+    for (const bucket of buckets) {
+      if (bucket.type === 'cluster') {
+        if (bundle.apiVersion === 3) {
+          const { YMapMarker } = bundle.ymaps3;
+          const el = makeClusterMarkerEl({
+            count: bucket.count,
+            title: `${bucket.count} станций — приблизьте`,
+          });
+          el.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            zoomInto(bucket.lat, bucket.lon);
+          });
+          const marker = new YMapMarker({ coordinates: toLonLat(bucket.lat, bucket.lon) }, el);
+          map.addChild(marker);
+          markersLayerRef.current.push(marker);
+        } else {
+          const ymaps = bundle.ymaps;
+          const marker = new ymaps.Placemark(
+            [bucket.lat, bucket.lon],
+            { iconContent: String(bucket.count), hintContent: `${bucket.count} станций` },
+            { preset: 'islands#darkBlueCircleIcon' },
+          );
+          marker.events.add('click', () => zoomInto(bucket.lat, bucket.lon));
+          map.geoObjects.add(marker);
+          markersLayerRef.current.push(marker);
+        }
+        continue;
       }
+
+      const s = bucket.item as MapStation;
+      const pw = stationMaxPowerKw(s);
 
       if (bundle.apiVersion === 3) {
         const { YMapMarker } = bundle.ymaps3;
-        const el = makeDotMarkerEl(color, 14, border);
-        el.title = s.name;
+        const el = makeChargerMarkerEl({
+          powerKw: pw > 0 ? pw : null,
+          recommended: false,
+          title: s.name + (pw > 0 ? ` · ${Math.round(pw)} кВт` : ''),
+        });
+        // Operator tint on the disc border when live is known
+        if (s.liveChecked) {
+          const free =
+            (profileConnectors.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
+            (profileConnectors.includes('gbt') && (s.freeGbt ?? 0) > 0) ||
+            (profileConnectors.includes('type2') && (s.freeType2 ?? 0) > 0);
+          const disc = el.querySelector('.vigo-chg-marker__disc') as HTMLElement | null;
+          if (disc) disc.style.boxShadow = free ? '0 0 0 2px #34d399' : '0 0 0 2px #f87171';
+        }
         el.addEventListener('click', (ev) => {
           ev.stopPropagation();
           setSelected(s);
@@ -827,8 +905,11 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         const ymaps = bundle.ymaps;
         const marker = new ymaps.Placemark(
           [s.lat, s.lon],
-          { hintContent: s.name },
-          { preset: 'islands#circleDotIcon', iconColor: color },
+          {
+            hintContent: s.name,
+            iconContent: pw > 0 ? String(Math.round(pw)) : '⚡',
+          },
+          { preset: 'islands#circleIcon', iconColor: operatorColor(s.operator) },
         );
         marker.events.add('click', () => {
           setSelected(s);
@@ -839,7 +920,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         markersLayerRef.current.push(marker);
       }
     }
-  }, [stations, matchesFilters, profileConnectors, settings.hapticFeedback]);
+  }, [stations, matchesFilters, profileConnectors, settings.hapticFeedback, mapZoom, stationMaxPowerKw]);
 
   useEffect(() => {
     bundleRef.current?.setTheme(isDark);
