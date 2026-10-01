@@ -501,8 +501,8 @@ export function makeDotMarkerEl(
 
 
 /**
- * Compact EVSE marker: small pin + power in kW (or bolt if unknown).
- * recommended → accent (amber); others → muted slate.
+ * Minimal EVSE marker: small disc, power number when known.
+ * recommended → solid amber; others → slate outline (lighter footprint).
  */
 export function makeChargerMarkerEl(opts: {
   powerKw?: number | null;
@@ -513,57 +513,47 @@ export function makeChargerMarkerEl(opts: {
     ? Math.round(Number(opts.powerKw))
     : null;
   const rec = !!opts.recommended;
-  const bg = rec ? '#f59e0b' : '#475569';
-  const ring = rec ? '0 0 0 2px rgba(245,158,11,0.35), 0 2px 8px rgba(0,0,0,0.45)' : '0 1px 4px rgba(0,0,0,0.4)';
   const el = document.createElement('div');
-  el.title = opts.title || '';
+  el.title = opts.title || (power != null ? `${power} кВт` : '');
   el.style.cssText = [
-    'display:flex',
-    'flex-direction:column',
-    'align-items:center',
-    'transform:translate(-50%,-90%)',
+    'transform:translate(-50%,-50%)',
     'cursor:pointer',
     'pointer-events:auto',
     'user-select:none',
   ].join(';');
-  const pin = document.createElement('div');
-  pin.style.cssText = [
-    'min-width:28px',
-    'height:28px',
-    'padding:0 6px',
-    `background:${bg}`,
-    'color:#0f172a',
-    'border-radius:999px',
-    'font:800 10px/28px system-ui,sans-serif',
-    'text-align:center',
-    `box-shadow:${ring}`,
-    'border:2px solid #fff',
-    'white-space:nowrap',
-  ].join(';');
-  pin.textContent = power != null ? `${power}` : '⚡';
-  const tip = document.createElement('div');
-  tip.style.cssText = [
-    'width:0',
-    'height:0',
-    'border-left:5px solid transparent',
-    'border-right:5px solid transparent',
-    `border-top:6px solid ${bg}`,
-    'margin-top:-1px',
-  ].join(';');
-  el.appendChild(pin);
-  el.appendChild(tip);
-  if (power != null) {
-    const unit = document.createElement('div');
-    unit.textContent = 'кВт';
-    unit.style.cssText = [
-      'margin-top:2px',
-      'font:700 8px/1 system-ui,sans-serif',
-      'color:#e2e8f0',
-      'text-shadow:0 1px 2px rgba(0,0,0,0.8)',
-      'letter-spacing:0.02em',
+  const disc = document.createElement('div');
+  if (rec) {
+    disc.style.cssText = [
+      'min-width:22px',
+      'height:22px',
+      'padding:0 5px',
+      'background:#f59e0b',
+      'color:#0f172a',
+      'border-radius:999px',
+      'font:700 9px/22px system-ui,sans-serif',
+      'text-align:center',
+      'border:1.5px solid rgba(255,255,255,0.9)',
+      'box-shadow:0 1px 3px rgba(0,0,0,0.35)',
+      'white-space:nowrap',
     ].join(';');
-    el.appendChild(unit);
+    disc.textContent = power != null ? String(power) : '•';
+  } else {
+    disc.style.cssText = [
+      'min-width:18px',
+      'height:18px',
+      'padding:0 4px',
+      'background:rgba(15,23,42,0.75)',
+      'color:#cbd5e1',
+      'border-radius:999px',
+      'font:600 8px/18px system-ui,sans-serif',
+      'text-align:center',
+      'border:1px solid rgba(148,163,184,0.7)',
+      'box-shadow:0 1px 2px rgba(0,0,0,0.3)',
+      'white-space:nowrap',
+    ].join(';');
+    disc.textContent = power != null ? String(power) : '·';
   }
+  el.appendChild(disc);
   return el;
 }
 

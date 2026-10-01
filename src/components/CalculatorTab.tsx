@@ -281,6 +281,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [stationsFoundAlongRoute, setStationsFoundAlongRoute] = useState(0);
   /** All connector-compatible stations found along the current route (for map markers). */
   const [routeStationsAlong, setRouteStationsAlong] = useState<ChargingStation[]>([]);
+  const [showAllRouteStations, setShowAllRouteStations] = useState(false);
   const [nearbyFreeStatus, setNearbyFreeStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [nearbyFreeList, setNearbyFreeList] = useState<FreeChargerResult[]>([]);
   const [nearbyFreeError, setNearbyFreeError] = useState('');
@@ -1762,7 +1763,24 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         recommended: true,
       });
     }
+    if (!showAllRouteStations) {
+      return out.filter((s) => s.recommended);
+    }
     return out;
+  })();
+
+  const extraRouteStationCount = (() => {
+    if (!routeElevation || !routeStationsAlong.length) return 0;
+    const planIds = new Set(planStops.map((s) => s.station.id));
+    return routeStationsAlong.filter(
+      (st) =>
+        !planIds.has(st.id) &&
+        !planStops.some(
+          (s) =>
+            Math.abs(s.station.lat - st.lat) < 1e-5 &&
+            Math.abs(s.station.lon - st.lon) < 1e-5,
+        ),
+    ).length;
   })();
 
   const selectNearbyItem = (item: FreeChargerResult) => {
@@ -2521,6 +2539,32 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           onChargingStopClick={handleMapStopClick}
           viewportInsets={mapInsets}
         />
+
+        {routeElevation && extraRouteStationCount > 0 && (
+          <div className="pointer-events-auto absolute left-1/2 z-20 -translate-x-1/2 bottom-3 landscape:bottom-4">
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic('light', settings.hapticFeedback);
+                setShowAllRouteStations((v) => !v);
+              }}
+              className={`rounded-full px-3.5 py-1.5 text-[11px] font-bold border shadow-lg backdrop-blur-md active:scale-[0.98] ${
+                showAllRouteStations
+                  ? isDark
+                    ? 'bg-slate-900/90 border-slate-600 text-slate-200'
+                    : 'bg-white/95 border-slate-300 text-slate-800'
+                  : isDark
+                    ? 'bg-slate-950/90 border-cyan-700/60 text-cyan-300'
+                    : 'bg-white/95 border-cyan-300 text-cyan-800'
+              }`}
+            >
+              {showAllRouteStations
+                ? 'Только план'
+                : `Все ЭЗС на маршруте · ${extraRouteStationCount}`}
+            </button>
+          </div>
+        )}
+
       </div>
 
       {/* Top: A → B search + hidden-parameters button */}
