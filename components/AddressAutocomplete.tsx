@@ -1,0 +1,137 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { searchAddressSuggestions, AddressSuggestion } from '../services/routeElevation';
+import { Loader2, X } from 'lucide-react';
+
+interface Props {
+  value: string;
+  onChange: (value: string) => void;
+  onSelect: (s: AddressSuggestion) => void;
+  placeholder: string;
+  isDark: boolean;
+  inputClassName: string;
+}
+
+export const AddressAutocomplete: React.FC<Props> = ({
+  value,
+  onChange,
+  onSelect,
+  placeholder,
+  isDark,
+  inputClassName,
+}) => {
+  const [items, setItems] = useState<AddressSuggestion[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const blurTimer = useRef<number | null>(null);
+  const reqId = useRef(0);
+  /** Text just chosen from the list: the parent puts it into `value`, which must not trigger another search. */
+  const skipSearchFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    const q = value.trim();
+    if (skipSearchFor.current !== null && skipSearchFor.current === value) {
+      skipSearchFor.current = null;
+      setItems([]);
+      setOpen(false);
+      setLoading(false);
+      return;
+    }
+    if (q.length < 3) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const id = ++reqId.current;
+    const timer = window.setTimeout(() => {
+      void searchAddressSuggestions(q, 5)
+        .then((list) => {
+          if (id !== reqId.current) return;
+          setItems(list);
+          setOpen(list.length > 0);
+        })
+        .catch(() => {
+          if (id !== reqId.current) return;
+          setItems([]);
+        })
+        .finally(() => {
+          if (id === reqId.current) setLoading(false);
+        });
+    }, 380);
+    return () => window.clearTimeout(timer);
+  }, [value]);
+
+  const clear = () => {
+    if (blurTimer.current) window.clearTimeout(blurTimer.current);
+    reqId.current += 1;
+    onChange('');
+    setItems([]);
+    setOpen(false);
+    setLoading(false);
+  };
+
+  return (
+    <div className="relative w-full">
+      <input
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => {
+          if (items.length) setOpen(true);
+        }}
+        onBlur={() => {
+          blurTimer.current = window.setTimeout(() => setOpen(false), 180);
+        }}
+        placeholder={placeholder}
+        autoComplete="off"
+        className={inputClassName}
+      />
+      {loading && (
+        <Loader2 className="absolute right-[2.75rem] top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-slate-500 pointer-events-none" />
+      )}
+      {!loading && value.length > 0 && (
+        <button
+          type="button"
+          aria-label="Очистить"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={clear}
+          className={`absolute right-11 top-1/2 -translate-y-1/2 p-1 rounded-full ${
+            isDark ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-800' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200'
+          }`}
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
+      {open && items.length > 0 && (
+        <ul
+          className={`absolute z-30 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-xl border shadow-lg ${
+            isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
+          }`}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {items.map((s) => (
+            <li key={`${s.lat},${s.lon},${s.displayName}`}>
+              <button
+                type="button"
+                className={`w-full text-left px-3 py-2.5 text-[12px] leading-snug ${
+                  isDark ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-800 hover:bg-slate-50'
+                }`}
+                onClick={() => {
+                  if (blurTimer.current) window.clearTimeout(blurTimer.current);
+                  skipSearchFor.current = s.displayName;
+                  onSelect(s);
+                  setOpen(false);
+                  setItems([]);
+                }}
+              >
+                {s.displayName}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
