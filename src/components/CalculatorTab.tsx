@@ -1744,7 +1744,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         powerKw: stationMarkerPowerKw(s) ?? prev?.powerKw,
       });
     }
-    return Array.from(byId.values());
+    return Array.from(byId.values()).filter(
+      (s) => Number.isFinite(s.lat) && Number.isFinite(s.lon),
+    );
   })();
 
   const selectNearbyItem = (item: FreeChargerResult) => {
