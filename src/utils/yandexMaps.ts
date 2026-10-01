@@ -500,59 +500,84 @@ export function makeDotMarkerEl(
 }
 
 
+/** Inject once: appear + soft pulse for plan stops */
+let chargerMarkerCssReady = false;
+function ensureChargerMarkerCss() {
+  if (chargerMarkerCssReady || typeof document === 'undefined') return;
+  chargerMarkerCssReady = true;
+  const s = document.createElement('style');
+  s.setAttribute('data-vigo-charger-marker', '1');
+  s.textContent = `
+@keyframes vigoChargerIn {
+  from { opacity: 0; transform: translate(-50%,-50%) scale(0.55); }
+  to   { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+}
+@keyframes vigoChargerPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.45); }
+  50%      { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
+}
+.vigo-chg-marker {
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+  animation: vigoChargerIn 0.35s cubic-bezier(0.22,1,0.36,1) both;
+}
+.vigo-chg-marker__disc {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-family: system-ui, sans-serif;
+}
+.vigo-chg-marker--rec .vigo-chg-marker__disc {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  background: #f59e0b;
+  color: #0f172a;
+  font-weight: 700;
+  font-size: 10px;
+  line-height: 24px;
+  border: 1.5px solid rgba(255,255,255,0.95);
+  animation: vigoChargerPulse 2.4s ease-in-out 0.4s infinite;
+}
+.vigo-chg-marker--dim .vigo-chg-marker__disc {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #94a3b8;
+  font-weight: 600;
+  font-size: 8px;
+  line-height: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+}
+`;
+  document.head.appendChild(s);
+}
+
 /**
- * Minimal EVSE marker: small disc, power number when known.
- * recommended → solid amber; others → slate outline (lighter footprint).
+ * SVG-free compact disc: power kW when known.
+ * recommended → amber + pulse; others → muted slate.
  */
 export function makeChargerMarkerEl(opts: {
   powerKw?: number | null;
   recommended?: boolean;
   title?: string;
 }): HTMLElement {
+  ensureChargerMarkerCss();
   const power = opts.powerKw != null && Number.isFinite(opts.powerKw) && opts.powerKw > 0
     ? Math.round(Number(opts.powerKw))
     : null;
   const rec = !!opts.recommended;
   const el = document.createElement('div');
+  el.className = 'vigo-chg-marker ' + (rec ? 'vigo-chg-marker--rec' : 'vigo-chg-marker--dim');
   el.title = opts.title || (power != null ? `${power} кВт` : '');
-  el.style.cssText = [
-    'transform:translate(-50%,-50%)',
-    'cursor:pointer',
-    'pointer-events:auto',
-    'user-select:none',
-  ].join(';');
   const disc = document.createElement('div');
-  if (rec) {
-    disc.style.cssText = [
-      'min-width:22px',
-      'height:22px',
-      'padding:0 5px',
-      'background:#f59e0b',
-      'color:#0f172a',
-      'border-radius:999px',
-      'font:700 9px/22px system-ui,sans-serif',
-      'text-align:center',
-      'border:1.5px solid rgba(255,255,255,0.9)',
-      'box-shadow:0 1px 3px rgba(0,0,0,0.35)',
-      'white-space:nowrap',
-    ].join(';');
-    disc.textContent = power != null ? String(power) : '•';
-  } else {
-    disc.style.cssText = [
-      'min-width:18px',
-      'height:18px',
-      'padding:0 4px',
-      'background:rgba(15,23,42,0.75)',
-      'color:#cbd5e1',
-      'border-radius:999px',
-      'font:600 8px/18px system-ui,sans-serif',
-      'text-align:center',
-      'border:1px solid rgba(148,163,184,0.7)',
-      'box-shadow:0 1px 2px rgba(0,0,0,0.3)',
-      'white-space:nowrap',
-    ].join(';');
-    disc.textContent = power != null ? String(power) : '·';
-  }
+  disc.className = 'vigo-chg-marker__disc';
+  disc.textContent = power != null ? String(power) : (rec ? '•' : '·');
   el.appendChild(disc);
   return el;
 }

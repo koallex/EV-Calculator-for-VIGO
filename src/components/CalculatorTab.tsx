@@ -592,7 +592,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     setChargingStops([]);
     // keep previous routeStationsAlong until new fetch lands
     try {
-      const stations = await fetchChargingStationsAlongRoute(routeElevation.points, force ? 8 : 5);
+      const stations = await fetchChargingStationsAlongRoute(routeElevation.points, force ? 5 : 3.5);
       if (cancelled) return;
       const vehicleConnectors = resolveEffectiveConnectors(
         settings.vehicleProfileId,
@@ -1731,11 +1731,20 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       powerKw: number | null;
       recommended: boolean;
     }> = [];
+    /** Extra stations on the map: tighter corridor than the planner fetch (≤2 km off route). */
+    const MAP_EXTRA_MAX_DETOUR_KM = 2;
     for (const st of base) {
       const key = st.id || `${st.lat.toFixed(5)},${st.lon.toFixed(5)}`;
       if (seen.has(key)) continue;
-      seen.add(key);
       const recommended = planIds.has(st.id) || planKey(st.lat, st.lon);
+      // Non-plan stops: only if close to the polyline
+      if (!recommended) {
+        const detour = st.distanceFromRouteKm;
+        if (!(detour != null && Number.isFinite(detour) && detour <= MAP_EXTRA_MAX_DETOUR_KM)) {
+          continue;
+        }
+      }
+      seen.add(key);
       const kw = powerOf(st);
       out.push({
         id: st.id,
@@ -1772,15 +1781,19 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const extraRouteStationCount = (() => {
     if (!routeElevation || !routeStationsAlong.length) return 0;
     const planIds = new Set(planStops.map((s) => s.station.id));
-    return routeStationsAlong.filter(
-      (st) =>
-        !planIds.has(st.id) &&
-        !planStops.some(
+    const MAP_EXTRA_MAX_DETOUR_KM = 2;
+    return routeStationsAlong.filter((st) => {
+      const inPlan =
+        planIds.has(st.id) ||
+        planStops.some(
           (s) =>
             Math.abs(s.station.lat - st.lat) < 1e-5 &&
             Math.abs(s.station.lon - st.lon) < 1e-5,
-        ),
-    ).length;
+        );
+      if (inPlan) return false;
+      const detour = st.distanceFromRouteKm;
+      return detour != null && Number.isFinite(detour) && detour <= MAP_EXTRA_MAX_DETOUR_KM;
+    }).length;
   })();
 
   const selectNearbyItem = (item: FreeChargerResult) => {
@@ -2303,10 +2316,33 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         {arrival >= CHARGE_SUGGEST_SOC && chargingSuggestionStatus === 'idle' && (
           <button
             type="button"
-            onClick={() => { triggerHaptic('light', settings.hapticFeedback); void searchChargingStations(); }}
+            onClick={() => {
+              triggerHaptic('light', settings.hapticFeedback);
+              setShowAllRouteStations(true);
+              void searchChargingStations();
+            }}
             className={`mt-2 w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold ${chipBg}`}
           >
             Найти зарядку по маршруту
+          </button>
+        )}
+        {/* After plan / search: toggle all corridor stations on the map (merged with find-on-route) */}
+        {routeElevation && chargingSuggestionStatus === 'ready' && extraRouteStationCount > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic('light', settings.hapticFeedback);
+              setShowAllRouteStations((v) => !v);
+            }}
+            className={`mt-2 w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold ${
+              showAllRouteStations
+                ? isDark ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-800'
+                : isDark ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-50 text-cyan-800'
+            }`}
+          >
+            {showAllRouteStations
+              ? 'Только остановки плана'
+              : `Показать все ЭЗС на маршруте · ${extraRouteStationCount}`}
           </button>
         )}
         {chargingSuggestionStatus === 'unavailable' && (
@@ -2317,10 +2353,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             {stationsFoundAlongRoute > 0 && (
               <button
                 type="button"
-                onClick={() => { triggerHaptic('light', settings.hapticFeedback); void searchChargingStations({ force: true }); }}
+                onClick={() => {
+                  triggerHaptic('light', settings.hapticFeedback);
+                  setShowAllRouteStations(true);
+                  void searchChargingStations({ force: true });
+                }}
                 className={`w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold ${isDark ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-50 text-cyan-800'}`}
               >
-                Показать станции всё равно
+                Показать станции на маршруте
               </button>
             )}
           </div>
@@ -2539,33 +2579,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           onChargingStopClick={handleMapStopClick}
           viewportInsets={mapInsets}
         />
-
-        {routeElevation && extraRouteStationCount > 0 && (
-          <div className="pointer-events-auto absolute left-1/2 z-20 -translate-x-1/2 bottom-3 landscape:bottom-4">
-            <button
-              type="button"
-              onClick={() => {
-                triggerHaptic('light', settings.hapticFeedback);
-                setShowAllRouteStations((v) => !v);
-              }}
-              className={`rounded-full px-3.5 py-1.5 text-[11px] font-bold border shadow-lg backdrop-blur-md active:scale-[0.98] ${
-                showAllRouteStations
-                  ? isDark
-                    ? 'bg-slate-900/90 border-slate-600 text-slate-200'
-                    : 'bg-white/95 border-slate-300 text-slate-800'
-                  : isDark
-                    ? 'bg-slate-950/90 border-cyan-700/60 text-cyan-300'
-                    : 'bg-white/95 border-cyan-300 text-cyan-800'
-              }`}
-            >
-              {showAllRouteStations
-                ? 'Только план'
-                : `Все ЭЗС на маршруте · ${extraRouteStationCount}`}
-            </button>
-          </div>
-        )}
-
-      </div>
+</div>
 
       {/* Top: A → B search + hidden-parameters button */}
       <div ref={topPanelRef} className="pointer-events-none absolute inset-x-2 top-2 z-30 flex flex-col gap-1.5 landscape:right-auto landscape:w-[24rem]">
