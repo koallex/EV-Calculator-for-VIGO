@@ -391,6 +391,10 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const bundleRef = useRef<AnyMapBundle | null>(null);
   const markersLayerRef = useRef<any[]>([]);
   const markersLayerSigRef = useRef('');
+  /** Full EVRace snapshot for the session — pan/zoom filters client-side (fast). */
+  const allStationsCacheRef = useRef<MapStation[] | null>(null);
+  const fetchAbortRef = useRef<AbortController | null>(null);
+  const lastBoundsKeyRef = useRef('');
   const userMarkerRef = useRef<any>(null);
   const userWatchRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -549,38 +553,98 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     return Array.from(acc.values());
   }, []);
 
-  const fetchStationsInBounds = useCallback(
-    async (bounds: number[][]) => {
-      // bounds: [[latSW, lonSW], [latNE, lonNE]]
-      const minLat = Math.min(bounds[0][0], bounds[1][0]);
-      const maxLat = Math.max(bounds[0][0], bounds[1][0]);
-      const minLon = Math.min(bounds[0][1], bounds[1][1]);
-      const maxLon = Math.max(bounds[0][1], bounds[1][1]);
-      setLoading(true);
-      setError('');
-      try {
-        const params = new URLSearchParams({
-          minLat: String(minLat),
-          maxLat: String(maxLat),
-          minLon: String(minLon),
-          maxLon: String(maxLon),
-        });
-        const res = await fetch(`/api/evrace/stations?${params}`, {
-          headers: { Accept: 'application/json' },
-        });
-        if (!res.ok) throw new Error(`Станции недоступны (${res.status})`);
-        const payload = await res.json();
-        const groups = Array.isArray(payload?.groups) ? payload.groups : [];
-        let list: MapStation[] = [];
-        groups.forEach((g: any, i: number) => {
-          const s = groupToMapStation(g, i);
-          if (s) list.push(s);
-        });
-        // Cap raw list — clustering + skip-rebuild keep pan smooth beyond this
-        if (list.length > 120) list = list.slice(0, 120);
+  const readMapBounds = useCallback((): number[][] | null => {
+    const map = mapRef.current as any;
+    if (!map) return null;
+    try {
+      const bundle = bundleRef.current as any;
+      if (bundle?.apiVersion === 2 && typeof map.getBounds === 'function') {
+        const b = map.getBounds();
+        if (b) return b;
+      } else if (typeof map.bounds === 'object' && map.bounds) {
+        const b = map.bounds;
+        return [
+          [b[0][1], b[0][0]],
+          [b[1][1], b[1][0]],
+        ];
+      } else if (typeof map.getBounds === 'function') {
+        const b = map.getBounds();
+        if (b) {
+          return [
+            [b[0][1], b[0][0]],
+            [b[1][1], b[1][0]],
+          ];
+        }
+      }
+      const c = map.center || map.location?.center || [27.5667, 53.9];
+      const z = map.zoom ?? map.location?.zoom ?? 12;
+      const lon = Array.isArray(c) ? c[0] : 27.5667;
+      const lat = Array.isArray(c) ? c[1] : 53.9;
+      const dLat = (180 / Math.pow(2, z)) * 1.4;
+      const dLon = dLat / Math.max(0.3, Math.cos((lat * Math.PI) / 180));
+      return [
+        [lat - dLat, lon - dLon],
+        [lat + dLat, lon + dLon],
+      ];
+    } catch {
+      return null;
+    }
+  }, []);
 
-        // Live occupancy is expensive: only when "only free" filter is on.
-        // Single-station live runs on marker click.
+  const filterStationsToBounds = useCallback((list: MapStation[], bounds: number[][]) => {
+    const minLat = Math.min(bounds[0][0], bounds[1][0]);
+    const maxLat = Math.max(bounds[0][0], bounds[1][0]);
+    const minLon = Math.min(bounds[0][1], bounds[1][1]);
+    const maxLon = Math.max(bounds[0][1], bounds[1][1]);
+    // Slight pad so edge stations don't pop when panning a little
+    const padLat = (maxLat - minLat) * 0.08;
+    const padLon = (maxLon - minLon) * 0.08;
+    let out = list.filter(
+      (s) =>
+        s.lat >= minLat - padLat &&
+        s.lat <= maxLat + padLat &&
+        s.lon >= minLon - padLon &&
+        s.lon <= maxLon + padLon,
+    );
+    if (out.length > 120) out = out.slice(0, 120);
+    return out;
+  }, []);
+
+  /** Load full snapshot once per session (Redis-backed API is already cached). */
+  const ensureAllStations = useCallback(async (): Promise<MapStation[]> => {
+    if (allStationsCacheRef.current && allStationsCacheRef.current.length) {
+      return allStationsCacheRef.current;
+    }
+    fetchAbortRef.current?.abort();
+    const ac = new AbortController();
+    fetchAbortRef.current = ac;
+    const res = await fetch('/api/evrace/stations', {
+      headers: { Accept: 'application/json' },
+      signal: ac.signal,
+    });
+    if (!res.ok) throw new Error(`Станции недоступны (${res.status})`);
+    const payload = await res.json();
+    const groups = Array.isArray(payload?.groups) ? payload.groups : [];
+    const list: MapStation[] = [];
+    groups.forEach((g: any, i: number) => {
+      const s = groupToMapStation(g, i);
+      if (s) list.push(s);
+    });
+    allStationsCacheRef.current = list;
+    return list;
+    // groupToMapStation is a stable helper in this module scope of the component body
+  }, []);
+
+  const applyBoundsFromCache = useCallback(
+    async (bounds: number[][], opts?: { silent?: boolean }) => {
+      const silent = !!opts?.silent && stations.length > 0;
+      if (!silent) {
+        setLoading(true);
+        setError('');
+      }
+      try {
+        let list = await ensureAllStations();
+        list = filterStationsToBounds(list, bounds);
         if (onlyFreeRef.current) {
           setLiveBusy(true);
           try {
@@ -591,63 +655,50 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         }
         setStations(list);
         lastFetchAtRef.current = Date.now();
-      } catch (e) {
+      } catch (e: any) {
+        if (e?.name === 'AbortError') return;
         setError(e instanceof Error ? e.message : String(e));
       } finally {
-        setLoading(false);
+        if (!silent) setLoading(false);
       }
     },
-    [enrichLive],
+    [ensureAllStations, filterStationsToBounds, enrichLive, stations.length],
   );
 
-  const scheduleFetch = useCallback(() => {
-    if (!mapRef.current) return;
-    if (fetchTimerRef.current) window.clearTimeout(fetchTimerRef.current);
-    // Debounce after pan/zoom ends — avoids stacking requests mid-drag
-    fetchTimerRef.current = window.setTimeout(() => {
-      try {
-        const map = mapRef.current;
-        if (!map) return;
-        // ymaps3: bounds as [[minLon,minLat],[maxLon,maxLat]] or via location
-        let bounds: number[][] | null = null;
-        const bundle = bundleRef.current as any;
-        if (bundle?.apiVersion === 2 && typeof map.getBounds === 'function') {
-          const b = map.getBounds();
-          if (b) bounds = b; // already [[lat,lon],[lat,lon]]
-        } else if (typeof map.bounds === 'object' && map.bounds) {
-          const b = map.bounds;
-          bounds = [
-            [b[0][1], b[0][0]],
-            [b[1][1], b[1][0]],
-          ];
-        } else if (typeof map.getBounds === 'function') {
-          const b = map.getBounds();
-          if (b) {
-            bounds = [
-              [b[0][1], b[0][0]],
-              [b[1][1], b[1][0]],
-            ];
+  const scheduleFetch = useCallback(
+    (opts?: { immediate?: boolean }) => {
+      if (!mapRef.current) return;
+      if (fetchTimerRef.current) window.clearTimeout(fetchTimerRef.current);
+
+      const run = () => {
+        try {
+          const bounds = readMapBounds();
+          if (!bounds) return;
+          const key = bounds.flat().map((n) => n.toFixed(3)).join(',');
+          // Skip duplicate viewport (same ~100m grid) when cache is warm
+          if (
+            key === lastBoundsKeyRef.current &&
+            allStationsCacheRef.current &&
+            Date.now() - lastFetchAtRef.current < 8000 &&
+            !onlyFreeRef.current
+          ) {
+            return;
           }
+          lastBoundsKeyRef.current = key;
+          const hasCache = !!(allStationsCacheRef.current && allStationsCacheRef.current.length);
+          void applyBoundsFromCache(bounds, { silent: hasCache });
+        } catch {
+          /* ignore */
         }
-        if (!bounds) {
-          // Estimate viewport from center + zoom (v3 center is [lon, lat])
-          const c = map.center || map.location?.center || [27.5667, 53.9];
-          const z = map.zoom ?? map.location?.zoom ?? 12;
-          const lon = Array.isArray(c) ? c[0] : 27.5667;
-          const lat = Array.isArray(c) ? c[1] : 53.9;
-          const dLat = 180 / Math.pow(2, z) * 1.4;
-          const dLon = dLat / Math.max(0.3, Math.cos((lat * Math.PI) / 180));
-          bounds = [
-            [lat - dLat, lon - dLon],
-            [lat + dLat, lon + dLon],
-          ];
-        }
-        void fetchStationsInBounds(bounds);
-      } catch {
-        /* ignore */
-      }
-    }, 700);
-  }, [fetchStationsInBounds]);
+      };
+
+      // First paint: no wait. Pan/zoom: short debounce only.
+      const delay = opts?.immediate || !allStationsCacheRef.current ? 0 : 280;
+      if (delay === 0) run();
+      else fetchTimerRef.current = window.setTimeout(run, delay);
+    },
+    [readMapBounds, applyBoundsFromCache],
+  );
 
   /** Live status for one station (on card open). */
   const refreshStationLive = useCallback(
@@ -670,8 +721,9 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
 
   // Re-load with live data when "only free" is enabled
   useEffect(() => {
-    if (!onlyFree || !mapRef.current) return;
-    scheduleFetch();
+    if (!mapRef.current) return;
+    lastBoundsKeyRef.current = '';
+    scheduleFetch({ immediate: true });
   }, [onlyFree, scheduleFetch]);
 
 
@@ -705,7 +757,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           el?.removeEventListener('wheel', onUp);
         };
 
-        scheduleFetch();
+        scheduleFetch({ immediate: true });
 
         if (navigator.geolocation) {
           navigator.geolocation.getCurrentPosition(
@@ -735,7 +787,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
                 /* ignore */
               }
               bundleRef.current.setLocation(lat, lon, 13);
-              scheduleFetch();
+              scheduleFetch({ immediate: true });
             },
             () => {},
             { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 },
