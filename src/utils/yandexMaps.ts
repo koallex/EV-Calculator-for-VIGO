@@ -595,6 +595,22 @@ function ensureChargerMarkerCss() {
   document.head.appendChild(s);
 }
 
+/** Relative luminance 0–1 for hex #rgb / #rrggbb */
+function hexLuminance(hex: string): number {
+  const h = hex.replace('#', '').trim();
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  if (full.length < 6) return 0.5;
+  const n = parseInt(full.slice(0, 6), 16);
+  if (!Number.isFinite(n)) return 0.5;
+  const r = ((n >> 16) & 255) / 255;
+  const g = ((n >> 8) & 255) / 255;
+  const b = (n & 255) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+function accentIsLight(hex: string): boolean {
+  return hexLuminance(hex) > 0.55;
+}
+
 const BOLT_SVG = (fill: string, size: number) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">` +
   `<path fill="${fill}" d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg>`;
@@ -626,11 +642,14 @@ export function makeChargerMarkerEl(opts: {
   const disc = document.createElement('div');
   disc.className = 'vigo-chg-marker__disc';
   if (accent) {
+    const light = accentIsLight(accent);
+    const fg = light ? '#0f172a' : '#ffffff';
     disc.style.background = accent;
-    disc.style.borderColor = 'rgba(255,255,255,0.9)';
+    disc.style.borderColor = light ? 'rgba(15,23,42,0.35)' : 'rgba(255,255,255,0.9)';
     disc.style.width = '20px';
     disc.style.height = '20px';
-    disc.innerHTML = BOLT_SVG('#ffffff', 10);
+    disc.innerHTML = BOLT_SVG(fg, 10);
+    (el as any).__accentFg = fg;
   } else {
     disc.innerHTML = BOLT_SVG(rec ? '#0f172a' : '#94a3b8', rec ? 11 : 9);
   }
@@ -640,9 +659,11 @@ export function makeChargerMarkerEl(opts: {
     kw.className = 'vigo-chg-marker__kw';
     kw.textContent = String(power);
     if (accent) {
+      const light = accentIsLight(accent);
+      const fg = light ? '#0f172a' : '#ffffff';
       kw.style.background = accent;
-      kw.style.color = '#ffffff';
-      kw.style.border = '1px solid rgba(255,255,255,0.35)';
+      kw.style.color = fg;
+      kw.style.border = light ? '1px solid rgba(15,23,42,0.25)' : '1px solid rgba(255,255,255,0.35)';
     }
     el.appendChild(kw);
   }

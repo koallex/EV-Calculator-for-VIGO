@@ -63,21 +63,23 @@ interface MapStation {
 }
 
 const OPERATOR_COLORS: Record<string, string> = {
-  // EVSE map legend (user): Маланка green, Zaryadka turquoise, Battery Fly blue, Forevo purple
-  malanka: '#22c55e',
-  zaryadka: '#14b8a6',
-  batteryfly: '#3b82f6',
-  forevo: '#a855f7',
-  evika: '#ef4444',
-  united: '#06b6d4',
-  csms: '#14b8a6',
-  цсмс: '#14b8a6',
-  evon: '#e11d48',
-  orange: '#f97316',
-  skat: '#8b5cf6',
-  prizma: '#0ea5e9',
-  gto: '#64748b',
-  belteh: '#64748b',
+  // Primary (user)
+  malanka: '#22c55e',      // green
+  zaryadka: '#00FFFF',     // pure cyan
+  batteryfly: '#3b82f6',   // blue
+  forevo: '#a855f7',       // purple
+  // Others — distinct on dark map, not colliding with primary four
+  evika: '#f43f5e',        // rose-red
+  united: '#38bdf8',       // sky (not pure cyan)
+  csms: '#2dd4bf',         // teal
+  цсмс: '#2dd4bf',
+  evon: '#fb7185',         // soft rose
+  orange: '#fb923c',       // orange
+  skat: '#c084fc',         // light violet
+  prizma: '#60a5fa',       // light blue
+  gto: '#94a3b8',          // slate
+  belteh: '#94a3b8',
+  other: '#64748b',
 };
 
 function normalizeOperatorKey(op: string): string {
@@ -100,7 +102,7 @@ function normalizeOperatorKey(op: string): string {
 
 function operatorColor(op: string): string {
   const key = normalizeOperatorKey(op);
-  return OPERATOR_COLORS[key] || '#94a3b8';
+  return OPERATOR_COLORS[key] || OPERATOR_COLORS.other || '#64748b';
 }
 
 function connectorLabelFromGun(g: string): string | null {
