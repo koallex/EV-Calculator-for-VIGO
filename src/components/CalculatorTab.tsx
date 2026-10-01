@@ -279,8 +279,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   }>>([]);
   /** How many VIGO-compatible stations were found along the corridor before usefulness filtering. */
   const [stationsFoundAlongRoute, setStationsFoundAlongRoute] = useState(0);
-  /** All VIGO-compatible stations found along the current route (for map context markers). */
-  const [routeStations, setRouteStations] = useState<ChargingStation[]>([]);
   const [nearbyFreeStatus, setNearbyFreeStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [nearbyFreeList, setNearbyFreeList] = useState<FreeChargerResult[]>([]);
   const [nearbyFreeError, setNearbyFreeError] = useState('');
@@ -589,7 +587,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     let cancelled = false;
     setChargingSuggestionStatus('loading');
     setChargingStops([]);
-    setRouteStations([]);
     try {
       const stations = await fetchChargingStationsAlongRoute(routeElevation.points, force ? 8 : 5);
       if (cancelled) return;
@@ -599,7 +596,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       );
       const vigoStations = stations.filter((s) => stationSupportsConnectors(s, vehicleConnectors));
       setStationsFoundAlongRoute(vigoStations.length);
-      setRouteStations(vigoStations);
       const batteryCap = settings.batteryCapacityKwh || 51.87;
       // Vehicle-side limits come from the car profile (Settings); the temperature is the one
       // forecast at the stop. Both are bundled into one object so no positional slot can be
@@ -1129,7 +1125,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       setChargingStops([]);
       setChargingSuggestionStatus('idle');
       setStationsFoundAlongRoute(0);
-      setRouteStations([]);
       return;
     }
     void searchChargingStations();
@@ -1503,7 +1498,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     setChargingSuggestionStatus('idle');
     setSelectedRouteStop(null);
     setStationsFoundAlongRoute(0);
-    setRouteStations([]);
     setSheetMode('peek');
     setSearchEditing(false);
     setChargingSearchForced(false);
@@ -1680,74 +1674,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           : []
       : [];
 
-  /** Peak power badge for a station marker (prefer highest known connector power). */
-  const stationMarkerPowerKw = (s: ChargingStation): number | undefined => {
-    const vals = [s.ccs2PowerKw, s.gbtPowerKw, s.type2PowerKw]
-      .filter((v): v is number => typeof v === 'number' && v > 0);
-    return vals.length ? Math.max(...vals) : undefined;
-  };
-
-  /**
-   * Markers after route calc: all corridor stations (context) + planned (cyan) + optimal (amber).
-   * Before route: nearby free-charger list as context pins.
-   */
-  const mapStops = (() => {
-    if (!routeElevation) {
-      return nearbyFreeList.map((x) => ({
-        id: x.station.id,
-        lat: x.station.lat,
-        lon: x.station.lon,
-        name: x.station.name,
-        address: x.station.address,
-        role: 'context' as const,
-        powerKw: stationMarkerPowerKw(x.station),
-      }));
-    }
-    const plannedIds = new Set(planStops.map((s) => s.station.id));
-    const optimalId = planStops[0]?.station.id;
-    const byId = new Map<string, {
-      id: string;
-      lat: number;
-      lon: number;
-      name: string;
-      address?: string;
-      role: 'context' | 'planned' | 'optimal';
-      powerKw?: number;
-    }>();
-
-    for (const s of routeStations) {
-      const role: 'context' | 'planned' | 'optimal' =
-        plannedIds.has(s.id)
-          ? (s.id === optimalId ? 'optimal' : 'planned')
-          : 'context';
-      byId.set(s.id, {
-        id: s.id,
-        lat: s.lat,
-        lon: s.lon,
-        name: s.name,
-        address: s.address,
-        role,
-        powerKw: stationMarkerPowerKw(s),
-      });
-    }
-    for (let i = 0; i < planStops.length; i++) {
-      const s = planStops[i].station;
-      const role: 'context' | 'planned' | 'optimal' = i === 0 ? 'optimal' : 'planned';
-      const prev = byId.get(s.id);
-      byId.set(s.id, {
-        id: s.id,
-        lat: s.lat,
-        lon: s.lon,
-        name: s.name,
-        address: s.address,
-        role: prev?.role === 'optimal' ? 'optimal' : role,
-        powerKw: stationMarkerPowerKw(s) ?? prev?.powerKw,
-      });
-    }
-    return Array.from(byId.values()).filter(
-      (s) => Number.isFinite(s.lat) && Number.isFinite(s.lon),
-    );
-  })();
+  /** Markers on the map: the planned stops once a route exists, otherwise the nearby-charger list. */
+  const mapStops = routeElevation
+    ? planStops.map((s) => ({ id: s.station.id, lat: s.station.lat, lon: s.station.lon, name: s.station.name, address: s.station.address }))
+    : nearbyFreeList.map((x) => ({ id: x.station.id, lat: x.station.lat, lon: x.station.lon, name: x.station.name, address: x.station.address }));
 
   const selectNearbyItem = (item: FreeChargerResult) => {
     triggerHaptic('light', settings.hapticFeedback);
@@ -1757,15 +1687,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     });
   };
 
-  const handleMapStopClick = (stop: {
-    id?: string;
-    lat: number;
-    lon: number;
-    name: string;
-    address?: string;
-    role?: string;
-    powerKw?: number;
-  }) => {
+  const handleMapStopClick = (stop: { id?: string; lat: number; lon: number; name: string; address?: string }) => {
     triggerHaptic('light', settings.hapticFeedback);
     if (!routeElevation) {
       const free = nearbyFreeList.find((x) => x.station.id === stop.id);
@@ -1792,15 +1714,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       });
       return;
     }
-    // Context station along the route (not in the charging plan)
-    const along = routeStations.find(
-      (s) => s.id === stop.id
-        || (Math.abs(s.lat - stop.lat) < 1e-5 && Math.abs(s.lon - stop.lon) < 1e-5),
-    );
-    if (along) {
-      setSelectedRouteStop({ station: along });
-      return;
-    }
     setSelectedRouteStop({
       station: {
         id: stop.id || `map:${stop.lat},${stop.lon}`,
@@ -1813,7 +1726,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         connectorTypeUnknown: true,
         distanceFromRouteKm: 0,
         distanceAlongRouteKm: 0,
-        ccs2PowerKw: stop.powerKw,
       },
     });
   };
@@ -2515,29 +2427,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           viewportInsets={mapInsets}
         />
       </div>
-
-      {/* Marker legend — only when a route has chargers on the map */}
-      {routeElevation && mapStops.length > 0 && (
-        <div
-          className={`pointer-events-none absolute right-2 z-20 rounded-xl border px-2 py-1.5 text-[10px] font-semibold shadow-lg backdrop-blur-md ${
-            isDark ? 'border-white/10 bg-slate-950/75 text-slate-200' : 'border-slate-200 bg-white/85 text-slate-700'
-          }`}
-          style={{ bottom: 'max(5.5rem, env(safe-area-inset-bottom, 0px) + 4.5rem)' }}
-        >
-          <div className="flex items-center gap-1.5 whitespace-nowrap">
-            <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-500 text-[8px] text-slate-900">⚡</span>
-            Оптимальная
-          </div>
-          <div className="mt-1 flex items-center gap-1.5 whitespace-nowrap">
-            <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-cyan-500 text-[8px] text-slate-900">⚡</span>
-            В плане
-          </div>
-          <div className="mt-1 flex items-center gap-1.5 whitespace-nowrap">
-            <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-slate-600 text-[8px] text-white">⚡</span>
-            На маршруте
-          </div>
-        </div>
-      )}
 
       {/* Top: A → B search + hidden-parameters button */}
       <div ref={topPanelRef} className="pointer-events-none absolute inset-x-2 top-2 z-30 flex flex-col gap-1.5 landscape:right-auto landscape:w-[24rem]">
