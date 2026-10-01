@@ -63,9 +63,10 @@ interface MapStation {
 }
 
 const OPERATOR_COLORS: Record<string, string> = {
+  // EVSE map legend (user): Маланка green, Zaryadka turquoise, Battery Fly blue, Forevo purple
   malanka: '#22c55e',
-  zaryadka: '#3b82f6',
-  batteryfly: '#f59e0b',
+  zaryadka: '#14b8a6',
+  batteryfly: '#3b82f6',
   forevo: '#a855f7',
   evika: '#ef4444',
   united: '#06b6d4',
@@ -387,6 +388,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   const mapRef = useRef<any>(null);
   const bundleRef = useRef<AnyMapBundle | null>(null);
   const markersLayerRef = useRef<any[]>([]);
+  const markersLayerSigRef = useRef('');
   const userMarkerRef = useRef<any>(null);
   const userWatchRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -572,8 +574,8 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
           const s = groupToMapStation(g, i);
           if (s) list.push(s);
         });
-        // Cap markers — fewer objects = smoother pan
-        if (list.length > 90) list = list.slice(0, 90);
+        // Cap raw list — clustering + skip-rebuild keep pan smooth beyond this
+        if (list.length > 120) list = list.slice(0, 120);
 
         // Live occupancy is expensive: only when "only free" filter is on.
         // Single-station live runs on marker click.
@@ -820,17 +822,6 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
     const map = bundle.map;
     const visible = stations.filter(matchesFilters);
 
-    // clear previous
-    markersLayerRef.current.forEach((m) => {
-      try {
-        if (bundle.apiVersion === 3) map.removeChild(m);
-        else map.geoObjects.remove(m);
-      } catch {
-        /* ignore */
-      }
-    });
-    markersLayerRef.current = [];
-
     const zoomInto = (lat: number, lon: number) => {
       try {
         if (bundle.apiVersion === 3) {
@@ -852,9 +843,46 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       recommended: false,
     }));
     const zCluster = Math.round(mapZoom * 2) / 2;
-    const buckets = clusterPointsByZoom(points, zCluster);
+    // EVSE map: cluster earlier / larger cells → fewer DOM nodes when panned out
+    const buckets = clusterPointsByZoom(points, zCluster, {
+      individualAboveZoom: 14,
+      cellScale: zCluster < 12 ? 1.6 : 1.25,
+    });
 
-    for (const bucket of buckets) {
+    // Hard cap on drawn objects (clusters count as 1)
+    const MAX_MAP_OBJECTS = 70;
+    const drawn =
+      buckets.length > MAX_MAP_OBJECTS
+        ? [
+            ...buckets.filter((b) => b.type === 'cluster'),
+            ...buckets.filter((b) => b.type === 'point'),
+          ].slice(0, MAX_MAP_OBJECTS)
+        : buckets;
+
+    const sig = drawn
+      .map((b) =>
+        b.type === 'cluster'
+          ? `c:${b.cellKey}:${b.count}`
+          : `p:${(b.item as MapStation).id}:${Math.round(stationMaxPowerKw(b.item as MapStation))}`,
+      )
+      .join('|');
+    if (sig === markersLayerSigRef.current && markersLayerRef.current.length > 0) {
+      return;
+    }
+    markersLayerSigRef.current = sig;
+
+    // clear previous only when redrawing
+    markersLayerRef.current.forEach((m) => {
+      try {
+        if (bundle.apiVersion === 3) map.removeChild(m);
+        else map.geoObjects.remove(m);
+      } catch {
+        /* ignore */
+      }
+    });
+    markersLayerRef.current = [];
+
+    for (const bucket of drawn) {
       if (bucket.type === 'cluster') {
         if (bundle.apiVersion === 3) {
           const { YMapMarker } = bundle.ymaps3;
@@ -886,15 +914,16 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
 
       const s = bucket.item as MapStation;
       const pw = stationMaxPowerKw(s);
+      const accent = operatorColor(s.operator);
 
       if (bundle.apiVersion === 3) {
         const { YMapMarker } = bundle.ymaps3;
         const el = makeChargerMarkerEl({
           powerKw: pw > 0 ? pw : null,
           recommended: false,
+          accentColor: accent,
           title: s.name + (pw > 0 ? ` · ${Math.round(pw)} кВт` : ''),
         });
-        // Operator tint on the disc border when live is known
         if (s.liveChecked) {
           const free =
             (profileConnectors.includes('ccs2') && (s.freeCcs ?? 0) > 0) ||
@@ -920,7 +949,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
             hintContent: s.name,
             iconContent: pw > 0 ? String(Math.round(pw)) : '⚡',
           },
-          { preset: 'islands#circleIcon', iconColor: operatorColor(s.operator) },
+          { preset: 'islands#circleIcon', iconColor: accent },
         );
         marker.events.add('click', () => {
           setSelected(s);

@@ -607,23 +607,43 @@ export function makeChargerMarkerEl(opts: {
   recommended?: boolean;
   title?: string;
   index?: number;
+  /**
+   * Operator (or other) fill for the EVSE map only.
+   * Calculator leaves this unset and keeps amber/slate plan styles.
+   */
+  accentColor?: string | null;
 }): HTMLElement {
   ensureChargerMarkerCss();
   const power = opts.powerKw != null && Number.isFinite(opts.powerKw) && opts.powerKw > 0
     ? Math.round(Number(opts.powerKw))
     : null;
   const rec = !!opts.recommended;
+  const accent = opts.accentColor && /^#|[a-z]/i.test(opts.accentColor) ? opts.accentColor : null;
   const el = document.createElement('div');
-  el.className = 'vigo-chg-marker ' + (rec ? 'vigo-chg-marker--rec' : 'vigo-chg-marker--dim');
+  // accent path uses dim layout shell, then overrides disc/kw colors inline
+  el.className = 'vigo-chg-marker ' + (accent ? 'vigo-chg-marker--dim' : rec ? 'vigo-chg-marker--rec' : 'vigo-chg-marker--dim');
   el.title = opts.title || (power != null ? `${power} кВт` : '');
   const disc = document.createElement('div');
   disc.className = 'vigo-chg-marker__disc';
-  disc.innerHTML = BOLT_SVG(rec ? '#0f172a' : '#94a3b8', rec ? 11 : 9);
+  if (accent) {
+    disc.style.background = accent;
+    disc.style.borderColor = 'rgba(255,255,255,0.9)';
+    disc.style.width = '20px';
+    disc.style.height = '20px';
+    disc.innerHTML = BOLT_SVG('#ffffff', 10);
+  } else {
+    disc.innerHTML = BOLT_SVG(rec ? '#0f172a' : '#94a3b8', rec ? 11 : 9);
+  }
   el.appendChild(disc);
   if (power != null) {
     const kw = document.createElement('span');
     kw.className = 'vigo-chg-marker__kw';
     kw.textContent = String(power);
+    if (accent) {
+      kw.style.background = accent;
+      kw.style.color = '#ffffff';
+      kw.style.border = '1px solid rgba(255,255,255,0.35)';
+    }
     el.appendChild(kw);
   }
   return el;
@@ -693,12 +713,20 @@ export type ClusterBucket<T extends ClusterablePoint> =
 export function clusterPointsByZoom<T extends ClusterablePoint>(
   points: T[],
   zoom: number,
+  opts?: {
+    /** Zoom at/above which all points stay individual (default 13.2). */
+    individualAboveZoom?: number;
+    /** Multiplier on grid cell size (>1 → fewer, larger clusters). */
+    cellScale?: number;
+  },
 ): ClusterBucket<T>[] {
   if (!points.length) return [];
-  if (zoom >= 13.2 || points.length <= 3) {
+  const individualAbove = opts?.individualAboveZoom ?? 13.2;
+  const cellScale = opts?.cellScale ?? 1;
+  if (zoom >= individualAbove || points.length <= 3) {
     return points.map((item) => ({ type: 'point' as const, item }));
   }
-  const cell = Math.max(0.008, 0.55 / Math.pow(2, Math.max(0, zoom - 9)));
+  const cell = Math.max(0.008, (0.55 * cellScale) / Math.pow(2, Math.max(0, zoom - 9)));
   const bins = new Map<string, T[]>();
   for (const p of points) {
     if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) continue;
