@@ -277,6 +277,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     session: ChargeSessionEstimate;
     finishSocAfterCharge: number;
   }>>([]);
+  /** All VIGO-compatible stations found along the calculated route. */
+  const [routeChargingStations, setRouteChargingStations] = useState<ChargingStation[]>([]);
   /** How many VIGO-compatible stations were found along the corridor before usefulness filtering. */
   const [stationsFoundAlongRoute, setStationsFoundAlongRoute] = useState(0);
   const [nearbyFreeStatus, setNearbyFreeStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
@@ -595,6 +597,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         settings.connectorOverride,
       );
       const vigoStations = stations.filter((s) => stationSupportsConnectors(s, vehicleConnectors));
+      // Keep every compatible station for the route map. The planner below still decides
+      // independently which stops are recommended/necessary.
+      setRouteChargingStations(vigoStations);
       setStationsFoundAlongRoute(vigoStations.length);
       const batteryCap = settings.batteryCapacityKwh || 51.87;
       // Vehicle-side limits come from the car profile (Settings); the temperature is the one
@@ -1125,10 +1130,44 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       setChargingStops([]);
       setChargingSuggestionStatus('idle');
       setStationsFoundAlongRoute(0);
+      if (!routeElevation || !routeForecast) setRouteChargingStations([]);
       return;
     }
     void searchChargingStations();
   }, [routeElevation, routeForecast, searchChargingStations]);
+
+  // Routes that already have enough SOC do not enter the charging planner, but their map
+  // should still show all compatible chargers along the corridor.
+  useEffect(() => {
+    if (!routeElevation || !routeForecast || routeForecast.arrivalSoc < CHARGE_SUGGEST_SOC) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const stations = await fetchChargingStationsAlongRoute(routeElevation.points, 5);
+        if (cancelled) return;
+        const vehicleConnectors = resolveEffectiveConnectors(
+          settings.vehicleProfileId,
+          settings.connectorOverride,
+        );
+        const compatible = stations.filter((station) => stationSupportsConnectors(station, vehicleConnectors));
+        setRouteChargingStations(compatible);
+        setStationsFoundAlongRoute(compatible.length);
+      } catch (e) {
+        if (!cancelled) {
+          console.error('[CalculatorTab] route charging stations load failed:', e);
+          setRouteChargingStations([]);
+          setStationsFoundAlongRoute(0);
+        }
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [
+    routeElevation,
+    routeForecast,
+    settings.vehicleProfileId,
+    settings.connectorOverride,
+  ]);
 
   const calculateBearing = (lat1:number, lon1:number, lat2:number, lon2:number) => {
     const r=Math.PI/180, y=Math.sin((lon2-lon1)*r)*Math.cos(lat2*r), x=Math.cos(lat1*r)*Math.sin(lat2*r)-Math.sin(lat1*r)*Math.cos(lat2*r)*Math.cos((lon2-lon1)*r);
@@ -1496,6 +1535,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     setChargingSuggestion(null);
     setChargingStops([]);
     setChargingSuggestionStatus('idle');
+    setRouteChargingStations([]);
     setSelectedRouteStop(null);
     setStationsFoundAlongRoute(0);
     setSheetMode('peek');
@@ -1674,10 +1714,37 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           : []
       : [];
 
-  /** Markers on the map: the planned stops once a route exists, otherwise the nearby-charger list. */
+  /** Route map shows every compatible charger; recommended stops are highlighted separately. */
+  const recommendedStationIds = useMemo(
+    () => new Set(planStops.map((s) => s.station.id)),
+    [planStops],
+  );
   const mapStops = routeElevation
-    ? planStops.map((s) => ({ id: s.station.id, lat: s.station.lat, lon: s.station.lon, name: s.station.name, address: s.station.address }))
-    : nearbyFreeList.map((x) => ({ id: x.station.id, lat: x.station.lat, lon: x.station.lon, name: x.station.name, address: x.station.address }));
+    ? routeChargingStations.map((station) => {
+        const powers = [station.ccs2PowerKw, station.gbtPowerKw, station.type2PowerKw]
+          .filter((v): v is number => Number.isFinite(v));
+        return {
+          id: station.id,
+          lat: station.lat,
+          lon: station.lon,
+          name: station.name,
+          address: station.address,
+          powerKw: powers.length ? Math.max(...powers) : undefined,
+          isRecommended: recommendedStationIds.has(station.id),
+        };
+      })
+    : nearbyFreeList.map((x) => {
+        const powers = [x.station.ccs2PowerKw, x.station.gbtPowerKw, x.station.type2PowerKw]
+          .filter((v): v is number => Number.isFinite(v));
+        return {
+          id: x.station.id,
+          lat: x.station.lat,
+          lon: x.station.lon,
+          name: x.station.name,
+          address: x.station.address,
+          powerKw: powers.length ? Math.max(...powers) : undefined,
+        };
+      });
 
   const selectNearbyItem = (item: FreeChargerResult) => {
     triggerHaptic('light', settings.hapticFeedback);
@@ -1692,6 +1759,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     if (!routeElevation) {
       const free = nearbyFreeList.find((x) => x.station.id === stop.id);
       if (free) { selectNearbyItem(free); return; }
+    }
+    const routeStation = routeChargingStations.find(
+      (station) => station.id === stop.id
+        || (Math.abs(station.lat - stop.lat) < 1e-5 && Math.abs(station.lon - stop.lon) < 1e-5),
+    );
+    if (routeStation && !planStops.some((s) => s.station.id === routeStation.id)) {
+      setSelectedRouteStop({ station: routeStation });
+      return;
     }
     const fromList = chargingStops.find(
       (s) => s.station.id === stop.id
