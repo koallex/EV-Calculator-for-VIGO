@@ -499,6 +499,74 @@ export function makeDotMarkerEl(
   return el;
 }
 
+
+/**
+ * Compact EVSE marker: small pin + power in kW (or bolt if unknown).
+ * recommended → accent (amber); others → muted slate.
+ */
+export function makeChargerMarkerEl(opts: {
+  powerKw?: number | null;
+  recommended?: boolean;
+  title?: string;
+}): HTMLElement {
+  const power = opts.powerKw != null && Number.isFinite(opts.powerKw) && opts.powerKw > 0
+    ? Math.round(Number(opts.powerKw))
+    : null;
+  const rec = !!opts.recommended;
+  const bg = rec ? '#f59e0b' : '#475569';
+  const ring = rec ? '0 0 0 2px rgba(245,158,11,0.35), 0 2px 8px rgba(0,0,0,0.45)' : '0 1px 4px rgba(0,0,0,0.4)';
+  const el = document.createElement('div');
+  el.title = opts.title || '';
+  el.style.cssText = [
+    'display:flex',
+    'flex-direction:column',
+    'align-items:center',
+    'transform:translate(-50%,-90%)',
+    'cursor:pointer',
+    'pointer-events:auto',
+    'user-select:none',
+  ].join(';');
+  const pin = document.createElement('div');
+  pin.style.cssText = [
+    'min-width:28px',
+    'height:28px',
+    'padding:0 6px',
+    `background:${bg}`,
+    'color:#0f172a',
+    'border-radius:999px',
+    'font:800 10px/28px system-ui,sans-serif',
+    'text-align:center',
+    `box-shadow:${ring}`,
+    'border:2px solid #fff',
+    'white-space:nowrap',
+  ].join(';');
+  pin.textContent = power != null ? `${power}` : '⚡';
+  const tip = document.createElement('div');
+  tip.style.cssText = [
+    'width:0',
+    'height:0',
+    'border-left:5px solid transparent',
+    'border-right:5px solid transparent',
+    `border-top:6px solid ${bg}`,
+    'margin-top:-1px',
+  ].join(';');
+  el.appendChild(pin);
+  el.appendChild(tip);
+  if (power != null) {
+    const unit = document.createElement('div');
+    unit.textContent = 'кВт';
+    unit.style.cssText = [
+      'margin-top:2px',
+      'font:700 8px/1 system-ui,sans-serif',
+      'color:#e2e8f0',
+      'text-shadow:0 1px 2px rgba(0,0,0,0.8)',
+      'letter-spacing:0.02em',
+    ].join(';');
+    el.appendChild(unit);
+  }
+  return el;
+}
+
 export function makeLabelMarkerEl(text: string, color: string): HTMLElement {
   const el = document.createElement('div');
   el.textContent = text;

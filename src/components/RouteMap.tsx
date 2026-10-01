@@ -5,6 +5,7 @@ import {
   headingDegToAzimuthRad,
   makeDotMarkerEl,
   makeLabelMarkerEl,
+  makeChargerMarkerEl,
   makeNavArrowEl,
   normalizeDeg180,
   scrubYandexOpenMapsPromo,
@@ -142,6 +143,10 @@ export interface RouteMapChargingStop {
   address?: string;
   /** Optional id to match station in parent state when marker is tapped. */
   id?: string;
+  /** Peak connector power for marker label (kW). */
+  powerKw?: number | null;
+  /** Planned / comfort stop — accent color on the map. */
+  recommended?: boolean;
 }
 
 interface RouteMapProps {
@@ -721,12 +726,21 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     chargerMarkersRef.current.forEach((m) => removeObj(bundle, m));
     chargerMarkersRef.current = [];
 
-    stops.forEach((stop) => {
+    // Recommended stops last so they paint above nearby non-plan stations.
+    const ordered = [...stops].sort((a, b) => Number(!!a.recommended) - Number(!!b.recommended));
+    ordered.forEach((stop) => {
+      const power =
+        stop.powerKw != null && Number.isFinite(stop.powerKw) && stop.powerKw > 0
+          ? Math.round(Number(stop.powerKw))
+          : null;
+      const label = power != null ? `${power}` : '⚡';
       if (bundle.apiVersion === 3) {
         const { YMapMarker } = (bundle as any).ymaps3;
-        const el = makeLabelMarkerEl('⚡', '#fbbf24');
-        el.title = stop.name;
-        el.style.cursor = 'pointer';
+        const el = makeChargerMarkerEl({
+          powerKw: stop.powerKw,
+          recommended: stop.recommended,
+          title: stop.name + (power != null ? ` · ${power} кВт` : ''),
+        });
         if (onChargingStopClick) {
           el.addEventListener('click', (ev: Event) => {
             ev.stopPropagation();
@@ -738,10 +752,18 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         chargerMarkersRef.current.push(m);
       } else {
         const ymaps = (bundle as any).ymaps;
+        const color = stop.recommended ? '#f59e0b' : '#64748b';
         const m = new ymaps.Placemark(
           [stop.lat, stop.lon],
-          { hintContent: stop.name, balloonContent: stop.name },
-          { preset: 'islands#darkOrangeStretchyIcon', iconContent: '⚡' },
+          {
+            hintContent: stop.name,
+            balloonContent: stop.name + (power != null ? `<br/>${power} кВт` : ''),
+            iconContent: label,
+          },
+          {
+            preset: stop.recommended ? 'islands#orangeCircleIcon' : 'islands#grayCircleIcon',
+            iconColor: color,
+          },
         );
         if (onChargingStopClick) {
           m.events.add('click', () => onChargingStopClick(stop));

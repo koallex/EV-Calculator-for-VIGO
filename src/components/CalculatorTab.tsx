@@ -279,6 +279,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   }>>([]);
   /** How many VIGO-compatible stations were found along the corridor before usefulness filtering. */
   const [stationsFoundAlongRoute, setStationsFoundAlongRoute] = useState(0);
+  /** All connector-compatible stations found along the current route (for map markers). */
+  const [routeStationsAlong, setRouteStationsAlong] = useState<ChargingStation[]>([]);
   const [nearbyFreeStatus, setNearbyFreeStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [nearbyFreeList, setNearbyFreeList] = useState<FreeChargerResult[]>([]);
   const [nearbyFreeError, setNearbyFreeError] = useState('');
@@ -587,6 +589,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     let cancelled = false;
     setChargingSuggestionStatus('loading');
     setChargingStops([]);
+    // keep previous routeStationsAlong until new fetch lands
     try {
       const stations = await fetchChargingStationsAlongRoute(routeElevation.points, force ? 8 : 5);
       if (cancelled) return;
@@ -596,6 +599,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       );
       const vigoStations = stations.filter((s) => stationSupportsConnectors(s, vehicleConnectors));
       setStationsFoundAlongRoute(vigoStations.length);
+      setRouteStationsAlong(vigoStations);
       const batteryCap = settings.batteryCapacityKwh || 51.87;
       // Vehicle-side limits come from the car profile (Settings); the temperature is the one
       // forecast at the stop. Both are bundled into one object so no positional slot can be
@@ -1125,6 +1129,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       setChargingStops([]);
       setChargingSuggestionStatus('idle');
       setStationsFoundAlongRoute(0);
+    setRouteStationsAlong([]);
       return;
     }
     void searchChargingStations();
@@ -1498,6 +1503,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     setChargingSuggestionStatus('idle');
     setSelectedRouteStop(null);
     setStationsFoundAlongRoute(0);
+    setRouteStationsAlong([]);
     setSheetMode('peek');
     setSearchEditing(false);
     setChargingSearchForced(false);
@@ -1674,10 +1680,90 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           : []
       : [];
 
-  /** Markers on the map: the planned stops once a route exists, otherwise the nearby-charger list. */
-  const mapStops = routeElevation
-    ? planStops.map((s) => ({ id: s.station.id, lat: s.station.lat, lon: s.station.lon, name: s.station.name, address: s.station.address }))
-    : nearbyFreeList.map((x) => ({ id: x.station.id, lat: x.station.lat, lon: x.station.lon, name: x.station.name, address: x.station.address }));
+  /** Markers: all stations along the route after calc; recommended plan stops highlighted. Before route — nearby free list. */
+  const mapStops = (() => {
+    if (!routeElevation) {
+      return nearbyFreeList.map((x) => {
+        const kw =
+          x.matchedConnector === 'gbt'
+            ? x.station.gbtPowerKw ?? x.station.ccs2PowerKw
+            : x.station.ccs2PowerKw ?? x.station.type2PowerKw;
+        return {
+          id: x.station.id,
+          lat: x.station.lat,
+          lon: x.station.lon,
+          name: x.station.name,
+          address: x.station.address,
+          powerKw: kw ?? null,
+          recommended: false,
+        };
+      });
+    }
+    const planIds = new Set(planStops.map((s) => s.station.id));
+    const planKey = (lat: number, lon: number) =>
+      planStops.some(
+        (s) => Math.abs(s.station.lat - lat) < 1e-5 && Math.abs(s.station.lon - lon) < 1e-5,
+      );
+    const powerOf = (st: ChargingStation) => {
+      const fromPlan = planStops.find(
+        (s) =>
+          s.station.id === st.id ||
+          (Math.abs(s.station.lat - st.lat) < 1e-5 && Math.abs(s.station.lon - st.lon) < 1e-5),
+      );
+      if (fromPlan) {
+        return connectorKw(fromPlan.station, fromPlan.connector) ?? st.ccs2PowerKw ?? st.gbtPowerKw ?? st.type2PowerKw;
+      }
+      return st.ccs2PowerKw ?? st.gbtPowerKw ?? st.type2PowerKw;
+    };
+    // Prefer full along-route list; if empty (search still running), fall back to plan only.
+    const base = routeStationsAlong.length
+      ? routeStationsAlong
+      : planStops.map((s) => s.station);
+    // Deduplicate by id / coords
+    const seen = new Set<string>();
+    const out: Array<{
+      id: string;
+      lat: number;
+      lon: number;
+      name: string;
+      address?: string;
+      powerKw: number | null;
+      recommended: boolean;
+    }> = [];
+    for (const st of base) {
+      const key = st.id || `${st.lat.toFixed(5)},${st.lon.toFixed(5)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const recommended = planIds.has(st.id) || planKey(st.lat, st.lon);
+      const kw = powerOf(st);
+      out.push({
+        id: st.id,
+        lat: st.lat,
+        lon: st.lon,
+        name: st.name,
+        address: st.address,
+        powerKw: kw != null && kw > 0 ? kw : null,
+        recommended,
+      });
+    }
+    // Ensure every plan stop is present even if not in routeStationsAlong
+    for (const s of planStops) {
+      const key = s.station.id || `${s.station.lat.toFixed(5)},${s.station.lon.toFixed(5)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const kw = connectorKw(s.station, s.connector);
+      out.push({
+        id: s.station.id,
+        lat: s.station.lat,
+        lon: s.station.lon,
+        name: s.station.name,
+        address: s.station.address,
+        powerKw: kw != null && kw > 0 ? kw : null,
+        recommended: true,
+      });
+    }
+    return out;
+  })();
 
   const selectNearbyItem = (item: FreeChargerResult) => {
     triggerHaptic('light', settings.hapticFeedback);
@@ -1712,6 +1798,15 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         session: chargingSuggestion.session,
         finishSocAfterCharge: chargingSuggestion.finishSocAfterCharge,
       });
+      return;
+    }
+    const along = routeStationsAlong.find(
+      (s) =>
+        s.id === stop.id ||
+        (Math.abs(s.lat - stop.lat) < 1e-5 && Math.abs(s.lon - stop.lon) < 1e-5),
+    );
+    if (along) {
+      setSelectedRouteStop({ station: along });
       return;
     }
     setSelectedRouteStop({
