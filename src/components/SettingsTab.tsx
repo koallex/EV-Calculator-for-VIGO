@@ -910,11 +910,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                     : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-cyan-500'
                 }`}
               />
-              <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                Пиковая мощность, которую принимает авто на быстрой зарядке. От неё строится кривая
-                зарядки в расчёте времени стопов (у Vigo — 167 кВт). Реальная скорость ограничена ещё
-                мощностью станции, уровнем заряда и температурой.
-              </p>
             </div>
 
             <div className="space-y-1.5">

@@ -1827,9 +1827,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             {selectedRouteStop.socAtStation != null && <>Прибытие ~{Math.round(selectedRouteStop.socAtStation)}%</>}
             {selectedRouteStop.targetSoc != null && <> → {Math.round(selectedRouteStop.targetSoc)}%</>}
             {selectedRouteStop.session && <> · ~{selectedRouteStop.session.minutes} мин · {selectedRouteStop.session.energyKwh.toFixed(1)} кВт⋅ч</>}
-            {selectedRouteStop.session && selectedRouteStop.session.minutes !== selectedRouteStop.session.chargeMinutes && (
-              <> (зарядка {selectedRouteStop.session.chargeMinutes} + подключение {selectedRouteStop.session.overheadMinutes}{selectedRouteStop.session.detourMinutes > 0 ? ` + съезд ${selectedRouteStop.session.detourMinutes}` : ''} мин)</>
-            )}
             {selectedRouteStop.finishSocAfterCharge != null && <> · на финише ~{Math.round(selectedRouteStop.finishSocAfterCharge)}%</>}
           </p>
         )}
