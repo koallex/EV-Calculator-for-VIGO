@@ -1754,6 +1754,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         address: st.address,
         powerKw: kw != null && kw > 0 ? kw : null,
         recommended,
+        accentColor: recommended ? '#22d3ee' : null,
       });
     }
     // Ensure every plan stop is present even if not in routeStationsAlong
@@ -1770,6 +1771,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         address: s.station.address,
         powerKw: kw != null && kw > 0 ? kw : null,
         recommended: true,
+        accentColor: '#22d3ee',
       });
     }
     if (!showAllRouteStations) {

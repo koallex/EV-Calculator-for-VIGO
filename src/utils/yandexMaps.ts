@@ -500,6 +500,9 @@ export function makeDotMarkerEl(
 }
 
 
+/** Unified plan-stop color: calculator + HUD */
+export const PLAN_CHARGER_ACCENT = '#22d3ee';
+
 /** Static CSS for charger / cluster markers (no enter animation — avoids flicker on redraw). */
 let chargerMarkerCssReady = false;
 function ensureChargerMarkerCss() {
@@ -539,14 +542,25 @@ function ensureChargerMarkerCss() {
 .vigo-chg-marker--rec .vigo-chg-marker__disc {
   width: 22px;
   height: 22px;
-  background: #f59e0b;
+  background: #22d3ee;
   border: 1.5px solid rgba(255,255,255,0.95);
   box-shadow: 0 1px 3px rgba(0,0,0,0.35);
 }
 .vigo-chg-marker--rec .vigo-chg-marker__kw {
-  background: rgba(245, 158, 11, 0.95);
+  background: #22d3ee;
   color: #0f172a;
   box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+/* Glow only on disc — never opacity/scale on root (avoids flicker when markers rebuild) */
+@keyframes vigoPlanGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.55), 0 1px 3px rgba(0,0,0,0.35); }
+  50%      { box-shadow: 0 0 0 8px rgba(34, 211, 238, 0), 0 1px 3px rgba(0,0,0,0.35); }
+}
+.vigo-chg-marker--plan .vigo-chg-marker__disc {
+  animation: vigoPlanGlow 2.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vigo-chg-marker--plan .vigo-chg-marker__disc { animation: none; }
 }
 .vigo-chg-marker--dim .vigo-chg-marker__disc {
   width: 18px;
@@ -634,10 +648,18 @@ export function makeChargerMarkerEl(opts: {
     ? Math.round(Number(opts.powerKw))
     : null;
   const rec = !!opts.recommended;
-  const accent = opts.accentColor && /^#|[a-z]/i.test(opts.accentColor) ? opts.accentColor : null;
+  // Plan stops (calc + HUD): same cyan. Explicit accentColor still wins for operator map.
+  const rawAccent = opts.accentColor && /^#|[a-z]/i.test(String(opts.accentColor))
+    ? String(opts.accentColor)
+    : rec
+      ? PLAN_CHARGER_ACCENT
+      : null;
+  const accent = rawAccent;
+  const isPlan = rec || (accent != null && accent.toLowerCase() === PLAN_CHARGER_ACCENT.toLowerCase());
   const el = document.createElement('div');
-  // accent path uses dim layout shell, then overrides disc/kw colors inline
-  el.className = 'vigo-chg-marker ' + (accent ? 'vigo-chg-marker--dim' : rec ? 'vigo-chg-marker--rec' : 'vigo-chg-marker--dim');
+  el.className =
+    'vigo-chg-marker ' +
+    (isPlan ? 'vigo-chg-marker--rec vigo-chg-marker--plan' : 'vigo-chg-marker--dim');
   el.title = opts.title || (power != null ? `${power} кВт` : '');
   const disc = document.createElement('div');
   disc.className = 'vigo-chg-marker__disc';
@@ -645,13 +667,12 @@ export function makeChargerMarkerEl(opts: {
     const light = accentIsLight(accent);
     const fg = light ? '#0f172a' : '#ffffff';
     disc.style.background = accent;
-    disc.style.borderColor = light ? 'rgba(15,23,42,0.35)' : 'rgba(255,255,255,0.9)';
-    disc.style.width = '20px';
-    disc.style.height = '20px';
-    disc.innerHTML = BOLT_SVG(fg, 10);
-    (el as any).__accentFg = fg;
+    disc.style.borderColor = light ? 'rgba(15,23,42,0.25)' : 'rgba(255,255,255,0.9)';
+    disc.style.width = isPlan ? '22px' : '20px';
+    disc.style.height = isPlan ? '22px' : '20px';
+    disc.innerHTML = BOLT_SVG(fg, isPlan ? 11 : 10);
   } else {
-    disc.innerHTML = BOLT_SVG(rec ? '#0f172a' : '#94a3b8', rec ? 11 : 9);
+    disc.innerHTML = BOLT_SVG('#94a3b8', 9);
   }
   el.appendChild(disc);
   if (power != null) {
@@ -663,7 +684,7 @@ export function makeChargerMarkerEl(opts: {
       const fg = light ? '#0f172a' : '#ffffff';
       kw.style.background = accent;
       kw.style.color = fg;
-      kw.style.border = light ? '1px solid rgba(15,23,42,0.25)' : '1px solid rgba(255,255,255,0.35)';
+      kw.style.border = light ? '1px solid rgba(15,23,42,0.2)' : '1px solid rgba(255,255,255,0.35)';
     }
     el.appendChild(kw);
   }

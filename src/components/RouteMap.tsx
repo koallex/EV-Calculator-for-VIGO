@@ -148,8 +148,10 @@ export interface RouteMapChargingStop {
   id?: string;
   /** Peak connector power for marker label (kW). */
   powerKw?: number | null;
-  /** Planned / comfort stop — accent color on the map. */
+  /** Planned / comfort stop — amber style when accentColor is unset. */
   recommended?: boolean;
+  /** Explicit fill (e.g. HUD cyan). Overrides recommended/dim palette. */
+  accentColor?: string | null;
 }
 
 interface RouteMapProps {
@@ -828,6 +830,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         const el = makeChargerMarkerEl({
           powerKw: stop.powerKw as number | null | undefined,
           recommended: !!stop.recommended,
+          accentColor: stop.accentColor ?? null,
           title: String(stop.name || '') + (power != null ? ` · ${power} кВт` : ''),
         });
         el.addEventListener('click', (ev: Event) => {

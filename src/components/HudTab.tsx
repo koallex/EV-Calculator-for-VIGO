@@ -2294,6 +2294,10 @@ export const HudTab: React.FC<HudTabProps> = ({
               lon: w.lon!,
               name: w.name,
               address: w.address,
+              recommended: true,
+              powerKw: w.ccs2PowerKw ?? null,
+              // Ice/HUD accent — readable on dark Tesla-style map
+              accentColor: '#22d3ee',
             }))}
           onChargingStopClick={(stop) => {
             triggerHaptic('light', settings.hapticFeedback);
