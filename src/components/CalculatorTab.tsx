@@ -312,6 +312,24 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
    * map's bottom corner; if the card extends under the nav the logo ends up drawn over the menu.
    */
   const shellRef = useRef<HTMLDivElement>(null);
+  /**
+   * Ландшафт: вместо «шторки» снизу — боковая колонка слева (поиск → кнопки → результат), справа вся карта.
+   * Саму раскладку задаёт CSS (index.css, блок «Calculator — landscape»); флаг нужен только там,
+   * где без JS не обойтись: лимиты высоты шторки и минимальная высота оболочки.
+   */
+  const [landscape, setLandscape] = useState(
+    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches,
+  );
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(orientation: landscape)');
+    const update = () => setLandscape(mq.matches);
+    update();
+    try { mq.addEventListener('change', update); } catch { /* Safari < 14 */ mq.addListener?.(update); }
+    return () => {
+      try { mq.removeEventListener('change', update); } catch { mq.removeListener?.(update); }
+    };
+  }, []);
   const [shellHeight, setShellHeight] = useState<number | null>(null);
   /** Pixels of `main`'s bottom padding the card would push the page by — cancelled with a negative margin. */
   const [shellBleed, setShellBleed] = useState(0);
@@ -325,7 +343,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         document.querySelector('nav')) as HTMLElement | null;
       const navTop = nav ? nav.getBoundingClientRect().top : window.innerHeight;
       if (!Number.isFinite(navTop) || navTop <= top) return;
-      const h = Math.max(360, Math.floor(navTop - top - 10));
+      // В портрете карта не должна быть совсем низкой (360 px). В ландшафте высота — самый дефицитный ресурс:
+      // жёсткие 360 px вылезали за экран телефона (≈320–400 px) и уходили под нижнюю навигацию.
+      const isLand = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches;
+      const h = Math.max(isLand ? 160 : 360, Math.floor(navTop - top - 10));
       setShellHeight((prev) => (prev !== null && Math.abs(prev - h) < 2 ? prev : h));
       const main = el.closest('main');
       const padBottom = main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
@@ -2006,7 +2027,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         <p className={`mt-3 text-[12px] ${muted}`}>{nearbyFreeError}</p>
       )}
       {nearbyFreeList.length > 0 && (
-        <ul className="mt-2 max-h-[13rem] space-y-1.5 overflow-y-auto overscroll-contain">
+        <ul className="calc-nearby-list mt-2 max-h-[13rem] space-y-1.5 overflow-y-auto overscroll-contain">
           {nearbyFreeList.map((item) => {
             const isActive = selectedRouteStop?.station.id === item.station.id;
             const kw = item.matchedConnector === 'gbt' ? item.station.gbtPowerKw ?? item.station.ccs2PowerKw : item.station.ccs2PowerKw;
@@ -2133,7 +2154,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         onPointerUp={onHandlePointerUp}
         onPointerCancel={onHandlePointerCancel}
         onKeyDown={onHandleKeyDown}
-        className="-mt-2 mb-1 flex cursor-grab touch-none justify-center py-2.5"
+        className="calc-handle -mt-2 mb-1 flex cursor-grab touch-none justify-center py-2.5"
       >
         <span className={`h-1 w-10 rounded-full ${isDark ? 'bg-slate-600' : 'bg-slate-300'}`} />
       </div>
@@ -2531,7 +2552,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const searchCollapsed = hasRoute && !searchEditing;
   const sheetIsResult = sheetView === 'result';
   const sheetFull = sheetIsResult && sheetMode === 'full';
-  const sheetMaxPx = sheetIsResult && sheetMode !== 'peek'
+  const sheetMaxPx = !landscape && sheetIsResult && sheetMode !== 'peek'
     ? sheetMaxHeightPx(sheetMode, shellHeight ?? 560, mapInsets.top)
     : undefined;
 
@@ -2565,7 +2586,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       id="calculator-tab-container"
       ref={shellRef}
       style={shellHeight ? { height: shellHeight, marginBottom: shellBleed ? -shellBleed : undefined } : undefined}
-      className={`calculator-map-shell relative isolate mx-auto h-[calc(100dvh-11.5rem)] min-h-[360px] w-full overflow-hidden rounded-3xl border landscape:h-[max(26rem,calc(100dvh-8rem))] ${
+      className={`calculator-map-shell relative isolate mx-auto h-[calc(100dvh-11.5rem)] min-h-[360px] w-full overflow-hidden rounded-3xl border landscape:h-[calc(100dvh-4.75rem)] landscape:min-h-[10rem] landscape:rounded-2xl ${
         isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-100'
       }`}
     >
@@ -2583,8 +2604,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         />
 </div>
 
+      {/* Портрет: обёртка «прозрачна» (display: contents) — верхняя карточка и шторка позиционируются от оболочки, как раньше.
+          Ландшафт: обёртка — левая колонка (поиск → быстрые кнопки → результат), справа остаётся вся карта.
+          data-sheet: «compact» (пустая / свёрнутая шторка) или «expanded» — на низких экранах во втором случае прячем быстрые кнопки. */}
+      <div className="calc-overlay" data-sheet={sheetView === 'idle' || (sheetView === 'result' && sheetMode === 'peek') ? 'compact' : 'expanded'}>
       {/* Top: A → B search + hidden-parameters button */}
-      <div ref={topPanelRef} className="pointer-events-none absolute inset-x-2 top-2 z-30 flex flex-col gap-1.5 landscape:right-auto landscape:w-[24rem]">
+      <div ref={topPanelRef} className="calc-top pointer-events-none absolute inset-x-2 top-2 z-30 flex flex-col gap-1.5">
         <div className="pointer-events-auto relative z-20 flex items-start gap-2">
           {searchCollapsed && (
             <div className={`flex min-w-0 flex-1 items-center rounded-2xl border shadow-lg ${surface}`}>
@@ -2782,12 +2807,12 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       </div>
 
       {/* Bottom: the single sheet (result / details / stations) + quick buttons floating above it */}
-      <div className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex ${sheetFull ? 'max-h-[86%]' : 'max-h-[68%]'} flex-col justify-end p-2 pb-7 landscape:right-auto landscape:top-[9rem] landscape:max-h-none landscape:w-[24rem]`}>
+      <div className={`calc-bottom pointer-events-none absolute inset-x-0 bottom-0 z-20 flex ${sheetFull ? 'max-h-[86%]' : 'max-h-[68%]'} flex-col justify-end p-2 pb-7`}>
         <div ref={bottomPanelRef} className="relative flex min-h-0 flex-col">
           {/* Portrait: a compact column on the right, hovering over the map just above the sheet (takes no layout height).
               Landscape: a plain row above the sheet, as before. Hidden while the sheet is fully expanded. */}
           {!sheetFull && (
-            <div className="pointer-events-auto absolute bottom-full right-0 z-10 mb-2 flex flex-col items-end gap-2 landscape:static landscape:mb-2 landscape:flex-row landscape:items-center">
+            <div className="calc-quick pointer-events-auto absolute bottom-full right-0 z-10 mb-2 flex flex-col items-end gap-2 landscape:static landscape:mb-2 landscape:flex-row landscape:flex-wrap landscape:items-center">
               <button
                 type="button"
                 onClick={() => { triggerHaptic('light', settings.hapticFeedback); setParamsOpen(true); }}
@@ -2817,7 +2842,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             style={sheetMaxPx ? { maxHeight: sheetMaxPx } : undefined}
-            className={`pointer-events-auto min-h-0 overflow-y-auto overscroll-contain rounded-2xl border p-3.5 shadow-2xl ${surface}`}
+            className={`calc-sheet pointer-events-auto min-h-0 overflow-y-auto overscroll-contain rounded-2xl border p-3.5 shadow-2xl ${surface}`}
           >
             {sheetView === 'station' && renderStationCard()}
             {sheetView === 'nearby' && renderNearbyView()}
@@ -2827,6 +2852,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           </motion.div>
         </div>
       </div>
+      </div>{/* /calc-overlay */}
 
       {/* Hidden parameters: speed, people, climate, weather — closed by default */}
       <AnimatePresence>
@@ -2848,7 +2874,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               animate={{ y: 0 }}
               exit={{ y: '100%' }}
               transition={{ type: 'spring', stiffness: 380, damping: 36 }}
-              className={`absolute inset-x-0 bottom-0 z-50 mx-auto max-h-[92%] w-full max-w-md overflow-y-auto overscroll-contain rounded-t-3xl border p-4 pb-6 shadow-2xl ${
+              className={`calc-params absolute inset-x-0 bottom-0 z-50 mx-auto max-h-[92%] w-full max-w-md overflow-y-auto overscroll-contain rounded-t-3xl border p-4 pb-6 shadow-2xl ${
                 isDark ? 'border-slate-700 bg-slate-900 text-slate-100' : 'border-slate-200 bg-white text-slate-900'
               }`}
             >
@@ -2859,6 +2885,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 </button>
               </div>
 
+              <div className="calc-params-body">
+              <div className="calc-params-col">
               <section className="mt-4">
                 <div className="flex items-baseline justify-between">
                   <span className="text-[13px] font-semibold">Заряд на старте</span>
@@ -2912,6 +2940,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 </div>
               </section>
 
+              </div>{/* /calc-params-col (заряд, люди, скорость) */}
+              <div className="calc-params-col">
               <section className="mt-4">
                 <div className="flex items-center gap-1.5 text-[13px] font-semibold">
                   {weatherIcon(quickWeather?.weatherCode ?? 1, 'w-4 h-4 text-cyan-500')} Погода
@@ -2953,7 +2983,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 )}
               </section>
 
-              <div className="mt-5 flex items-center gap-2">
+              </div>{/* /calc-params-col (погода) */}
+              </div>{/* /calc-params-body */}
+
+              <div className={`calc-params-footer mt-5 flex items-center gap-2 ${isDark ? 'bg-slate-900' : 'bg-white'}`}>
                 <button
                   type="button"
                   onClick={() => { triggerHaptic('light', settings.hapticFeedback); resetAll(); }}
