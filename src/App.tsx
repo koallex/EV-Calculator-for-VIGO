@@ -682,7 +682,7 @@ function AppInner() {
         {/* All main tabs stay mounted and toggle via CSS — avoids Android WebView black screen after login / tab switch */}
         <div
           data-tab-panel="calculator"
-          className={isLandscape ? 'max-w-3xl mx-auto w-full' : undefined}
+          className={isLandscape ? 'w-full' : undefined}
           style={{ display: activeTab === 'calculator' ? 'block' : 'none' }}
         >
           <CalculatorTab
