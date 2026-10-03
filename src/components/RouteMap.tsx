@@ -29,7 +29,8 @@ import {
   wrapPi,
   zoomForSpeed,
 } from '../utils/navCamera';
-import { Box, LocateFixed } from 'lucide-react';
+import { Box, LocateFixed, Minus, Plus } from 'lucide-react';
+import { nextZoom } from '../utils/mapZoom';
 import { insetsKey, type MapInsets } from '../utils/calculatorSheet';
 
 const CAM3D_KEY = 'vigo_hud_cam3d_v1';
@@ -184,6 +185,16 @@ interface RouteMapProps {
    * поведение прежнее (HUD не затронут).
    */
   viewportInsets?: MapInsets | null;
+  /**
+   * Крупные кнопки «+» / «−» вместо штатного контрола Яндекса. Нужны там, где нет мультитача
+   * (CarPlay и т.п.) — щипком масштаб не изменить. Штатный контрол при этом отключается, чтобы не дублировался.
+   * Кнопки центрируются в видимом окне карты (с учётом viewportInsets): в портрете — у левого края (справа над шторкой
+   * стоят быстрые кнопки), в ландшафте — у правого (слева колонка). Если окно ниже двух кнопок — прячутся (см. index.css).
+   * По умолчанию выключено — HUD не затронут.
+   */
+  zoomControls?: boolean;
+  /** Временно спрятать кнопки (например, шторка развёрнута на весь экран и карта почти не видна). Карту не пересоздаёт. */
+  zoomControlsHidden?: boolean;
 }
 
 export const RouteMap: React.FC<RouteMapProps> = ({
@@ -200,6 +211,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   onChargingStopClick,
   focusPoint = null,
   viewportInsets = null,
+  zoomControls = false,
+  zoomControlsHidden = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const bundleRef = useRef<AnyMapBundle | null>(null);
@@ -299,7 +312,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       lon: start?.[1] ?? 27.5667,
       zoom: 12,
       isDark,
-      showZoom: true,
+      showZoom: !zoomControls,
       behaviors: ROUTE_MAP_BEHAVIORS,
     })
       .then((bundle) => {
@@ -1230,6 +1243,28 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     setFollowPaused(false);
   };
 
+  /** Шаг масштаба по кнопкам «+» / «−»: целый уровень, плавно, без мультитача. */
+  const zoomBy = (delta: number) => {
+    const bundle = bundleRef.current as any;
+    if (!bundle) return;
+    try { bundle._vigoPauseFollow?.(); } catch { /* ignore */ }
+    const map = bundle.map;
+    try {
+      if (bundle.apiVersion === 3) {
+        const cur = typeof map.zoom === 'number' ? map.zoom : mapZoom;
+        const z = nextZoom(cur, delta);
+        const c = map.center ?? map.location?.center;
+        if (Array.isArray(c) && c.length >= 2) map.setLocation({ center: c, zoom: z, duration: 250 });
+        else map.setLocation({ zoom: z, duration: 250 });
+        setMapZoom(z);
+      } else {
+        const z = nextZoom(typeof map.getZoom === 'function' ? map.getZoom() : mapZoom, delta);
+        map.setZoom(z, { duration: 250, checkZoomRange: true });
+        setMapZoom(z);
+      }
+    } catch { /* карта могла быть уничтожена — молча игнорируем */ }
+  };
+
   return (
     <div
       className={`route-map-shell overflow-hidden ${fill ? 'route-map-shell--fill' : ''} ${
@@ -1245,6 +1280,41 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         {loadError && (
           <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-rose-300 bg-slate-950/85 whitespace-pre-wrap">
             {loadError}
+          </div>
+        )}
+        {zoomControls && !zoomControlsHidden && (
+          // Обёртка занимает только видимое окно карты (без карточек поверх неё) и центрирует кнопки по вертикали.
+          <div
+            className="calc-zoom pointer-events-none absolute z-[120] flex items-center justify-start landscape:justify-end"
+            style={{
+              top: viewportInsets?.top ?? 0,
+              bottom: viewportInsets?.bottom ?? 0,
+              left: 8 + (viewportInsets?.left ?? 0),
+              right: 8 + (viewportInsets?.right ?? 0),
+            }}
+          >
+            <div className="calc-zoom-group pointer-events-auto flex select-none flex-col gap-2">
+              {([
+                { delta: 1, label: 'Увеличить масштаб карты', Icon: Plus },
+                { delta: -1, label: 'Уменьшить масштаб карты', Icon: Minus },
+              ] as const).map(({ delta, label, Icon }) => (
+                <button
+                  key={delta}
+                  type="button"
+                  disabled={!mapReady}
+                  onClick={() => zoomBy(delta)}
+                  aria-label={label}
+                  title={label}
+                  className={`calc-zoom-btn flex h-14 w-14 touch-manipulation items-center justify-center rounded-2xl border shadow-xl backdrop-blur active:scale-95 disabled:opacity-40 ${
+                    isDark
+                      ? 'border-slate-600 bg-slate-900/90 text-slate-100'
+                      : 'border-slate-300 bg-white/95 text-slate-800'
+                  }`}
+                >
+                  <Icon className="h-7 w-7" strokeWidth={2.5} />
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {fill && followMode && (

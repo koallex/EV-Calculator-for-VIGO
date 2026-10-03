@@ -2617,6 +2617,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           chargingStops={mapStops}
           onChargingStopClick={handleMapStopClick}
           viewportInsets={mapInsets}
+          zoomControls
+          zoomControlsHidden={!landscape && sheetFull}
         />
 </div>
 
