@@ -866,6 +866,13 @@ html {
   .calc-idle-hint { display: none; }
 }
 
+/* Кнопки масштаба карты (RouteMap, zoomControls): если видимое окно карты ниже двух кнопок
+   (шторка развёрнута почти на весь экран) — прячем, чтобы они не налезали на карточку. */
+.calc-zoom { container-type: size; }
+@container (max-height: 124px) {
+  .calc-zoom-group { display: none; }
+}
+
 /* Предельно низко (SE 568×320): подписи под цифрами статистики прячем — иначе «Начать» уходит за край.
    Эти же данные остаются в «Подробности». */
 @media (orientation: landscape) and (max-height: 340px) {
