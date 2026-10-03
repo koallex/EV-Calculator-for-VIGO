@@ -1,11 +1,19 @@
 {
-  "headers": [
+  "framework": "vite",
+  "rewrites": [
     {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Cache-Control", "value": "s-maxage=10, stale-while-revalidate=20" }
-      ]
+      "source": "/api/elevation/profile",
+      "destination": "/api/osm/stations?resource=elevation"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/evrace-refresh",
+      "schedule": "0 3 * * *"
     }
   ]
 }

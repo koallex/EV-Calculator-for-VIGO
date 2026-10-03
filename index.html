@@ -1,39 +1,34 @@
 <!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#0d141c">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="mobile-web-app-capable" content="yes">
-  <title>Minsk Air Radar</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <link rel="stylesheet" href="/style.css">
-</head>
-<body>
-  <header>
-    <div>
-      <b>MINSK AIR RADAR</b>
-      <small>Открытые ADS-B данные · тест</small>
-    </div>
-    <div id="status" class="status">Подключение…</div>
-  </header>
-  <main>
-    <div id="map"></div>
-    <section class="panel">
-      <div class="paneltop">
-        <b>Воздушная обстановка</b>
-        <span id="count">— бортов</span>
-      </div>
-      <div id="details" class="details">Нажмите на самолёт на карте, чтобы увидеть данные.</div>
-      <div class="foot">
-        <span id="updated">Ожидание данных</span>
-        <button id="refresh" type="button">Обновить</button>
-      </div>
-    </section>
-  </main>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="/app.js"></script>
-</body>
+<html lang="ru" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Telegram Mini Apps SDK. Must load before the app bundle so window.Telegram.WebApp
+         exists by the time main.tsx initializes it. Harmless outside Telegram (window.Telegram
+         is simply undefined and initTelegramWebApp() no-ops). -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#090d16" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="EV Route BY" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="application-version" content="1.01" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>EV Route BY — планировщик поездок на электромобиле</title>
+    <meta name="description" content="Планировщик поездок на электромобиле по Беларуси: расчёт расхода энергии, остатка заряда и остановок на зарядных станциях." />
+    <meta property="og:title" content="EV Route BY" />
+    <meta property="og:description" content="Планировщик поездок на электромобиле по Беларуси: расчёт расхода энергии, остатка заряда и остановок на зарядных станциях." />
+    <meta name="twitter:title" content="EV Route BY" />
+    <meta name="twitter:description" content="Планировщик поездок на электромобиле по Беларуси: расчёт расхода энергии, остатка заряда и остановок на зарядных станциях." />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-slate-950 text-slate-100 antialiased selection:bg-cyan-500 selection:text-black">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
+
