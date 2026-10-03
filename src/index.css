@@ -861,6 +861,11 @@ html {
   .calc-params section.grid:has(button[aria-label="Больше людей"]) { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Низкий ландшафт: пояснение в пустой карточке «Куда едем?» прячем — место нужнее ленте недавних мест. */
+@media (orientation: landscape) and (max-height: 380px) {
+  .calc-idle-hint { display: none; }
+}
+
 /* Предельно низко (SE 568×320): подписи под цифрами статистики прячем — иначе «Начать» уходит за край.
    Эти же данные остаются в «Подробности». */
 @media (orientation: landscape) and (max-height: 340px) {
