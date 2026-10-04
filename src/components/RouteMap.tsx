@@ -29,8 +29,9 @@ import {
   wrapPi,
   zoomForSpeed,
 } from '../utils/navCamera';
-import { Box, LocateFixed, Minus, Plus } from 'lucide-react';
-import { nextZoom } from '../utils/mapZoom';
+import { Box, LocateFixed } from 'lucide-react';
+import { zoomMapBundle } from '../utils/mapZoom';
+import { MapZoomButtons } from './MapZoomButtons';
 import { insetsKey, type MapInsets } from '../utils/calculatorSheet';
 
 const CAM3D_KEY = 'vigo_hud_cam3d_v1';
@@ -195,6 +196,11 @@ interface RouteMapProps {
   zoomControls?: boolean;
   /** Временно спрятать кнопки (например, шторка развёрнута на весь экран и карта почти не видна). Карту не пересоздаёт. */
   zoomControlsHidden?: boolean;
+  /**
+   * Где стоит столбец кнопок. 'right' (по умолчанию) — всегда у правого края (HUD).
+   * 'auto' — портрет: у левого края, ландшафт: у правого (калькулятор: справа над шторкой в портрете стоят быстрые кнопки).
+   */
+  zoomPlacement?: 'right' | 'auto';
 }
 
 export const RouteMap: React.FC<RouteMapProps> = ({
@@ -213,6 +219,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   viewportInsets = null,
   zoomControls = false,
   zoomControlsHidden = false,
+  zoomPlacement = 'right',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const bundleRef = useRef<AnyMapBundle | null>(null);
@@ -1245,24 +1252,11 @@ export const RouteMap: React.FC<RouteMapProps> = ({
 
   /** Шаг масштаба по кнопкам «+» / «−»: целый уровень, плавно, без мультитача. */
   const zoomBy = (delta: number) => {
-    const bundle = bundleRef.current as any;
-    if (!bundle) return;
-    try { bundle._vigoPauseFollow?.(); } catch { /* ignore */ }
-    const map = bundle.map;
-    try {
-      if (bundle.apiVersion === 3) {
-        const cur = typeof map.zoom === 'number' ? map.zoom : mapZoom;
-        const z = nextZoom(cur, delta);
-        const c = map.center ?? map.location?.center;
-        if (Array.isArray(c) && c.length >= 2) map.setLocation({ center: c, zoom: z, duration: 250 });
-        else map.setLocation({ zoom: z, duration: 250 });
-        setMapZoom(z);
-      } else {
-        const z = nextZoom(typeof map.getZoom === 'function' ? map.getZoom() : mapZoom, delta);
-        map.setZoom(z, { duration: 250, checkZoomRange: true });
-        setMapZoom(z);
-      }
-    } catch { /* карта могла быть уничтожена — молча игнорируем */ }
+    // Камера следования коротко уступает руке (иначе она тут же вернёт старый масштаб), затем сама
+    // подхватывает новый уровень как «смещение» от скоростного зума. Кнопку «к автомобилю» не показываем.
+    userNavPauseUntilRef.current = Date.now() + 1200;
+    const z = zoomMapBundle(bundleRef.current, delta, mapZoom);
+    if (z != null) setMapZoom(z);
   };
 
   return (
@@ -1282,72 +1276,73 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             {loadError}
           </div>
         )}
-        {zoomControls && !zoomControlsHidden && (
-          // Обёртка занимает только видимое окно карты (без карточек поверх неё) и центрирует кнопки по вертикали.
-          <div
-            className="calc-zoom pointer-events-none absolute z-[120] flex items-center justify-start landscape:justify-end"
-            style={{
-              top: viewportInsets?.top ?? 0,
-              bottom: viewportInsets?.bottom ?? 0,
-              left: 8 + (viewportInsets?.left ?? 0),
-              right: 8 + (viewportInsets?.right ?? 0),
-            }}
-          >
-            <div className="calc-zoom-group pointer-events-auto flex select-none flex-col gap-2">
-              {([
-                { delta: 1, label: 'Увеличить масштаб карты', Icon: Plus },
-                { delta: -1, label: 'Уменьшить масштаб карты', Icon: Minus },
-              ] as const).map(({ delta, label, Icon }) => (
-                <button
-                  key={delta}
-                  type="button"
-                  disabled={!mapReady}
-                  onClick={() => zoomBy(delta)}
-                  aria-label={label}
-                  title={label}
-                  className={`calc-zoom-btn flex h-14 w-14 touch-manipulation items-center justify-center rounded-2xl border shadow-xl backdrop-blur active:scale-95 disabled:opacity-40 ${
-                    isDark
-                      ? 'border-slate-600 bg-slate-900/90 text-slate-100'
-                      : 'border-slate-300 bg-white/95 text-slate-800'
-                  }`}
-                >
-                  <Icon className="h-7 w-7" strokeWidth={2.5} />
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {fill && followMode && (
-          <div className="absolute left-3 top-1/2 z-[120] flex -translate-y-1/2 flex-col gap-2">
-            <button
-              type="button"
-              onClick={toggleCam3d}
-              aria-pressed={cam3d}
-              aria-label={cam3d ? 'Плоская карта, север сверху' : '3D-вид по ходу движения'}
-              className={`flex h-10 w-10 items-center justify-center rounded-full border shadow-lg active:scale-95 ${
-                cam3d
-                  ? 'border-blue-400/60 bg-blue-600/90 text-white'
-                  : isDark
-                    ? 'border-slate-600 bg-slate-900/85 text-slate-300'
-                    : 'border-slate-300 bg-white/90 text-slate-600'
+        {/*
+          Правый столбец управления картой: [вид 3D/сверху] [к автомобилю] [+] [−].
+          Раньше «вид» стоял слева по центру и в ландшафте HUD уходил под информационную колонку.
+          Столбец центрируется в видимом окне карты (с учётом viewportInsets): в портрете калькулятора кнопки у левого края
+          (справа над шторкой быстрые кнопки), в ландшафте — у правого (слева колонка). HUD insets не передаёт → окно = вся карта.
+          Опорные кнопки «вид» и «к автомобилю» работают только в режиме следования (HUD).
+        */}
+        {(() => {
+          const showNav = fill && followMode;
+          const showZoom = zoomControls && !zoomControlsHidden;
+          if (!showNav && !showZoom) return null;
+          return (
+            <div
+              // 'right' (HUD): у правого края; в ландшафте — от верха (по центру столбец садился на ряд «люди / климат / СТОП»
+              // снизу справа на низких экранах), с учётом выреза. 'auto' (калькулятор): центр видимого окна карты.
+              className={`calc-zoom pointer-events-none absolute z-[120] flex ${
+                zoomPlacement === 'auto'
+                  ? 'items-center justify-start landscape:justify-end'
+                  : 'items-center justify-end landscape:items-start landscape:pt-[max(0.5rem,env(safe-area-inset-top,0px))]'
               }`}
+              style={{
+                top: viewportInsets?.top ?? 0,
+                bottom: viewportInsets?.bottom ?? 0,
+                left: 8 + (viewportInsets?.left ?? 0),
+                right:
+                  zoomPlacement === 'auto'
+                    ? 8 + (viewportInsets?.right ?? 0)
+                    : `calc(${8 + (viewportInsets?.right ?? 0)}px + env(safe-area-inset-right, 0px))`,
+              }}
             >
-              <Box className="h-5 w-5" />
-            </button>
-            {followPaused && (
-              <button
-                type="button"
-                onClick={recenter}
-                aria-label="Вернуть карту к автомобилю"
-                className={`flex h-10 w-10 items-center justify-center rounded-full border shadow-lg active:scale-95 ${
-                  isDark ? 'border-slate-600 bg-slate-900/90 text-blue-300' : 'border-slate-300 bg-white/95 text-blue-600'
-                }`}
-              >
-                <LocateFixed className="h-5 w-5" />
-              </button>
-            )}
-          </div>
-        )}
+              <div className="pointer-events-none flex flex-col items-center gap-2">
+                {showNav && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={toggleCam3d}
+                      aria-pressed={cam3d}
+                      aria-label={cam3d ? 'Плоская карта, север сверху' : '3D-вид по ходу движения'}
+                      className={`map-zoom-btn pointer-events-auto flex h-14 w-14 touch-manipulation items-center justify-center rounded-2xl border shadow-xl backdrop-blur active:scale-95 ${
+                        cam3d
+                          ? 'border-blue-400/60 bg-blue-600/90 text-white'
+                          : isDark
+                            ? 'border-slate-600 bg-slate-900/90 text-slate-200'
+                            : 'border-slate-300 bg-white/95 text-slate-700'
+                      }`}
+                    >
+                      <Box className="h-6 w-6" />
+                    </button>
+                    {followPaused && (
+                      <button
+                        type="button"
+                        onClick={recenter}
+                        aria-label="Вернуть карту к автомобилю"
+                        className={`map-zoom-btn pointer-events-auto flex h-14 w-14 touch-manipulation items-center justify-center rounded-2xl border shadow-xl backdrop-blur active:scale-95 ${
+                          isDark ? 'border-slate-600 bg-slate-900/90 text-blue-300' : 'border-slate-300 bg-white/95 text-blue-600'
+                        }`}
+                      >
+                        <LocateFixed className="h-6 w-6" />
+                      </button>
+                    )}
+                  </>
+                )}
+                {showZoom && <MapZoomButtons onZoom={zoomBy} isDark={isDark} disabled={!mapReady} />}
+              </div>
+            </div>
+          );
+        })()}
         {/* Hidden in fullscreen HUD (fill) — overlaps bottom trip telemetry */}
         {!fill && (
           <div className="route-map-legend">

@@ -2286,6 +2286,7 @@ export const HudTab: React.FC<HudTabProps> = ({
           followMode={isTracking && !!mapLivePosition}
           headingDeg={isTracking ? (gpsHeading ?? lastHeadingRef.current ?? 0) : null}
           moveSpeedKmH={isTracking ? currentSpeed : null}
+          zoomControls
           chargingStops={routeWaypoints
             .filter((w) => w.kind === 'charge' && Number.isFinite(w.lat) && Number.isFinite(w.lon))
             .map((w) => ({

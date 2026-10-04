@@ -866,6 +866,45 @@ html {
   .calc-idle-hint { display: none; }
 }
 
+/* Кнопки масштаба / вида на карте (MapZoomButtons, RouteMap): на низких ландшафтных экранах чуть компактнее,
+   чтобы столбец из 3–4 кнопок помещался по высоте (HUD: вид + к авто + «+» + «−»). */
+@media (orientation: landscape) and (max-height: 520px) {
+  .map-zoom-btn { width: 48px; height: 48px; border-radius: 0.875rem; }
+  .map-zoom-btn svg { width: 24px; height: 24px; }
+  .map-zoom-group { gap: 0.375rem; }
+}
+/* Совсем низко (568×320): столбец из 4 кнопок (вид, к авто, «+», «−») должен уместиться над рядом «СТОП» в HUD. */
+@media (orientation: landscape) and (max-height: 340px) {
+  .map-zoom-btn { width: 44px; height: 44px; }
+  .map-zoom-btn svg { width: 22px; height: 22px; }
+  .map-zoom-group, .calc-zoom > div { gap: 0.25rem; }
+}
+
+/*
+ * Окно «Выбор точки на карте» (LocationPickerModal) в ландшафте.
+ * Раньше срабатывали «десктопные» sm:-классы (ширина ≥ 640px у телефона на боку): окно 512px × 80% высоты, а заголовок и
+ * нижний блок съедали большую часть → карта оставалась маленькой полоской. Теперь: на весь экран, карта слева на всю высоту,
+ * справа узкая панель (заголовок → подсказка/адрес → «Выбрать»). Портрет не меняется.
+ */
+@media (orientation: landscape) {
+  .loc-picker-overlay {
+    align-items: stretch;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+  .loc-picker-overlay .loc-picker-card {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    border-radius: 0.75rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(15rem, 30vw, 21rem);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+  .loc-picker-card .loc-picker-map { grid-column: 1; grid-row: 1 / span 3; min-height: 0; }
+  .loc-picker-card .loc-picker-header { grid-column: 2; grid-row: 1; border-bottom-width: 1px; }
+  .loc-picker-card .loc-picker-footer { grid-column: 2; grid-row: 3; border-top-width: 1px; }
+}
+
 /* Кнопки масштаба карты (RouteMap, zoomControls): если видимое окно карты ниже двух кнопок
    (шторка развёрнута почти на весь экран) — прячем, чтобы они не налезали на карточку. */
 .calc-zoom { container-type: size; }

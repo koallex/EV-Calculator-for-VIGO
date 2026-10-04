@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { MapZoomButtons } from './MapZoomButtons';
+import { zoomMapBundle } from '../utils/mapZoom';
 import {
   MapPin,
   Navigation,
@@ -389,6 +391,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
 
   const mapRef = useRef<any>(null);
   const bundleRef = useRef<AnyMapBundle | null>(null);
+  const [mapReady, setMapReady] = useState(false);
   const markersLayerRef = useRef<any[]>([]);
   const markersLayerSigRef = useRef('');
   /** Full EVRace snapshot for the session — pan/zoom filters client-side (fast). */
@@ -737,6 +740,8 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
       lon: 27.5667,
       zoom: 12,
       isDark,
+      // Свои крупные кнопки «+/−» (MapZoomButtons) вместо штатного контрола — без мультитача (CarPlay) щипок недоступен.
+      showZoom: false,
     })
       .then((bundle) => {
         if (cancelled) {
@@ -745,6 +750,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         }
         bundleRef.current = bundle;
         mapRef.current = bundle.map;
+        setMapReady(true);
 
         const onMoveEnd = () => scheduleFetch();
         // v3: listen via YMapListener for location changes is complex; poll bounds on action end via DOM
@@ -1333,6 +1339,19 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
               </>
             )}
           </button>
+        </div>
+
+        {/*
+          Кнопки масштаба. Ландшафт: у правого края центральной колонки, от верха (под рядом «Фильтры / Ближайшая свободная»):
+          панель карты высотой 100dvh начинается под переключателем «Карта ЭЗС / Стоимость» и частично уходит за нижний край,
+          так что «центр» сетки оказывался под нижней навигацией; сверху кнопки видны всегда и не мешают карточке станции
+          (она прижата к правому нижнему углу). Портрет: справа по центру свободной области; пока открыт список/фильтры/карточка — скрыты.
+        */}
+        <div
+          className={`pointer-events-none flex col-start-1 row-start-3 justify-self-end self-center landscape:col-start-2 landscape:row-start-2 landscape:self-start ${
+            filtersOpen || nearestFreeOpen || selected ? 'portrait:hidden' : ''}`}
+        >
+          <MapZoomButtons onZoom={(d) => zoomMapBundle(bundleRef.current, d)} isDark={isDark} disabled={!mapReady} />
         </div>
 
         {/* Nearest free list. Landscape: right column, hidden while a station card is open. */}

@@ -1,8 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, MapPin, Check, Loader2, LocateFixed } from 'lucide-react';
 import { reverseGeocode } from '../services/routeElevation';
 import { triggerHaptic } from '../utils/haptics';
+import { zoomMapBundle } from '../utils/mapZoom';
+import { MapZoomButtons } from './MapZoomButtons';
 import {
   createBestMap,
   makeDotMarkerEl,
@@ -47,6 +50,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
   const [resolving, setResolving] = useState(false);
   const [locating, setLocating] = useState(false);
   const [mapError, setMapError] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
 
   const center = initialCenter || FALLBACK;
 
@@ -75,6 +79,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
     if (!isOpen) return;
     let cancelled = false;
     setMapError(false);
+    setMapReady(false);
 
     const t = window.setTimeout(() => {
       if (!containerRef.current || cancelled) return;
@@ -83,6 +88,8 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
         lon: center.lon,
         zoom: 12,
         isDark,
+        // Свои крупные «+/−» вместо штатного контрола: без мультитача (CarPlay) щипком не приблизить.
+        showZoom: false,
       })
         .then((bundle) => {
           if (cancelled) {
@@ -90,6 +97,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
             return;
           }
           bundleRef.current = bundle;
+          setMapReady(true);
           const map = (bundle as any).map;
           if ((bundle as any).apiVersion === 3) {
             const { YMapListener } = (bundle as any).ymaps3;
@@ -187,11 +195,15 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
     });
   };
 
-  return (
+  // Портал в <body>: окно рендерилось внутри оболочки калькулятора (isolate = свой контекст наложения), поэтому его
+  // z-[10000] не поднимало его над плавающей нижней навигацией (z-50 вне оболочки) — на весь экран в ландшафте
+  // навигация наезжала на кнопку «Выбрать».
+  if (typeof document === 'undefined') return null;
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
         <motion.div
-          className="fixed inset-0 z-[10000] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+          className="loc-picker-overlay fixed inset-0 z-[10000] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -201,7 +213,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
           }}
         >
           <motion.div
-            className={`w-full sm:max-w-lg h-[88vh] sm:h-[80vh] rounded-t-2xl sm:rounded-2xl overflow-hidden flex flex-col border shadow-2xl ${
+            className={`loc-picker-card w-full sm:max-w-lg h-[88vh] sm:h-[80vh] rounded-t-2xl sm:rounded-2xl overflow-hidden flex flex-col border shadow-2xl ${
               isDark
                 ? 'bg-slate-900 border-slate-800 text-white'
                 : 'bg-white border-slate-200 text-slate-900'
@@ -213,7 +225,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <div
-              className={`flex items-center justify-between px-4 py-3 border-b shrink-0 ${
+              className={`loc-picker-header flex items-center justify-between px-4 py-3 border-b shrink-0 ${
                 isDark ? 'border-slate-800' : 'border-slate-100'
               }`}
             >
@@ -230,7 +242,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
               </button>
             </div>
 
-            <div className="relative flex-1 min-h-0">
+            <div className="loc-picker-map relative flex-1 min-h-0">
               <div ref={containerRef} className="absolute inset-0 bg-slate-900" />
               {mapError && (
                 <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 text-sm text-rose-300 p-4 text-center">
@@ -252,10 +264,18 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
                 )}
                 Где я
               </button>
+              {/* Масштаб кнопками: у правого края карты по центру */}
+              <div className="pointer-events-none absolute right-3 top-1/2 z-10 flex -translate-y-1/2">
+                <MapZoomButtons
+                  onZoom={(d) => zoomMapBundle(bundleRef.current, d)}
+                  isDark={isDark}
+                  disabled={!mapReady || mapError}
+                />
+              </div>
             </div>
 
             <div
-              className={`shrink-0 border-t px-4 py-3 space-y-2 ${
+              className={`loc-picker-footer shrink-0 border-t px-4 py-3 space-y-2 ${
                 isDark ? 'border-slate-800' : 'border-slate-100'
               }`}
             >
@@ -286,6 +306,7 @@ export const LocationPickerModal: React.FC<LocationPickerModalProps> = ({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 };

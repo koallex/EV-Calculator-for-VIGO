@@ -20,3 +20,30 @@ export function nextZoom(current: number, delta: number): number {
   const target = delta > 0 ? Math.floor(base + EPS) + delta : Math.ceil(base - EPS) + delta;
   return Math.max(MAP_ZOOM_MIN, Math.min(MAP_ZOOM_MAX, target));
 }
+
+/**
+ * Один шаг масштаба на живой карте (общий для калькулятора, HUD, ЭЗС и выбора точки).
+ * Работает с обеими версиями Яндекс.Карт: v3 (map.zoom + setLocation) и 2.1 (getZoom + setZoom).
+ * Возвращает новый уровень или null, если карта ещё не готова / уничтожена.
+ * Центр карты не меняется.
+ */
+export function zoomMapBundle(bundle: any, delta: number, fallbackZoom: number = MAP_ZOOM_DEFAULT): number | null {
+  if (!bundle || !bundle.map) return null;
+  const map = bundle.map;
+  try {
+    if (bundle.apiVersion === 3) {
+      const cur = typeof map.zoom === 'number' ? map.zoom : fallbackZoom;
+      const z = nextZoom(cur, delta);
+      const c = map.center ?? map.location?.center;
+      if (Array.isArray(c) && c.length >= 2) map.setLocation({ center: c, zoom: z, duration: 250 });
+      else map.setLocation({ zoom: z, duration: 250 });
+      return z;
+    }
+    const cur = typeof map.getZoom === 'function' ? map.getZoom() : fallbackZoom;
+    const z = nextZoom(cur, delta);
+    map.setZoom(z, { duration: 250, checkZoomRange: true });
+    return z;
+  } catch {
+    return null; // карта могла быть уничтожена — молча игнорируем
+  }
+}
