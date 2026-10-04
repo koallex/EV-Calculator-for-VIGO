@@ -24,7 +24,7 @@ export const MapZoomButtons: React.FC<{
         onClick={() => onZoom(delta)}
         aria-label={label}
         title={label}
-        className={`map-zoom-btn flex h-14 w-14 touch-manipulation items-center justify-center rounded-2xl border shadow-xl backdrop-blur active:scale-95 disabled:opacity-40 ${
+        className={`map-zoom-btn flex h-14 w-14 touch-manipulation items-center justify-center rounded-2xl border shadow-xl active:scale-95 disabled:opacity-40 ${
           isDark ? 'border-slate-600 bg-slate-900/90 text-slate-100' : 'border-slate-300 bg-white/95 text-slate-800'
         }`}
       >

@@ -1342,14 +1342,17 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
         </div>
 
         {/*
-          Кнопки масштаба. Ландшафт: у правого края центральной колонки, от верха (под рядом «Фильтры / Ближайшая свободная»):
+          Кнопки масштаба. Ландшафт: у ПРАВОГО края экрана, сверху (под кнопкой «Ближайшая свободная»); при открытом списке «ближайших» сдвигаются левее него, при открытой карточке станции скрыты. Историческая справка (прежняя схема — центральная колонка):
           панель карты высотой 100dvh начинается под переключателем «Карта ЭЗС / Стоимость» и частично уходит за нижний край,
           так что «центр» сетки оказывался под нижней навигацией; сверху кнопки видны всегда и не мешают карточке станции
           (она прижата к правому нижнему углу). Портрет: справа по центру свободной области; пока открыт список/фильтры/карточка — скрыты.
         */}
         <div
-          className={`pointer-events-none flex col-start-1 row-start-3 justify-self-end self-center landscape:col-start-2 landscape:row-start-2 landscape:self-start ${
-            filtersOpen || nearestFreeOpen || selected ? 'portrait:hidden' : ''}`}
+          className={`pointer-events-none flex col-start-1 row-start-3 justify-self-end self-center landscape:absolute landscape:col-auto landscape:row-auto landscape:z-30 landscape:top-[calc(env(safe-area-inset-top,0px)_+_3.75rem)] ${
+            nearestFreeOpen
+              ? 'landscape:right-[calc(min(19rem,38%)_+_max(0.5rem,env(safe-area-inset-right,0px)))]'
+              : 'landscape:right-[max(0.5rem,env(safe-area-inset-right,0px))]'
+          } ${filtersOpen || nearestFreeOpen || selected ? 'portrait:hidden' : ''} ${selected ? 'landscape:hidden' : ''}`}
         >
           <MapZoomButtons onZoom={(d) => zoomMapBundle(bundleRef.current, d)} isDark={isDark} disabled={!mapReady} />
         </div>

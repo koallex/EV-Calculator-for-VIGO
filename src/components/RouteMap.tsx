@@ -772,7 +772,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       } catch { /* ignore */ }
     };
     readZoom();
-    const id = window.setInterval(readZoom, 450);
+    const id = window.setInterval(readZoom, 1000);
     const el = containerRef.current;
     const onUser = () => readZoom();
     el?.addEventListener('pointerup', onUser, { passive: true });
@@ -1038,7 +1038,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     const POS_TAU_S = 0.4;
     const HEAD_LERP = 0.14;
     const HEAD_DEADZONE = 3;
-    const FRAME_MIN_MS = 40; // ~25 fps camera updates
+    const FRAME_MIN_MS = 14; // ~60 fps: camera/marker follow every display frame while driving (was 40 ms = 25 fps)
+    const IDLE_FRAME_MIN_MS = 120; // standing / crawling (<3 km/h): nothing visible moves, so ~8 fps is enough
     const GLIDE_MS = 600;
     let lastFrameTs = 0;
     let camZoom: number | null = null;
@@ -1064,7 +1065,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
 
       const now = performance.now();
-      if (lastFrameTs && now - lastFrameTs < FRAME_MIN_MS) {
+      const frameMinMs = (moveSpeedRef.current ?? 0) < 3 ? IDLE_FRAME_MIN_MS : FRAME_MIN_MS;
+      if (lastFrameTs && now - lastFrameTs < frameMinMs) {
         followLoopRafRef.current = requestAnimationFrame(tick);
         return;
       }
@@ -1314,7 +1316,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
                       onClick={toggleCam3d}
                       aria-pressed={cam3d}
                       aria-label={cam3d ? 'Плоская карта, север сверху' : '3D-вид по ходу движения'}
-                      className={`map-zoom-btn pointer-events-auto flex h-14 w-14 touch-manipulation items-center justify-center rounded-2xl border shadow-xl backdrop-blur active:scale-95 ${
+                      className={`map-zoom-btn pointer-events-auto flex h-14 w-14 touch-manipulation items-center justify-center rounded-2xl border shadow-xl active:scale-95 ${
                         cam3d
                           ? 'border-blue-400/60 bg-blue-600/90 text-white'
                           : isDark
@@ -1329,7 +1331,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
                         type="button"
                         onClick={recenter}
                         aria-label="Вернуть карту к автомобилю"
-                        className={`map-zoom-btn pointer-events-auto flex h-14 w-14 touch-manipulation items-center justify-center rounded-2xl border shadow-xl backdrop-blur active:scale-95 ${
+                        className={`map-zoom-btn pointer-events-auto flex h-14 w-14 touch-manipulation items-center justify-center rounded-2xl border shadow-xl active:scale-95 ${
                           isDark ? 'border-slate-600 bg-slate-900/90 text-blue-300' : 'border-slate-300 bg-white/95 text-blue-600'
                         }`}
                       >

@@ -189,6 +189,38 @@ const MIN_ELEVATION_COMMIT_DELTA_M = 5;
 const ELEVATION_CONFIRMATION_SAMPLES = 3;
 const MAX_ELEVATION_DELTA_PER_COMMIT_M = 30;
 
+/** mm:ss / h:mm:ss */
+const formatClock = (secs: number) => {
+  const hrs = Math.floor(secs / 3600);
+  const mins = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (hrs > 0) {
+    return `${hrs}:${mins < 10 ? '0' : ''}${mins}:${s < 10 ? '0' : ''}${s}`;
+  }
+  return `${mins < 10 ? '0' : ''}${mins}:${s < 10 ? '0' : ''}${s}`;
+};
+
+/**
+ * Self-contained 1 Hz trip clock. Only this tiny component re-renders every second —
+ * previously a per-second setState in HudTab re-rendered the whole 3k-line HUD (and the map props) each tick,
+ * which kept the CPU awake and the phone warm.
+ */
+const TripClock: React.FC<{ startTime: number | null; active: boolean; fallbackSecs: number }> = React.memo(
+  ({ startTime, active, fallbackSecs }) => {
+    const [secs, setSecs] = useState(() =>
+      active && startTime ? Math.max(0, Math.floor((Date.now() - startTime) / 1000)) : fallbackSecs,
+    );
+    useEffect(() => {
+      if (!active || !startTime) return;
+      const tick = () => setSecs(Math.max(0, Math.floor((Date.now() - startTime) / 1000)));
+      tick();
+      const id = window.setInterval(tick, 1000);
+      return () => window.clearInterval(id);
+    }, [active, startTime]);
+    return <>{formatClock(active && startTime ? secs : fallbackSecs)}</>;
+  },
+);
+
 export const HudTab: React.FC<HudTabProps> = ({
   settings,
   sessions,
@@ -341,6 +373,10 @@ export const HudTab: React.FC<HudTabProps> = ({
   const [trackingStopMessage, setTrackingStopMessage] = useState('');
 
   const watchIdRef = useRef<number | null>(null);
+  // Exact elapsed seconds (updated every second without re-rendering) + last value pushed to React state.
+  const ELAPSED_PUBLISH_S = 5;
+  const elapsedRef = useRef(0);
+  const elapsedPublishedRef = useRef(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const prevPositionRef = useRef<{ lat: number; lon: number; time: number; speed: number } | null>(null);
   const speedHistoryRef = useRef<number[]>([]);
@@ -657,8 +693,20 @@ export const HudTab: React.FC<HudTabProps> = ({
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
     if (isTracking && tripStartTime) {
+      // New trip or resumed checkpoint: re-baseline so the 5 s publish gate starts from the right value.
+      const baseline = Math.max(0, Math.floor((Date.now() - tripStartTime) / 1000));
+      elapsedRef.current = baseline;
+      elapsedPublishedRef.current = baseline;
+      setElapsedSeconds(baseline);
       interval = setInterval(() => {
-        setElapsedSeconds(Math.floor((Date.now() - tripStartTime) / 1000));
+        // Exact value lives in a ref; React state (which re-renders the whole HUD) is refreshed only
+        // every ELAPSED_PUBLISH_S seconds. The on-screen clock is the self-updating <TripClock />.
+        const elapsedNow = Math.floor((Date.now() - tripStartTime) / 1000);
+        elapsedRef.current = elapsedNow;
+        if (elapsedNow - elapsedPublishedRef.current >= ELAPSED_PUBLISH_S) {
+          elapsedPublishedRef.current = elapsedNow;
+          setElapsedSeconds(elapsedNow);
+        }
         // Accrue climate energy for exactly this one second, at the climate on/off state and
         // outdoor temperature in effect right now — see climateEnergyKwhRef above.
         const currentClimatePowerKw = calculateClimateImpact(outdoorTempRef.current, climateOnRef.current).powerKw;
@@ -1180,10 +1228,15 @@ export const HudTab: React.FC<HudTabProps> = ({
 
   const windInfo = getWindClassification(relativeWindAngle, weather.windSpeed);
 
+  // Exact elapsed time for calculations. `elapsedSeconds` state is only refreshed every few seconds (to avoid
+  // re-rendering the whole HUD each second), so anything that feeds the forecast reads the exact ref instead —
+  // average speed / driving style are therefore computed from exactly the same numbers as before.
+  const elapsedExactS = isTracking ? Math.max(elapsedSeconds, elapsedRef.current) : elapsedSeconds;
+
   // Real-time trip average speed calculation
   const avgTripSpeedKmH =
-    isTracking && elapsedSeconds > 5 && tripDistanceKm > 0.05
-      ? Math.min(MAX_VALID_SPEED_KMH, Number(((tripDistanceKm / (elapsedSeconds / 3600))).toFixed(0)))
+    isTracking && elapsedExactS > 5 && tripDistanceKm > 0.05
+      ? Math.min(MAX_VALID_SPEED_KMH, Number(((tripDistanceKm / (elapsedExactS / 3600))).toFixed(0)))
       : currentSpeed > 0
       ? currentSpeed
       : 55;
@@ -1226,7 +1279,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   // Weather/temperature/precipitation are deliberately excluded from driving style.
   const currentTripStyle = useMemo(() => {
     // When tracking is inactive or in early calibration
-    if (!isTracking || tripDistanceKm < 0.05 || elapsedSeconds < 6 || speedHistoryRef.current.length < 4) {
+    if (!isTracking || tripDistanceKm < 0.05 || elapsedExactS < 6 || speedHistoryRef.current.length < 4) {
       return {
         factor: 1.0,
         label: 'Калибровка',
@@ -1337,7 +1390,7 @@ export const HudTab: React.FC<HudTabProps> = ({
         badgeBg: isDark ? 'bg-rose-950/70 border-rose-800 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-800',
       };
     }
-  }, [isTracking, tripDistanceKm, elapsedSeconds, maxSpeed, avgTripSpeedKmH, isDark]);
+  }, [isTracking, tripDistanceKm, elapsedExactS, maxSpeed, avgTripSpeedKmH, isDark]);
 
   // Energy consumption forecast combining live trip style + speed + temperature + climate + relative wind + precipitation + elevation
   const forecast: ConsumptionForecast = estimateTripConsumption(
@@ -1545,36 +1598,10 @@ export const HudTab: React.FC<HudTabProps> = ({
   );
 
   // Persist live trip so a WebView kill / reload does not erase it.
-  const writeCheckpoint = useCallback(() => {
-    if (!isTracking || !tripStartTime) return;
-    saveHudCheckpoint({
-      v: 1,
-      savedAt: Date.now(),
-      tripStartTime,
-      elapsedSeconds,
-      tripDistanceKm,
-      maxSpeed,
-      startTripSoc,
-      climateOn,
-      passengers,
-      elevationGainM,
-      elevationLossM,
-      altitudeAvailable,
-      distanceKm: distanceRef.current,
-      segmentEnergyKwh: segmentEnergyKwhRef.current,
-      elevationEnergyKwh: elevationEnergyKwhRef.current,
-      climateEnergyKwh: climateEnergyKwhRef.current,
-      speedHistory: speedHistoryRef.current.slice(-200),
-      windLog: windLogRef.current as Array<Record<string, unknown>>,
-      lastWindLogDistanceKm: lastWindLogDistanceKmRef.current,
-      destinationQuery: destinationQuery || undefined,
-      destinationMode,
-      manualAvgSpeedKmH,
-    });
-  }, [
-    isTracking,
-    tripStartTime,
-    elapsedSeconds,
+  // Volatile values are read through a ref so writeCheckpoint keeps a STABLE identity. Before, it was
+  // recreated every second/GPS tick, which re-ran the interval effect below and wrote the whole
+  // checkpoint (incl. windLog JSON) to localStorage on every change instead of once per 12 s.
+  const cpLiveRef = useRef({
     tripDistanceKm,
     maxSpeed,
     startTripSoc,
@@ -1586,7 +1613,54 @@ export const HudTab: React.FC<HudTabProps> = ({
     destinationQuery,
     destinationMode,
     manualAvgSpeedKmH,
-  ]);
+  });
+  cpLiveRef.current = {
+    tripDistanceKm,
+    maxSpeed,
+    startTripSoc,
+    climateOn,
+    passengers,
+    elevationGainM,
+    elevationLossM,
+    altitudeAvailable,
+    destinationQuery,
+    destinationMode,
+    manualAvgSpeedKmH,
+  };
+  const writeCheckpoint = useCallback(() => {
+    if (!isTracking || !tripStartTime) return;
+    const live = cpLiveRef.current;
+    saveHudCheckpoint({
+      v: 1,
+      savedAt: Date.now(),
+      tripStartTime,
+      elapsedSeconds: Math.max(0, Math.floor((Date.now() - tripStartTime) / 1000)),
+      tripDistanceKm: live.tripDistanceKm,
+      maxSpeed: live.maxSpeed,
+      startTripSoc: live.startTripSoc,
+      climateOn: live.climateOn,
+      passengers: live.passengers,
+      elevationGainM: live.elevationGainM,
+      elevationLossM: live.elevationLossM,
+      altitudeAvailable: live.altitudeAvailable,
+      distanceKm: distanceRef.current,
+      segmentEnergyKwh: segmentEnergyKwhRef.current,
+      elevationEnergyKwh: elevationEnergyKwhRef.current,
+      climateEnergyKwh: climateEnergyKwhRef.current,
+      speedHistory: speedHistoryRef.current.slice(-200),
+      windLog: windLogRef.current as Array<Record<string, unknown>>,
+      lastWindLogDistanceKm: lastWindLogDistanceKmRef.current,
+      destinationQuery: live.destinationQuery || undefined,
+      destinationMode: live.destinationMode,
+      manualAvgSpeedKmH: live.manualAvgSpeedKmH,
+    });
+  }, [isTracking, tripStartTime]);
+
+  // Rare, user-driven changes are persisted immediately (cheap); the periodic write below covers the rest.
+  useEffect(() => {
+    if (isTracking) writeCheckpoint();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [climateOn, passengers]);
 
   useEffect(() => {
     if (!isTracking) return;
@@ -1738,10 +1812,11 @@ export const HudTab: React.FC<HudTabProps> = ({
     setTrackingStopMessage('Расчёт остановлен');
 
     const finalDistance = Number(distanceRef.current.toFixed(1));
-    const finalMinutes = Math.max(1, Math.round(elapsedSeconds / 60));
+    const elapsedNow = tripStartTime ? Math.floor((Date.now() - tripStartTime) / 1000) : elapsedSeconds;
+    const finalMinutes = Math.max(1, Math.round(elapsedNow / 60));
     const finalAvgSpeed =
-      elapsedSeconds > 10 && finalDistance > 0.05
-        ? Math.min(MAX_VALID_SPEED_KMH, Math.round(finalDistance / (elapsedSeconds / 3600)))
+      elapsedNow > 10 && finalDistance > 0.05
+        ? Math.min(MAX_VALID_SPEED_KMH, Math.round(finalDistance / (elapsedNow / 3600)))
         : maxSpeed > 0
         ? Math.round(maxSpeed * 0.7)
         : currentSpeed;
@@ -1900,16 +1975,6 @@ export const HudTab: React.FC<HudTabProps> = ({
     setCompletedTripSummary(null);
   };
 
-  // Format time mm:ss or hh:mm:ss
-  const formatTime = (secs: number) => {
-    const hrs = Math.floor(secs / 3600);
-    const mins = Math.floor((secs % 3600) / 60);
-    const s = secs % 60;
-    if (hrs > 0) {
-      return `${hrs}:${mins < 10 ? '0' : ''}${mins}:${s < 10 ? '0' : ''}${s}`;
-    }
-    return `${mins < 10 ? '0' : ''}${mins}:${s < 10 ? '0' : ''}${s}`;
-  };
 
   // === SoC AT DESTINATION FORECAST ===
   // geocodeAddress / buildRouteElevation live in ../services/routeElevation and
@@ -2194,8 +2259,10 @@ export const HudTab: React.FC<HudTabProps> = ({
       : Number(forecast.estimatedConsumption.toFixed(1));
 
   const glass = isDark
-    ? 'bg-slate-950/70 border-white/10 text-white backdrop-blur-md'
-    : 'bg-white/80 border-slate-200/80 text-slate-900 backdrop-blur-md';
+    ? 'bg-slate-950/85 border-white/10 text-white'
+    : 'bg-white/90 border-slate-200/80 text-slate-900';
+  // NOTE: no backdrop-blur here on purpose — blurring a continuously redrawn WebGL map re-runs the blur
+  // shader every frame and is one of the biggest GPU/heat costs on iPhone. Opaque-ish fill looks the same.
 
   // Shared fullscreen map layer (pre-start + driving)
   // Prefer planned route geometry; if the user started tracking without a plan, still show
@@ -2336,7 +2403,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   // Above bottom nav; in portrait also clear the trip telemetry strip (time / avg / distance).
   const hudEvseCard = selectedMapStop ? (
     <div
-      className={`pointer-events-auto absolute left-1/2 z-40 w-[min(22rem,calc(100%-1.25rem))] -translate-x-1/2 rounded-2xl border p-3 shadow-2xl backdrop-blur-md overflow-y-auto overscroll-contain ${
+      className={`pointer-events-auto absolute left-1/2 z-40 w-[min(22rem,calc(100%-1.25rem))] -translate-x-1/2 rounded-2xl border p-3 shadow-2xl overflow-y-auto overscroll-contain ${
         isDark
           ? 'border-amber-700/40 bg-slate-950/95 text-slate-100'
           : 'border-amber-200 bg-white/95 text-slate-900'
@@ -2463,7 +2530,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   // z-[60] above floating bottom nav (z-50). Extra bottom padding keeps action buttons clear of the nav bar in landscape.
   const completedTripModal = completedTripSummary ? (
     <div
-      className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-md flex items-center justify-center px-4 pt-4"
+      className="fixed inset-0 z-[60] bg-black/85 flex items-center justify-center px-4 pt-4"
       style={{
         paddingBottom: 'calc(5.75rem + env(safe-area-inset-bottom, 0px))',
       }}
@@ -2908,7 +2975,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       <div className={`rounded-2xl border px-2 py-1.5 grid grid-cols-3 gap-1 ${glass}`}>
         <div className="text-center">
           <div className="text-[9px] font-bold uppercase opacity-60">В пути</div>
-          <div className="text-sm font-black font-mono tabular-nums">{formatTime(elapsedSeconds)}</div>
+          <div className="text-sm font-black font-mono tabular-nums"><TripClock startTime={tripStartTime} active={isTracking} fallbackSecs={elapsedSeconds} /></div>
         </div>
         <div className="text-center">
           <div className="text-[9px] font-bold uppercase opacity-60">Средняя</div>
@@ -2986,7 +3053,7 @@ export const HudTab: React.FC<HudTabProps> = ({
                 <div className="grid grid-cols-3 gap-1.5 text-center">
                   <div>
                     <div className="text-[9px] font-bold uppercase opacity-50">В пути</div>
-                    <div className="text-sm font-black font-mono tabular-nums leading-tight">{formatTime(elapsedSeconds)}</div>
+                    <div className="text-sm font-black font-mono tabular-nums leading-tight"><TripClock startTime={tripStartTime} active={isTracking} fallbackSecs={elapsedSeconds} /></div>
                   </div>
                   <div>
                     <div className="text-[9px] font-bold uppercase opacity-50">Средн.</div>
