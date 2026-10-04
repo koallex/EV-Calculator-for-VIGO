@@ -485,6 +485,11 @@ export const HudTab: React.FC<HudTabProps> = ({
   const outdoorTempRef = useRef(20);
 
   const isDark = settings.theme !== 'light';
+  // HUD map on/off (Settings → «Карта в HUD»). When off, <RouteMap /> is not mounted at all: no WebGL,
+  // no Yandex script/tiles, no 4 Hz marker re-renders — only GPS + the energy model keep running.
+  const mapEnabled = settings.hudMapEnabled !== false;
+  const mapEnabledRef = useRef(mapEnabled);
+  mapEnabledRef.current = mapEnabled;
   const batteryCap = settings.batteryCapacityKwh || 51.87;
 
   // Notify parent of tracking status
@@ -775,7 +780,7 @@ export const HudTab: React.FC<HudTabProps> = ({
         };
         smoothMapPosRef.current = smoothed;
         // ~4 Hz map feed — RouteMap continuously lerps marker toward this target.
-        if (now - lastMapPosUpdateRef.current > 250) {
+        if (mapEnabledRef.current && now - lastMapPosUpdateRef.current > 250) {
           lastMapPosUpdateRef.current = now;
           setMapLivePosition(smoothed);
         }
@@ -2342,7 +2347,21 @@ export const HudTab: React.FC<HudTabProps> = ({
     };
   }, [selectedMapStop, settings.vehicleProfileId, settings.connectorOverride]);
 
-  const mapLayer = (
+  const mapLayer = !mapEnabled ? (
+    // Map disabled in settings: static background, nothing animated, nothing loaded.
+    <div
+      className="pointer-events-none absolute inset-0 h-full w-full flex items-center justify-center"
+      style={{
+        background: isDark
+          ? 'radial-gradient(120% 80% at 50% 0%, #1b2230 0%, #0b0f16 70%)'
+          : 'radial-gradient(120% 80% at 50% 0%, #ffffff 0%, #e2e8f0 80%)',
+      }}
+    >
+      <span className={`text-[10px] font-semibold opacity-40 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+        Карта отключена · Настройки → HUD
+      </span>
+    </div>
+  ) : (
     <div className="absolute inset-0 h-full w-full">
       {mapPointsForHud.length >= 2 ? (
         <RouteMap

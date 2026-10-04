@@ -1045,6 +1045,59 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           </div>
         </div>
 
+        {/* 4. HUD */}
+        <div
+          className={`border rounded-2xl p-4 space-y-3 transition-colors ${
+            isDark
+              ? 'bg-slate-900/60 border-slate-800/80'
+              : 'bg-white border-slate-200/80 shadow-xs'
+          }`}
+        >
+          <h3
+            className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${
+              isDark ? 'text-slate-300' : 'text-slate-700'
+            }`}
+          >
+            <MapPin className={`w-4 h-4 ${isDark ? 'text-cyan-400' : 'text-cyan-600'}`} />
+            HUD
+          </h3>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={form.hudMapEnabled !== false}
+            onClick={() => {
+              triggerHaptic('light', form.hapticFeedback);
+              setForm({ ...form, hudMapEnabled: form.hudMapEnabled === false });
+            }}
+            className={`w-full flex items-center justify-between gap-3 p-3 rounded-xl border text-left min-h-[48px] active:scale-[0.99] transition-colors ${
+              isDark
+                ? 'bg-slate-950 border-slate-800 text-slate-200'
+                : 'bg-slate-50 border-slate-200 text-slate-800'
+            }`}
+          >
+            <span className="min-w-0">
+              <span className="block text-xs font-semibold">Карта в HUD</span>
+              <span className={`block text-[11px] leading-snug ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Отключите, если телефон сильно греется или нужно экономить интернет. Скорость, SoC, прогноз и запись поездки работают как обычно.
+              </span>
+            </span>
+            <span
+              className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors ${
+                form.hudMapEnabled !== false ? 'bg-cyan-600' : isDark ? 'bg-slate-700' : 'bg-slate-300'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                  form.hudMapEnabled !== false ? 'left-[22px]' : 'left-0.5'
+                }`}
+              />
+            </span>
+          </button>
+          <p className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+            Изменение вступает в силу после «Сохранить настройки».
+          </p>
+        </div>
+
         {/* Save Button */}
         <button
           type="submit"

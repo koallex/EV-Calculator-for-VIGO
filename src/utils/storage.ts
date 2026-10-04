@@ -125,6 +125,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   gasEquivalentL100km: 8.0,
   gasPricePerLiter: 2.46,
   hapticFeedback: true,
+  hudMapEnabled: true,
   theme: 'dark',
   targetMaxSoc: 80,
 };

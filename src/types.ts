@@ -51,6 +51,8 @@ export interface UserSettings {
   gasEquivalentL100km: number; // e.g. 8.0 L/100km
   gasPricePerLiter: number; // e.g. 2.45 Br/L or 62.0 ₽/L
   hapticFeedback: boolean;
+  /** Show the live map in the HUD tab. Default true; turn off to cut GPU/network load (phone heating). */
+  hudMapEnabled?: boolean;
   theme: ThemeMode;
   targetMaxSoc: number; // e.g. 80 or 100 for battery health advice
 
