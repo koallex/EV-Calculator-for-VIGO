@@ -1,5 +1,5 @@
 export interface RoutePoint { lat:number; lon:number; elevationM:number; distanceFromStartKm:number; roadSpeedKmH?:number; roadSegmentLengthKm?:number; }
-export interface RouteElevationData { name:string; distanceKm:number; points:RoutePoint[]; startElevationM:number; endElevationM:number; elevationGainM:number; elevationLossM:number; grossClimbEnergyKwh:number; recoveredEnergyKwh:number; netElevationEnergyKwh:number; elevationAvailable:boolean; elevationNote?:string; }
+export interface RouteElevationData { name:string; distanceKm:number; points:RoutePoint[]; startElevationM:number; endElevationM:number; elevationGainM:number; elevationLossM:number; grossClimbEnergyKwh:number; recoveredEnergyKwh:number; netElevationEnergyKwh:number; elevationAvailable:boolean; elevationNote?:string; /** Detailed [lat,lon] road geometry for DRAWING the route (only when requested via includeGeometry). Not used for calculations. */ geometry?:[number,number][]; }
 export interface RouteProgress { stage:'geocoding'|'routing'|'sampling'|'elevation'|'calculating'; message:string; completed?:number; total?:number; }
 const EARTH_RADIUS_M=6371000, DEFAULT_MASS_KG=1600, GRAVITY=9.80665, DRIVETRAIN_EFFICIENCY=.90, REGEN_EFFICIENCY=.65, NOISE_THRESHOLD_M=3;
 // Open-Meteo's elevation endpoint accepts up to 100 coordinate pairs per request — batching at that
@@ -107,6 +107,49 @@ export const sampleRouteByDistance=(coords:[number,number][],distanceKm:number)=
   const out:[number,number][]=[coords[0]];let acc=0,next=step;
   for(let i=1;i<coords.length-1;i++){acc+=haversineM(coords[i-1],coords[i]);if(acc>=next){out.push(coords[i]);next+=step}}
   out.push(coords[coords.length-1]);
+  return out;
+};
+
+// ---- Display geometry ---------------------------------------------------------------------------
+// OSRM's overview=full geometry follows every bend of the road, but a 300 km route is 20-30k vertices - too much to
+// ship around as-is. `sampleRouteByDistance` above thins it to ~1 point/km for the elevation API, which is fine for
+// terrain but, when used to DRAW the route, produces straight chords through city blocks. For the map we keep every
+// vertex that deviates from the straight line by more than a few metres (Douglas-Peucker, iterative so very long
+// routes cannot hit recursion limits). Input [lon,lat] (OSRM order) -> output [lat,lon] (map order).
+const GEOMETRY_MAX_POINTS = 9000;
+export const simplifyRouteGeometry=(coords:[number,number][],epsilonM=3,maxPoints=GEOMETRY_MAX_POINTS):[number,number][]=>{
+  const n=coords.length;
+  if(n<=2)return coords.map(([lon,lat])=>[lat,lon] as [number,number]);
+  const mLat=111320,mLon=111320*Math.cos(coords[0][1]*Math.PI/180);
+  const xs=new Float64Array(n),ys=new Float64Array(n);
+  for(let i=0;i<n;i++){xs[i]=coords[i][0]*mLon;ys[i]=coords[i][1]*mLat}
+  const run=(eps:number)=>{
+    const keep=new Uint8Array(n);keep[0]=1;keep[n-1]=1;
+    const stack:number[]=[0,n-1];
+    while(stack.length){
+      const hi=stack.pop()!,lo=stack.pop()!;
+      if(hi-lo<2)continue;
+      const ax=xs[lo],ay=ys[lo],dx=xs[hi]-ax,dy=ys[hi]-ay,len2=dx*dx+dy*dy;
+      let maxD=-1,idx=-1;
+      for(let i=lo+1;i<hi;i++){
+        let d:number;
+        if(len2<1e-9){d=Math.hypot(xs[i]-ax,ys[i]-ay)}
+        else{
+          let t=((xs[i]-ax)*dx+(ys[i]-ay)*dy)/len2;t=t<0?0:t>1?1:t;
+          d=Math.hypot(xs[i]-(ax+t*dx),ys[i]-(ay+t*dy));
+        }
+        if(d>maxD){maxD=d;idx=i}
+      }
+      if(maxD>eps&&idx>0){keep[idx]=1;stack.push(lo,idx,idx,hi)}
+    }
+    return keep;
+  };
+  const countKept=(k:Uint8Array)=>{let c=0;for(let i=0;i<k.length;i++)c+=k[i];return c};
+  let eps=epsilonM,keep=run(eps);
+  // Hard cap: widen the tolerance a little at a time (still metres, invisible at navigation zoom) instead of dropping points blindly.
+  for(let g=0;g<6&&countKept(keep)>maxPoints;g++){eps*=1.6;keep=run(eps)}
+  const out:[number,number][]=[];
+  for(let i=0;i<n;i++)if(keep[i])out.push([coords[i][1],coords[i][0]]);
   return out;
 };
 
@@ -233,7 +276,7 @@ const fetchServerElevationProfile = async (
   }
 };
 
-export const buildRouteElevation=async(aLat:number,aLon:number,bLat:number,bLon:number,name='Маршрут',onProgress?:(p:RouteProgress)=>void):Promise<RouteElevationData>=>{
+export const buildRouteElevation=async(aLat:number,aLon:number,bLat:number,bLon:number,name='Маршрут',onProgress?:(p:RouteProgress)=>void,opts?:{includeGeometry?:boolean}):Promise<RouteElevationData>=>{
   onProgress?.({stage:'routing',message:'Строим автомобильный маршрут…'});
   const route=await fetchDrivingRoute(aLat,aLon,bLat,bLon);
   onProgress?.({stage:'sampling',message:'Выбираем точки по расстоянию…'});
@@ -319,5 +362,5 @@ export const buildRouteElevation=async(aLat:number,aLon:number,bLat:number,bLon:
     return{lon:c[0],lat:c[1],elevationM:profile.elevations[i],distanceFromStartKm,roadSpeedKmH:road.speedKmH,roadSegmentLengthKm:road.lengthKm};
   });
   const{gainM,lossM}=computeElevationGainLoss(profile.elevations),energy=calculateElevationEnergy(gainM,lossM);
-  return{name,distanceKm:Number(route.distanceKm.toFixed(1)),points,startElevationM:profile.elevations[0],endElevationM:profile.elevations.at(-1)!,elevationGainM:gainM,elevationLossM:lossM,...energy,elevationAvailable,elevationNote};
+  return{name,distanceKm:Number(route.distanceKm.toFixed(1)),points,startElevationM:profile.elevations[0],endElevationM:profile.elevations.at(-1)!,elevationGainM:gainM,elevationLossM:lossM,...energy,elevationAvailable,elevationNote,...(opts?.includeGeometry?{geometry:simplifyRouteGeometry(route.coords)}:{})};
 };

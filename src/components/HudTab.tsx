@@ -139,6 +139,8 @@ export type HudRoutePlan = {
   waypoints?: HudRouteWaypoint[];
   /** Downsampled route geometry for map visualization in HUD. */
   routePoints?: Array<{ lat: number; lon: number; elevationM?: number; distanceFromStartKm?: number }>;
+  /** Detailed road geometry [lat, lon] used ONLY to draw the route line on the HUD map (routePoints above is a sparse sample). */
+  routeGeometry?: Array<[number, number]>;
 };
 
 interface HudTabProps {
@@ -320,6 +322,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   const [activeWaypointIndex, setActiveWaypointIndex] = useState(0);
   /** Route geometry from Calculator for map in HUD. */
   const [hudRoutePoints, setHudRoutePoints] = useState<RoutePoint[]>([]);
+  const [hudRouteGeometry, setHudRouteGeometry] = useState<Array<[number, number]> | null>(null);
   /** Collapsed by default so the phone HUD keeps STOP visible; user expands when needed. */
   const [hudMapOpen, setHudMapOpen] = useState(false);
   /** Live GPS for map marker (updated while tracking) — EMA-smoothed. */
@@ -578,6 +581,22 @@ export const HudTab: React.FC<HudTabProps> = ({
       });
     } else {
       setRouteTotalDistanceKm(null);
+    }
+    {
+      const geo = hudPlan.routeGeometry;
+      const last = Array.isArray(geo) ? geo[geo.length - 1] : null;
+      setHudRouteGeometry(
+        Array.isArray(geo) &&
+          geo.length >= 2 &&
+          Array.isArray(geo[0]) &&
+          Number.isFinite(geo[0][0]) &&
+          Number.isFinite(geo[0][1]) &&
+          Array.isArray(last) &&
+          Number.isFinite(last[0]) &&
+          Number.isFinite(last[1])
+          ? geo
+          : null,
+      );
     }
     if (Array.isArray(hudPlan.routePoints) && hudPlan.routePoints.length >= 2) {
       setHudRoutePoints(
@@ -2369,6 +2388,7 @@ export const HudTab: React.FC<HudTabProps> = ({
           key={mapLite ? 'hud-map-lite' : 'hud-map-full'}
           lite={mapLite}
           points={mapPointsForHud}
+          geometry={hudRouteGeometry}
           isDark={isDark}
           fill
           currentPosition={isTracking ? mapLivePosition : null}

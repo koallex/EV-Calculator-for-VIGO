@@ -160,6 +160,11 @@ export interface RouteMapChargingStop {
 
 interface RouteMapProps {
   points: RoutePoint[];
+  /**
+   * Optional detailed [lat, lon] polyline used to DRAW the route (and for progress / course matching) instead of `points`.
+   * `points` is typically a sparse sample (elevation profile), which draws straight chords through city blocks.
+   */
+  geometry?: Array<[number, number]> | null;
   isDark: boolean;
   chargingStop?: RouteMapChargingStop | null;
   chargingStops?: RouteMapChargingStop[];
@@ -212,6 +217,7 @@ interface RouteMapProps {
 
 export const RouteMap: React.FC<RouteMapProps> = ({
   points,
+  geometry = null,
   isDark,
   chargingStop,
   chargingStops,
@@ -250,6 +256,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   /** Last route progress index applied to polylines — skip redraw when unchanged. */
   const lastProgressIdxRef = useRef(-1);
   const lastProgressRedrawAtRef = useRef(0);
+  /** Next time (performance.now) the camera loop may try matching the car to the route again after a failed match. */
+  const routeMatchRetryAtRef = useRef(0);
   /** Continuous follow loop (does not restart on every GPS tick). */
   const followLoopRafRef = useRef<number | null>(null);
   const followTargetRef = useRef<{
@@ -288,9 +296,15 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   const [followPaused, setFollowPaused] = useState(false);
 
   const positions = useMemo(
-    () => points.map((p) => [p.lat, p.lon] as [number, number]),
-    [points],
+    () =>
+      geometry && geometry.length >= 2
+        ? geometry
+        : points.map((p) => [p.lat, p.lon] as [number, number]),
+    [points, geometry],
   );
+  // [lon, lat] copy built once per route: the progress redraw below slices it instead of re-mapping thousands of
+  // vertices every time (detailed geometry can be several thousand points).
+  const lonLatAll = useMemo(() => positions.map(([la, lo]) => toLonLat(la, lo)), [positions]);
   /** Route polyline for stable course-up heading (preferred over noisy GPS). */
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
@@ -655,7 +669,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       lastProgressIdxRef.current = -1;
       if (featureRef.current && bundle.apiVersion === 3) {
         try {
-          const lonLatPath = positions.map(([la, lo]) => toLonLat(la, lo));
+          const lonLatPath = lonLatAll;
           featureRef.current.update({
             geometry: { type: 'LineString', coordinates: lonLatPath },
             style: {
@@ -676,14 +690,28 @@ export const RouteMap: React.FC<RouteMapProps> = ({
 
     let bestIdx = 0;
     let bestD = Infinity;
-    for (let i = 0; i < positions.length; i++) {
-      const dLat = positions[i][0] - currentPosition.lat;
-      const dLon = positions[i][1] - currentPosition.lon;
-      const d = dLat * dLat + dLon * dLon;
-      if (d < bestD) {
-        bestD = d;
-        bestIdx = i;
+    const scanNearest = (from: number, to: number) => {
+      bestIdx = from;
+      bestD = Infinity;
+      for (let i = from; i < to; i++) {
+        const dLat = positions[i][0] - currentPosition.lat;
+        const dLon = positions[i][1] - currentPosition.lon;
+        const d = dLat * dLat + dLon * dLon;
+        if (d < bestD) {
+          bestD = d;
+          bestIdx = i;
+        }
       }
+    };
+    // Progress along a route is monotone: search a window around the previous match first. With a detailed polyline that is
+    // both cheaper and safer (a road that doubles back / passes close to itself cannot snap the progress line forward).
+    // Off the corridor (> ~200 m: reroute, GPS jump) -> one full scan.
+    const prevIdx = lastProgressIdxRef.current;
+    if (prevIdx >= 0) {
+      scanNearest(Math.max(0, prevIdx - 80), Math.min(positions.length, prevIdx + 3000));
+      if (bestD > 4e-6) scanNearest(0, positions.length);
+    } else {
+      scanNearest(0, positions.length);
     }
 
     // Require meaningful progress along polyline (not just "nearest is index 0/1")
@@ -718,8 +746,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
 
     if (bundle.apiVersion === 3) {
       const { YMapFeature } = (bundle as any).ymaps3;
-      const traveledCoords = traveledPos.map(([la, lo]) => toLonLat(la, lo));
-      const remainCoords = remainingPos.map(([la, lo]) => toLonLat(la, lo));
+      const traveledCoords = lonLatAll.slice(0, Math.max(2, bestIdx + 1));
+      const remainCoords = lonLatAll.slice(Math.max(0, bestIdx));
 
       if (traveledFeatureRef.current) {
         try {
@@ -945,15 +973,22 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     // Preferred: direction of the road ~45 m AHEAD on the planned route. Matching only moves
     // forward along the polyline, so an out-and-back route cannot flip the camera 180°.
     let routeHeading: number | null = null;
-    const rh = routeHeadingAhead(
-      positionsRef.current,
-      currentPosition.lat,
-      currentPosition.lon,
-      routeIdxHintRef.current,
-    );
-    if (rh) {
-      routeIdxHintRef.current = rh.idx;
-      routeHeading = rh.heading;
+    // A failed match (off the route) makes routeHeadingAhead scan the WHOLE polyline; with a detailed route that must not
+    // happen every display frame, so after a miss it is retried at most every 400 ms (GPS course is used meanwhile).
+    const matchNow = performance.now();
+    if (matchNow >= routeMatchRetryAtRef.current) {
+      const rh = routeHeadingAhead(
+        positionsRef.current,
+        currentPosition.lat,
+        currentPosition.lon,
+        routeIdxHintRef.current,
+      );
+      if (rh) {
+        routeIdxHintRef.current = rh.idx;
+        routeHeading = rh.heading;
+      } else {
+        routeMatchRetryAtRef.current = matchNow + 400;
+      }
     }
 
     const heading = routeHeading ?? (headingFilterRef.current.ready ? filtered : null);

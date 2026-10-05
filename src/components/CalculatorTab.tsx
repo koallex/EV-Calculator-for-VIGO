@@ -1269,7 +1269,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       ) {
         throw new Error('Не удалось определить координаты. Выберите адрес из списка или укажите точку на карте.');
       }
-      const data = await buildRouteElevation(start.lat,start.lon,destination.lat,destination.lon,destination.displayName,onProgress);
+      const data = await buildRouteElevation(start.lat,start.lon,destination.lat,destination.lon,destination.displayName,onProgress,{includeGeometry:true});
       setRouteElevation(data); setDistanceKm(data.distanceKm);
       rememberPlace({ name: destination.displayName, lat: destination.lat, lon: destination.lon });
       const etaMinutes=Math.max(1,Math.round((data.distanceKm/Math.max(10,plannedSpeedKmH))*60));
@@ -1679,6 +1679,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       predictedConsumption: consumptionPer100Km,
       waypoints,
       routePoints,
+      routeGeometry: routeElevation.geometry,
     });
   };
 
