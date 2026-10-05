@@ -562,6 +562,22 @@ function AppInner() {
     });
   };
 
+  /** Reset only settings (tariffs, vehicle, theme…) — trip history stays intact. */
+  const handleResetSettings = () => {
+    const prevSettings = settings;
+    setSettings(DEFAULT_SETTINGS);
+    setSettingsFormKey((k) => k + 1);
+    toast({
+      message: 'Настройки сброшены',
+      actionLabel: 'Вернуть',
+      durationMs: 10000,
+      onAction: () => {
+        setSettings(prevSettings);
+        setSettingsFormKey((k) => k + 1);
+      },
+    });
+  };
+
   const handleImportBackup = (
     importedSessions: TripSession[],
     importedSettings?: UserSettings,
@@ -734,6 +750,7 @@ function AppInner() {
             sessions={sessions}
             onUpdateSettings={setSettings}
             onResetData={handleResetData}
+            onResetSettings={handleResetSettings}
             onImportBackup={handleImportBackup}
             currentUser={authUser ?? undefined}
             onOpenAdmin={() => setShowAdmin(true)}

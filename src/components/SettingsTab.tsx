@@ -49,6 +49,8 @@ interface SettingsTabProps {
   sessions: TripSession[];
   onUpdateSettings: (newSettings: UserSettings) => void;
   onResetData: () => void;
+  /** Reset settings only (keep trip history). */
+  onResetSettings: () => void;
   onImportBackup: (sessions: TripSession[], newSettings: UserSettings | undefined, mode: ImportMode) => void;
   currentUser?: { login: string; role: 'admin' | 'user' };
   onOpenAdmin?: () => void;
@@ -65,6 +67,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   sessions,
   onUpdateSettings,
   onResetData,
+  onResetSettings,
   onImportBackup,
   currentUser,
   onOpenAdmin,
@@ -152,6 +155,25 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     if (choice !== 'backup' && choice !== 'reset') return;
     if (choice === 'backup') exportBackupJSON(settings, sessions);
     onResetData();
+    setForm(DEFAULT_SETTINGS);
+  };
+
+  const handleResetSettingsClick = async () => {
+    const choice = await ask({
+      title: 'Сбросить настройки?',
+      message: (
+        <div className="space-y-1.5">
+          <div>Тарифы, профиль авто, тема и остальные настройки вернутся к значениям по умолчанию.</div>
+          <div className="opacity-80">История поездок <b>не удаляется</b>. Сразу после сброса будет кнопка «Вернуть» (10 секунд).</div>
+        </div>
+      ),
+      actions: [
+        { id: 'reset', label: 'Сбросить настройки', tone: 'primary' },
+        { id: 'cancel', label: 'Отмена', tone: 'neutral' },
+      ],
+    });
+    if (choice !== 'reset') return;
+    onResetSettings();
     setForm(DEFAULT_SETTINGS);
   };
 
@@ -1198,11 +1220,11 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
           className="hidden"
         />
 
-        <div className={`flex gap-2 pt-2 border-t ${isDark ? 'border-slate-800/80' : 'border-slate-100'}`}>
+        <div className={`pt-2 border-t space-y-2 ${isDark ? 'border-slate-800/80' : 'border-slate-100'}`}>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1.5 active:scale-95 transition-all ${
+            className={`w-full py-2 px-3 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1.5 active:scale-95 transition-all ${
               isDark
                 ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
                 : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-200'
@@ -1212,18 +1234,33 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             <span>Восстановить из файла</span>
           </button>
 
-          <button
-            type="button"
-            onClick={handleResetClick}
-            className={`py-2 px-3 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1.5 active:scale-95 transition-all ${
-              isDark
-                ? 'bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-900/60'
-                : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
-            }`}
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Сброс</span>
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleResetSettingsClick}
+              className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1.5 active:scale-95 transition-all ${
+                isDark
+                  ? 'bg-amber-950/40 hover:bg-amber-900/50 text-amber-200 border-amber-900/50'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
+              }`}
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Сбросить настройки</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleResetClick}
+              className={`py-2 px-3 rounded-xl text-xs font-semibold border flex items-center justify-center gap-1.5 active:scale-95 transition-all ${
+                isDark
+                  ? 'bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-900/60'
+                  : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+              }`}
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Сбросить всё</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
