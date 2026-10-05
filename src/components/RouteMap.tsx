@@ -35,6 +35,8 @@ import { MapZoomButtons } from './MapZoomButtons';
 import { insetsKey, type MapInsets } from '../utils/calculatorSheet';
 
 const CAM3D_KEY = 'vigo_hud_cam3d_v1';
+/** Min interval between route progress (traveled/remaining) polyline redraws. */
+const PROGRESS_REDRAW_MS = 1500;
 /** Gestures the app allows on route maps. Rotate/tilt are excluded: the navigation camera owns them. */
 const ROUTE_MAP_BEHAVIORS = ['drag', 'pinchZoom', 'scrollZoom', 'dblClick'];
 
@@ -201,6 +203,11 @@ interface RouteMapProps {
    * 'auto' — портрет: у левого края, ландшафт: у правого (калькулятор: справа над шторкой в портрете стоят быстрые кнопки).
    */
   zoomPlacement?: 'right' | 'auto';
+  /**
+   * Lightweight rendering for the HUD ("Лёгкая карта"): flat camera (no 3D tilt), single-stroke route without glow,
+   * no buildings / road labels on the basemap. Read at map creation — remount (key) to change it.
+   */
+  lite?: boolean;
 }
 
 export const RouteMap: React.FC<RouteMapProps> = ({
@@ -220,7 +227,10 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   zoomControls = false,
   zoomControlsHidden = false,
   zoomPlacement = 'right',
+  lite = false,
 }) => {
+  const liteRef = useRef(lite);
+  liteRef.current = lite;
   const containerRef = useRef<HTMLDivElement>(null);
   const bundleRef = useRef<AnyMapBundle | null>(null);
   const featureRef = useRef<any>(null);
@@ -239,6 +249,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   const userNavPauseUntilRef = useRef(0);
   /** Last route progress index applied to polylines — skip redraw when unchanged. */
   const lastProgressIdxRef = useRef(-1);
+  const lastProgressRedrawAtRef = useRef(0);
   /** Continuous follow loop (does not restart on every GPS tick). */
   const followLoopRafRef = useRef<number | null>(null);
   const followTargetRef = useRef<{
@@ -283,6 +294,14 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   /** Route polyline for stable course-up heading (preferred over noisy GPS). */
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
+  // Cheap identity key for effect deps. These used to be `JSON.stringify(positions)` — re-serialising the whole
+  // route (tens of thousands of numbers on a long trip) on EVERY render, i.e. several times per second in the HUD.
+  const positionsSig = useMemo(() => {
+    const n = positions.length;
+    if (n === 0) return '0';
+    const at = (i: number) => `${positions[i][0]},${positions[i][1]}`;
+    return `${n}|${at(0)}|${at(n >> 2)}|${at(n >> 1)}|${at((n * 3) >> 2)}|${at(n - 1)}`;
+  }, [positions]);
 
   /** Актуальные отступы для вписывания маршрута; ref, чтобы их смена не перерисовывала линию. */
   const insetsRef = useRef<MapInsets | null>(viewportInsets);
@@ -320,6 +339,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       zoom: 12,
       isDark,
       showZoom: !zoomControls,
+      lite,
       behaviors: ROUTE_MAP_BEHAVIORS,
     })
       .then((bundle) => {
@@ -435,7 +455,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       const outline = new YMapFeature({
         geometry: { type: 'LineString', coordinates: lonLatPath.slice(0, count) },
         style: {
-          stroke: isDark
+          stroke: lite
+            ? [{ width: 8, color: strokeOutline }]
+            : isDark
             ? [
                 { width: 18, color: strokeGlow },
                 { width: 10, color: strokeOutline },
@@ -449,7 +471,9 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       const feature = new YMapFeature({
         geometry: { type: 'LineString', coordinates: lonLatPath.slice(0, count) },
         style: {
-          stroke: isDark
+          stroke: lite
+            ? [{ width: 5, color: strokeMain }]
+            : isDark
             ? [
                 { width: 14, color: strokeGlow },
                 { width: 6, color: strokeMain },
@@ -597,7 +621,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       endMarkerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, JSON.stringify(positions), compact, fill, followMode, isDark]);
+  }, [mapReady, positionsSig, compact, fill, followMode, isDark, lite]);
 
   // Карточки/панель поменяли размер (свёрнута ↔ раскрыта): заново вписываем уже нарисованный
   // маршрут в свободное окно. Саму линию не перерисовываем.
@@ -675,6 +699,12 @@ export const RouteMap: React.FC<RouteMapProps> = ({
 
     // Only redraw when the nearest vertex actually advanced (or first paint).
     if (bestIdx === lastProgressIdxRef.current) return;
+    // Each redraw re-tessellates the whole remaining polyline in the map: on a long route doing it on every vertex
+    // (≈ every second at highway speed) is costly. At most once per PROGRESS_REDRAW_MS; the effect re-runs on
+    // the next position update (4 Hz), so the line catches up without a timer.
+    const nowMs = Date.now();
+    if (lastProgressIdxRef.current !== -1 && nowMs - lastProgressRedrawAtRef.current < PROGRESS_REDRAW_MS) return;
+    lastProgressRedrawAtRef.current = nowMs;
     lastProgressIdxRef.current = bestIdx;
 
     const map = (bundle as any).map;
@@ -714,7 +744,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         try {
           featureRef.current.update({
             geometry: { type: 'LineString', coordinates: remainCoords },
-            style: { stroke: isDark ? [{ width: 14, color: strokeGlow }, { width: 6, color: strokeMain }] : [{ width: 4.5, color: strokeMain }] },
+            style: { stroke: lite ? [{ width: 5, color: strokeMain }] : isDark ? [{ width: 14, color: strokeGlow }, { width: 6, color: strokeMain }] : [{ width: 4.5, color: strokeMain }] },
           });
         } catch { /* ignore */ }
       }
@@ -744,7 +774,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, currentPosition?.lat, currentPosition?.lon, followMode, JSON.stringify(positions), isDark]);
+  }, [mapReady, currentPosition?.lat, currentPosition?.lon, followMode, positionsSig, isDark]);
 
 
 
@@ -1146,7 +1176,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         if (paused) {
           wasPaused = true;
         } else if (isV3) {
-          const tilt = want3d ? tiltRad(NAV_TILT_DEG) : 0;
+          // Lite: still course-up (map turns with the car) but flat — a tilted view renders far more tiles/labels.
+          const tilt = want3d && !liteRef.current ? tiltRad(NAV_TILT_DEG) : 0;
           const az = rotating ? azimuthForCourse(camCourse as number, sign as 1 | -1) : 0;
 
           // Speed-dependent zoom; a pinch by the user is kept as an offset instead of being overwritten.

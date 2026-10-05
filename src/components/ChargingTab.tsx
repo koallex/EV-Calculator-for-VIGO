@@ -18,9 +18,11 @@ import { ChargingMapPanel } from './ChargingMapPanel';
 interface ChargingTabProps {
   settings: UserSettings;
   sessions?: TripSession[];
+  /** True when this tab is the visible one (App keeps all tabs mounted and hides them with CSS). */
+  active?: boolean;
 }
 
-export const ChargingTab: React.FC<ChargingTabProps> = ({ settings, sessions = [] }) => {
+export const ChargingTab: React.FC<ChargingTabProps> = ({ settings, sessions = [], active = true }) => {
   const [view, setView] = useState<'map' | 'calc'>('map');
   const [calcMode, setCalcMode] = useState<'soc' | 'kwh'>('soc');
   const [currentSoc, setCurrentSoc] = useState<number>(20);
@@ -127,7 +129,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings, sessions = [
 
       {/* Keep map mounted to avoid reloading Yandex API on every switch */}
       <div className={view === 'map' ? 'block' : 'hidden'}>
-        <ChargingMapPanel settings={settings} />
+        <ChargingMapPanel settings={settings} active={active && view === 'map'} />
       </div>
 
       {view === 'calc' && (

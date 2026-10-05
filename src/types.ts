@@ -53,6 +53,8 @@ export interface UserSettings {
   hapticFeedback: boolean;
   /** Show the live map in the HUD tab. Default true; turn off to cut GPU/network load (phone heating). */
   hudMapEnabled?: boolean;
+  /** HUD map in lightweight mode: flat camera, simple route line, no buildings/labels. Default false. */
+  hudMapLite?: boolean;
   theme: ThemeMode;
   targetMaxSoc: number; // e.g. 80 or 100 for battery health advice
 

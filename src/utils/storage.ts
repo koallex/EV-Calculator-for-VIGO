@@ -126,6 +126,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   gasPricePerLiter: 2.46,
   hapticFeedback: true,
   hudMapEnabled: true,
+  hudMapLite: false,
   theme: 'dark',
   targetMaxSoc: 80,
 };

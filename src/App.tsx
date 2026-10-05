@@ -720,7 +720,7 @@ function AppInner() {
           className={isLandscape ? 'h-full' : undefined}
           style={{ display: activeTab === 'charging' ? 'block' : 'none' }}
         >
-          <ChargingTab settings={settings} sessions={sessions} />
+          <ChargingTab settings={settings} sessions={sessions} active={activeTab === 'charging'} />
         </div>
 
         <div

@@ -1093,8 +1093,41 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               />
             </span>
           </button>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={form.hudMapLite === true}
+            disabled={form.hudMapEnabled === false}
+            onClick={() => {
+              triggerHaptic('light', form.hapticFeedback);
+              setForm({ ...form, hudMapLite: form.hudMapLite !== true });
+            }}
+            className={`w-full flex items-center justify-between gap-3 p-3 rounded-xl border text-left min-h-[48px] active:scale-[0.99] transition-colors disabled:opacity-40 ${
+              isDark
+                ? 'bg-slate-950 border-slate-800 text-slate-200'
+                : 'bg-slate-50 border-slate-200 text-slate-800'
+            }`}
+          >
+            <span className="min-w-0">
+              <span className="block text-xs font-semibold">Лёгкая карта</span>
+              <span className={`block text-[11px] leading-snug ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Плоский вид по ходу движения, простая линия маршрута, без зданий и названий дорог. Заметно меньше нагрузка на GPU и нагрев.
+              </span>
+            </span>
+            <span
+              className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors ${
+                form.hudMapLite === true ? 'bg-cyan-600' : isDark ? 'bg-slate-700' : 'bg-slate-300'
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${
+                  form.hudMapLite === true ? 'left-[22px]' : 'left-0.5'
+                }`}
+              />
+            </span>
+          </button>
           <p className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-            Изменение вступает в силу после «Сохранить настройки».
+            Изменения вступают в силу после «Сохранить настройки».
           </p>
         </div>
 

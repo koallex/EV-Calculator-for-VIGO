@@ -179,6 +179,8 @@ function buildPortGroups(poles: any[], group: any): PortGroup[] {
 
 interface ChargingMapPanelProps {
   settings: UserSettings;
+  /** False while the ЭЗС tab (or its «Карта» view) is hidden: the panel stays mounted but stops reacting to GPS/timers. */
+  active?: boolean;
 }
 
 const isCcsLabel = (label: unknown) => {
@@ -353,7 +355,9 @@ function operatorForLive(station: any): (typeof LIVE_OPS)[number] | null {
   return null;
 }
 
-export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) => {
+export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, active = true }) => {
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const isDark = settings.theme !== 'light';
   const profileConnectors = useMemo(
     () =>
@@ -802,6 +806,8 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
             userWatchRef.current = navigator.geolocation.watchPosition(
               (pos) => {
                 if (cancelled || !bundleRef.current) return;
+                // Hidden tab (e.g. driving in the HUD): skip marker updates and the re-render they trigger.
+                if (!activeRef.current) return;
                 const lat = pos.coords.latitude;
                 const lon = pos.coords.longitude;
                 const b = bundleRef.current as any;
@@ -859,6 +865,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings }) 
   // Zoom for clustering
   useEffect(() => {
     const id = window.setInterval(() => {
+      if (!activeRef.current) return;
       const b = bundleRef.current as any;
       if (!b?.map) return;
       try {

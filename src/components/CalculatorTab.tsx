@@ -476,23 +476,49 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     return 'Боковой слева';
   };
 
+  // This tab stays mounted (hidden) while the HUD is open, so this watcher keeps firing during a trip. Without
+  // throttling it re-rendered this 3k-line tab and hit Open-Meteo on EVERY position update (traffic + 429s).
+  const quickGpsStateRef = useRef<{ t: number; lat: number; lon: number } | null>(null);
+  const quickWeatherRef = useRef<{ t: number; lat: number; lon: number } | null>(null);
   useEffect(() => {
     if (!navigator.geolocation) { setGpsStatus('error'); return; }
+    const kmBetween = (aLat: number, aLon: number, bLat: number, bLon: number) =>
+      Math.hypot((bLat - aLat) * 111.32, (bLon - aLon) * 111.32 * Math.cos((aLat * Math.PI) / 180));
     const id = navigator.geolocation.watchPosition(
       async (position) => {
-        setGpsStatus('ok');
-        setGpsCoords({ lat: position.coords.latitude, lon: position.coords.longitude });
+        const nowMs = Date.now();
+        const { latitude, longitude } = position.coords;
+        const prevState = quickGpsStateRef.current;
+        if (
+          !prevState ||
+          nowMs - prevState.t >= 30_000 ||
+          kmBetween(prevState.lat, prevState.lon, latitude, longitude) >= 0.05
+        ) {
+          quickGpsStateRef.current = { t: nowMs, lat: latitude, lon: longitude };
+          setGpsStatus('ok');
+          setGpsCoords({ lat: latitude, lon: longitude });
+        }
+        // Quick weather: first fix, then only after >10 min or >5 km.
+        const prevWx = quickWeatherRef.current;
+        if (prevWx && nowMs - prevWx.t < 10 * 60_000 && kmBetween(prevWx.lat, prevWx.lon, latitude, longitude) < 5) return;
+        quickWeatherRef.current = { t: nowMs, lat: latitude, lon: longitude };
         try {
-          const { latitude, longitude } = position.coords;
           const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude.toFixed(4)}&longitude=${longitude.toFixed(4)}&current=temperature_2m,weather_code,wind_speed_10m&timezone=auto`);
-          if (!res.ok) return;
+          if (!res.ok) {
+            // Retry in ~1 min instead of waiting the full interval (or hammering on every position update).
+            quickWeatherRef.current = { t: nowMs - 9 * 60_000, lat: latitude, lon: longitude };
+            return;
+          }
           const data = await res.json();
           if (data?.current) setQuickWeather({
             temperature: Math.round(data.current.temperature_2m),
             weatherCode: data.current.weather_code ?? 0,
             windSpeed: Math.round(data.current.wind_speed_10m ?? 0),
           });
-        } catch { /* keep last known weather */ }
+        } catch {
+          /* keep last known weather */
+          quickWeatherRef.current = { t: nowMs - 9 * 60_000, lat: latitude, lon: longitude };
+        }
       },
       () => setGpsStatus('error'),
       { enableHighAccuracy: false, maximumAge: 60000, timeout: 10000 }

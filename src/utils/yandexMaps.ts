@@ -10,7 +10,7 @@ declare global {
   }
 }
 
-import { TESLA_DARK_STYLE } from './mapStyleTesla';
+import { TESLA_DARK_STYLE, LITE_STYLE_EXTRAS } from './mapStyleTesla';
 
 const YANDEX_MAPS_API_KEY = (import.meta.env.VITE_YANDEX_MAPS_API_KEY as string | undefined)?.trim();
 
@@ -238,6 +238,8 @@ export async function createV3Map(
     zoom?: number;
     isDark?: boolean;
     showZoom?: boolean;
+    /** Lighter basemap: no buildings, no road/admin labels (HUD "Лёгкая карта"). */
+    lite?: boolean;
     /** Enabled gestures. Omit for the API default (which includes two-finger rotate and tilt). */
     behaviors?: string[];
   } = {},
@@ -277,11 +279,17 @@ export async function createV3Map(
       try {
         schemeLayer = new YMapDefaultSchemeLayer({
           theme: 'dark',
-          customization: TESLA_DARK_STYLE,
+          customization: opts.lite ? [...TESLA_DARK_STYLE, ...LITE_STYLE_EXTRAS] : TESLA_DARK_STYLE,
         });
       } catch (styleErr) {
         console.warn('[maps] Tesla customization unsupported, plain dark theme', styleErr);
         schemeLayer = new YMapDefaultSchemeLayer({ theme: 'dark' });
+      }
+    } else if (opts.lite) {
+      try {
+        schemeLayer = new YMapDefaultSchemeLayer({ theme: 'light', customization: LITE_STYLE_EXTRAS });
+      } catch {
+        schemeLayer = new YMapDefaultSchemeLayer({ theme: 'light' });
       }
     } else {
       schemeLayer = new YMapDefaultSchemeLayer({ theme: 'light' });
@@ -331,12 +339,15 @@ export async function createV3Map(
       try {
         if (dark) {
           try {
-            schemeLayer.update?.({ theme: 'dark', customization: TESLA_DARK_STYLE });
+            schemeLayer.update?.({
+              theme: 'dark',
+              customization: opts.lite ? [...TESLA_DARK_STYLE, ...LITE_STYLE_EXTRAS] : TESLA_DARK_STYLE,
+            });
           } catch {
             schemeLayer.update?.({ theme: 'dark' });
           }
         } else {
-          schemeLayer.update?.({ theme: 'light', customization: [] });
+          schemeLayer.update?.({ theme: 'light', customization: opts.lite ? LITE_STYLE_EXTRAS : [] });
         }
       } catch {
         /* ignore */
@@ -462,6 +473,7 @@ export async function createBestMap(
     zoom?: number;
     isDark?: boolean;
     showZoom?: boolean;
+    lite?: boolean;
     /** Enabled gestures. Omit for the API default (which includes two-finger rotate and tilt). */
     behaviors?: string[];
   } = {},

@@ -488,6 +488,7 @@ export const HudTab: React.FC<HudTabProps> = ({
   // HUD map on/off (Settings → «Карта в HUD»). When off, <RouteMap /> is not mounted at all: no WebGL,
   // no Yandex script/tiles, no 4 Hz marker re-renders — only GPS + the energy model keep running.
   const mapEnabled = settings.hudMapEnabled !== false;
+  const mapLite = settings.hudMapLite === true;
   const mapEnabledRef = useRef(mapEnabled);
   mapEnabledRef.current = mapEnabled;
   const batteryCap = settings.batteryCapacityKwh || 51.87;
@@ -2365,6 +2366,8 @@ export const HudTab: React.FC<HudTabProps> = ({
     <div className="absolute inset-0 h-full w-full">
       {mapPointsForHud.length >= 2 ? (
         <RouteMap
+          key={mapLite ? 'hud-map-lite' : 'hud-map-full'}
+          lite={mapLite}
           points={mapPointsForHud}
           isDark={isDark}
           fill
