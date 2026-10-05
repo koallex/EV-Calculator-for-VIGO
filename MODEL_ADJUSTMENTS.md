@@ -23,3 +23,18 @@ Distance itself is not penalized. A 300 km route at the same speed and condition
 - No factory Cd value is assumed because a verified Cd for this Vigo configuration is not available in the project data.
 - HUD, calculator and segmented route calculations all consume the same `interpolateVigoSpeedConsumption()` function.
 - The trip journal currently contains useful driving-style factors but no high-speed average-speed trips, so it is not used to invent a high-speed correction. New highway logs can be used for later empirical recalibration.
+
+## Geely EX2 calibration — 2026-10-05
+
+Real trip: Minsk (Sharangoicha 52–57 / Dneprovskaya) → Lyadishche (Borisov), 95 km.
+- Vehicle: Geely EX2 (39.4 kWh), 4 passengers
+- Start SoC 80% → actual arrival 55% (used 25%)
+- Calculator previously predicted 50% arrival (used 30%)
+- Conditions: clear, 18–20 °C, light wind, max 95 km/h, avg ~70 km/h
+
+Adjustment (EX2 profile only):
+- consumptionScale 39.4 kWh: 0.93 → 0.78
+- 35 kWh: 0.92 → 0.77
+- 47.1 kWh: 0.94 → 0.79
+
+This lowers predicted road-load energy so the same trip now lands near the observed 55% remaining. Other vehicles and the shared Vigo speed curve are unchanged.
