@@ -47,6 +47,7 @@ import {
   useCarMode,
   useFullscreen,
   setCarModePref,
+  setCarAutoTheme,
   isFullscreenSupported,
   toggleFullscreen,
   type CarModePref,
@@ -258,6 +259,25 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            triggerHaptic('light', form.hapticFeedback);
+            setCarAutoTheme(!car.autoTheme);
+          }}
+          aria-pressed={car.autoTheme}
+          className={`w-full py-2.5 rounded-xl border text-xs font-semibold min-h-[44px] ${
+            car.autoTheme
+              ? isDark
+                ? 'bg-cyan-500/15 border-cyan-400/60 text-cyan-300'
+                : 'bg-cyan-50 border-cyan-500 text-cyan-700'
+              : isDark
+                ? 'bg-slate-950 border-slate-800 text-slate-300'
+                : 'bg-slate-50 border-slate-200 text-slate-700'
+          }`}
+        >
+          {car.autoTheme ? 'Светлая днём, тёмная ночью: вкл' : 'Светлая днём, тёмная ночью: выкл'}
+        </button>
         {isFullscreenSupported() && (
           <button
             type="button"
