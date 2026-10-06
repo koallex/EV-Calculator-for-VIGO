@@ -29,6 +29,7 @@ import { useEvraceTariffs, deriveOperatorSettingsFromEvrace } from './hooks/useE
 import { FeedbackProvider, useFeedback } from './components/ui/Feedback';
 import { mergeSessions, pluralTrips } from './utils/backup';
 import { useCarMode } from './utils/carMode';
+import { isDaylight } from './utils/daylight';
 import type { ImportMode } from './hooks/useBackupImport';
 
 // Last successfully verified user. Used ONLY to let the app open when the server can't be reached
@@ -60,7 +61,28 @@ function AppInner() {
   const [sessions, setSessions] = useState<TripSession[]>(loadSessions);
   const [activeTab, setActiveTab] = useState<TabType>('calculator');
   // Режим авто: ставит html[data-car] и --car-zoom (крупные оверлеи под экран мультимедиа), см. utils/carMode.ts
-  useCarMode();
+  const car = useCarMode();
+  // День/ночь в авто: светлая тема между восходом и закатом, тёмная — ночью. Меняем настройку только в момент
+  // перехода, поэтому ручной выбор темы в течение дня не перебивается.
+  const autoThemeAppliedRef = useRef<'light' | 'dark' | null>(null);
+  useEffect(() => {
+    if (!car.active || !car.autoTheme) {
+      autoThemeAppliedRef.current = null;
+      return;
+    }
+    const tick = () => {
+      const want = isDaylight(new Date()) ? 'light' : 'dark';
+      if (autoThemeAppliedRef.current === want) return;
+      autoThemeAppliedRef.current = want;
+      setSettings((prev) => {
+        if (want === 'light') return prev.theme === 'light' ? prev : { ...prev, theme: 'light' };
+        return prev.theme === 'light' ? { ...prev, theme: 'dark' } : prev;
+      });
+    };
+    tick();
+    const id = window.setInterval(tick, 60_000);
+    return () => window.clearInterval(id);
+  }, [car.active, car.autoTheme]);
   const [isHudTracking, setIsHudTracking] = useState(false);
   // Route plan transferred from Calculator → HUD (destination + start SoC + optional charge stops)
   const [hudPlan, setHudPlan] = useState<import('./components/HudTab').HudRoutePlan | null>(null);
