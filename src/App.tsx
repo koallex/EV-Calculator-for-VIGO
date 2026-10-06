@@ -28,6 +28,7 @@ import { AboutProject } from './components/AboutProject';
 import { useEvraceTariffs, deriveOperatorSettingsFromEvrace } from './hooks/useEvraceTariffs';
 import { FeedbackProvider, useFeedback } from './components/ui/Feedback';
 import { mergeSessions, pluralTrips } from './utils/backup';
+import { useCarMode } from './utils/carMode';
 import type { ImportMode } from './hooks/useBackupImport';
 
 // Last successfully verified user. Used ONLY to let the app open when the server can't be reached
@@ -58,6 +59,8 @@ function AppInner() {
   const [settings, setSettings] = useState<UserSettings>(loadSettings);
   const [sessions, setSessions] = useState<TripSession[]>(loadSessions);
   const [activeTab, setActiveTab] = useState<TabType>('calculator');
+  // Режим авто: ставит html[data-car] и --car-zoom (крупные оверлеи под экран мультимедиа), см. utils/carMode.ts
+  useCarMode();
   const [isHudTracking, setIsHudTracking] = useState(false);
   // Route plan transferred from Calculator → HUD (destination + start SoC + optional charge stops)
   const [hudPlan, setHudPlan] = useState<import('./components/HudTab').HudRoutePlan | null>(null);
