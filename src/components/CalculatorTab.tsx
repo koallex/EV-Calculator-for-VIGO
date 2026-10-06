@@ -2637,6 +2637,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       <div className="absolute inset-0">
         <RouteMap
           points={routeElevation?.points ?? []}
+          geometry={routeElevation?.geometry}
           isDark={isDark}
           fill
           currentPosition={gpsCoords}

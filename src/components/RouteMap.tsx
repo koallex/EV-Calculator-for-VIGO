@@ -452,6 +452,12 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     const strokeGlow = isDark ? TESLA_ROUTE_GLOW : 'rgba(6, 182, 212, 0.2)';
     const strokeOutline = isDark ? 'rgba(20, 23, 29, 0.75)' : 'rgba(255, 255, 255, 0.65)';
     const strokeTraveled = isDark ? TESLA_ROUTE_TRAVELED : '#94a3b8';
+    // Толщина линии. На обзоре всего маршрута (калькулятор) тонкая и чёткая, в навигации (HUD, масштаб 16–17)
+    // толще — иначе линия теряется на фоне широких дорог. Подсветка одна: раньше она рисовалась дважды
+    // (в обводке и в основной линии), полупрозрачные слои складывались и давали мутную «полосу».
+    const wGlow = followMode ? 16 : 10;
+    const wCase = followMode ? 10 : 7;
+    const wMain = followMode ? 6 : 4;
 
     // Draw-in animation A→B unless actively following GPS (HUD trip).
     // Pre-start HUD uses fill=true but followMode=false — still animate.
@@ -473,10 +479,10 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             ? [{ width: 8, color: strokeOutline }]
             : isDark
             ? [
-                { width: 18, color: strokeGlow },
-                { width: 10, color: strokeOutline },
+                { width: wGlow, color: strokeGlow },
+                { width: wCase, color: strokeOutline },
               ]
-            : [{ width: 7, color: strokeOutline }],
+            : [{ width: followMode ? 7 : 5.5, color: strokeOutline }],
         },
       });
       map.addChild(outline);
@@ -488,11 +494,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
           stroke: lite
             ? [{ width: 5, color: strokeMain }]
             : isDark
-            ? [
-                { width: 14, color: strokeGlow },
-                { width: 6, color: strokeMain },
-              ]
-            : [{ width: 4.5, color: strokeMain }],
+            ? [{ width: wMain, color: strokeMain }]
+            : [{ width: followMode ? 4.5 : 3.5, color: strokeMain }],
         },
       });
       map.addChild(feature);
@@ -741,7 +744,6 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     if (remainingPos.length < 2) return;
 
     const strokeMain = isDark ? TESLA_ROUTE_BLUE : 'rgba(6, 182, 212, 0.95)';
-    const strokeGlow = isDark ? TESLA_ROUTE_GLOW : 'rgba(6, 182, 212, 0.2)';
     const strokeTraveled = isDark ? TESLA_ROUTE_TRAVELED : 'rgba(148, 163, 184, 0.8)';
 
     if (bundle.apiVersion === 3) {
@@ -772,7 +774,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         try {
           featureRef.current.update({
             geometry: { type: 'LineString', coordinates: remainCoords },
-            style: { stroke: lite ? [{ width: 5, color: strokeMain }] : isDark ? [{ width: 14, color: strokeGlow }, { width: 6, color: strokeMain }] : [{ width: 4.5, color: strokeMain }] },
+            style: { stroke: lite ? [{ width: 5, color: strokeMain }] : isDark ? [{ width: 6, color: strokeMain }] : [{ width: 4.5, color: strokeMain }] },
           });
         } catch { /* ignore */ }
       }
