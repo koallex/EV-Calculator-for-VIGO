@@ -14,12 +14,15 @@ import { useEffect, useSyncExternalStore } from 'react';
 export type CarModePref = 'auto' | 'on' | 'off';
 
 const STORAGE_KEY = 'vigo_car_mode';
+const AUTO_THEME_KEY = 'vigo_car_auto_theme';
 
 interface CarModeSnapshot {
   pref: CarModePref;
   active: boolean;
   /** Коэффициент `zoom` для оверлеев. */
   scale: number;
+  /** Днём — светлая тема, ночью — тёмная (работает только пока режим авто активен). По умолчанию включено. */
+  autoTheme: boolean;
 }
 
 function readPref(): CarModePref {
@@ -30,6 +33,14 @@ function readPref(): CarModePref {
     /* localStorage недоступен — работаем в режиме auto */
   }
   return 'auto';
+}
+
+function readAutoTheme(): boolean {
+  try {
+    return localStorage.getItem(AUTO_THEME_KEY) !== '0';
+  } catch {
+    return true;
+  }
 }
 
 function detectAuto(): boolean {
@@ -49,7 +60,7 @@ function computeScale(): number {
 function compute(): CarModeSnapshot {
   const pref = readPref();
   const active = pref === 'on' || (pref === 'auto' && detectAuto());
-  return { pref, active, scale: computeScale() };
+  return { pref, active, scale: computeScale(), autoTheme: readAutoTheme() };
 }
 
 let snapshot: CarModeSnapshot = compute();
@@ -64,7 +75,13 @@ function applyToDocument(s: CarModeSnapshot): void {
 
 function refresh(): void {
   const next = compute();
-  if (next.pref === snapshot.pref && next.active === snapshot.active && next.scale === snapshot.scale) return;
+  if (
+    next.pref === snapshot.pref &&
+    next.active === snapshot.active &&
+    next.scale === snapshot.scale &&
+    next.autoTheme === snapshot.autoTheme
+  )
+    return;
   snapshot = next;
   applyToDocument(snapshot);
   listeners.forEach((l) => l());
@@ -80,6 +97,15 @@ function subscribe(listener: () => void): () => void {
 export function setCarModePref(pref: CarModePref): void {
   try {
     localStorage.setItem(STORAGE_KEY, pref);
+  } catch {
+    /* ignore */
+  }
+  refresh();
+}
+
+export function setCarAutoTheme(on: boolean): void {
+  try {
+    localStorage.setItem(AUTO_THEME_KEY, on ? '1' : '0');
   } catch {
     /* ignore */
   }

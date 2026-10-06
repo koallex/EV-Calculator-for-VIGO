@@ -876,27 +876,24 @@ export function createStationObjectManager(_ymaps: any) {
  * Default shape points UP (screen north). `headingDeg` is CSS rotation (clockwise).
  */
 export function makeNavArrowEl(color = '#f8fafc', headingDeg = 0): HTMLElement {
-  // Tesla-like light chevron: soft glow, geographic rotation via CSS transform.
+  // Крупный шеврон (читается с расстояния вытянутой руки на экране авто): светлая стрелка с тёмной обводкой
+  // на циановом «ореоле». Поворот — CSS-transform на самом элементе (RouteMap выставляет его напрямую).
+  const SIZE = 48;
   const el = document.createElement('div');
   el.setAttribute('data-vigo-nav-arrow', '1');
   const deg = Number.isFinite(headingDeg) ? headingDeg : 0;
-  el.innerHTML = `<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-    <defs>
-      <filter id="vigoNavGlow" x="-40%" y="-40%" width="180%" height="180%">
-        <feGaussianBlur stdDeviation="1.2" result="b"/>
-        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>
-    </defs>
-    <path d="M14 3 L22 23 L14 18 L6 23 Z" fill="${color}" stroke="rgba(15,23,42,0.85)" stroke-width="1.2" filter="url(#vigoNavGlow)"/>
+  el.innerHTML = `<svg width="${SIZE}" height="${SIZE}" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <circle cx="24" cy="24" r="21" fill="rgba(60,224,245,0.16)" stroke="rgba(60,224,245,0.55)" stroke-width="1.5"/>
+    <path d="M24 5 L37 40 L24 32 L11 40 Z" fill="${color}" stroke="rgba(11,14,20,0.92)" stroke-width="2" stroke-linejoin="round"/>
   </svg>`;
   el.style.cssText = [
-    'width:28px',
-    'height:28px',
+    `width:${SIZE}px`,
+    `height:${SIZE}px`,
     'transform:translate(-50%,-50%) rotate(' + String(deg) + 'deg)',
     'transform-origin:50% 50%',
     'will-change:transform',
     'pointer-events:none',
-    'filter:drop-shadow(0 0 6px rgba(62,106,225,0.55))',
+    'filter:drop-shadow(0 2px 6px rgba(0,0,0,0.55))',
   ].join(';');
   (el as any).__setHeading = (h: number) => {
     const d = Number.isFinite(h) ? h : 0;

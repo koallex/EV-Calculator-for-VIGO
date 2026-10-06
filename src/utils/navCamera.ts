@@ -182,12 +182,31 @@ export class CourseSmoother {
 
 // ── Zoom & camera ────────────────────────────────────────────────────────────────────────────
 
-/** Speed-dependent zoom: closer when crawling, wider on the motorway. */
+/**
+ * Speed-dependent zoom: close in town and at a standstill, wider on the motorway.
+ * Piecewise-linear through fixed points so each band can be tuned on its own.
+ * At a standstill we deliberately stay a bit wider than before (16.9, was 17.4): a parking lot at zoom 17.4
+ * showed individual aircraft/markings and nothing useful.
+ */
+const ZOOM_BY_SPEED: ReadonlyArray<readonly [number, number]> = [
+  [0, 16.9],
+  [30, 16.6],
+  [60, 16.1],
+  [90, 15.5],
+  [130, 14.9],
+];
+
 export function zoomForSpeed(speedKmH: number | null): number {
   const v = clamp(speedKmH ?? 0, 0, 130);
-  // 0 km/h → 17.4,  50 km/h → 16.5,  90 km/h → 15.7,  130 km/h → 15.1
-  const z = 17.4 - 2.3 * Math.pow(v / 130, 0.85);
-  return Math.round(z * 100) / 100;
+  for (let i = 1; i < ZOOM_BY_SPEED.length; i++) {
+    const [v1, z1] = ZOOM_BY_SPEED[i];
+    if (v <= v1) {
+      const [v0, z0] = ZOOM_BY_SPEED[i - 1];
+      const t = (v - v0) / (v1 - v0);
+      return Math.round((z0 + (z1 - z0) * t) * 100) / 100;
+    }
+  }
+  return ZOOM_BY_SPEED[ZOOM_BY_SPEED.length - 1][1];
 }
 
 /** Exponential smoothing for scalar values such as zoom (frame-rate independent). */
