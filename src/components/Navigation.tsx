@@ -1,7 +1,8 @@
 import React from 'react';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
-import { Calculator, History, BatteryCharging, Settings, Gauge } from 'lucide-react';
+import { Calculator, History, BatteryCharging, Settings, Gauge, Maximize, Minimize } from 'lucide-react';
 import { triggerHaptic } from '../utils/haptics';
+import { useCarMode, useFullscreen, isFullscreenSupported, toggleFullscreen } from '../utils/carMode';
 
 export type TabType = 'calculator' | 'hud' | 'history' | 'charging' | 'settings';
 
@@ -29,6 +30,9 @@ export const Navigation: React.FC<NavigationProps> = ({
   onRequestClose,
 }) => {
   const isDark = theme !== 'light';
+  const car = useCarMode();
+  const fullscreen = useFullscreen();
+  const showFullscreenButton = car.active && isFullscreenSupported();
   const tabs: { id: TabType; label: string; icon: React.FC<{ className?: string }> }[] = [
     { id: 'calculator', label: 'Калькулятор', icon: Calculator },
     { id: 'hud', label: 'HUD', icon: Gauge },
@@ -142,6 +146,25 @@ export const Navigation: React.FC<NavigationProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
+      {/* Режим авто: «во весь экран» убирает строку браузера и вкладки — карте достаётся ещё ~120 px высоты. */}
+      {showFullscreenButton && visible && (
+        <button
+          type="button"
+          id="car-fullscreen-btn"
+          aria-label={fullscreen ? 'Выйти из полноэкранного режима' : 'Во весь экран'}
+          onClick={() => {
+            triggerHaptic('light', hapticFeedback);
+            void toggleFullscreen();
+          }}
+          className={`pointer-events-auto absolute bottom-[max(env(safe-area-inset-bottom,0px),12px)] left-3 flex h-12 w-12 items-center justify-center rounded-full border shadow-2xl backdrop-blur-xl active:scale-95 ${
+            isDark
+              ? 'bg-slate-950/70 border-white/10 text-slate-200 shadow-black/40'
+              : 'bg-white/75 border-slate-200/80 text-slate-700 shadow-slate-300/40'
+          }`}
+        >
+          {fullscreen ? <Minimize className="h-6 w-6" /> : <Maximize className="h-6 w-6" />}
+        </button>
+      )}
     </div>
   );
 };

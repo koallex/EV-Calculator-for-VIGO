@@ -3051,7 +3051,7 @@ export const HudTab: React.FC<HudTabProps> = ({
           <>
             {/* Left cluster — glanceable, does not span the screen */}
             <div
-              className="pointer-events-none absolute left-2 top-2 z-20 flex flex-col gap-1.5"
+              className="hud-left-cluster pointer-events-none absolute left-2 top-2 z-20 flex flex-col gap-1.5"
               style={{ maxHeight: 'calc(100% - 5.5rem - env(safe-area-inset-bottom, 0px))' }}
             >
               <div className={`pointer-events-auto w-[13.5rem] rounded-2xl border px-3 py-2.5 shadow-xl ${glass}`}>
@@ -3174,13 +3174,13 @@ export const HudTab: React.FC<HudTabProps> = ({
 
             {/* Controls: bottom-right, above floating nav */}
             <div
-              className="pointer-events-none absolute right-2 z-20 flex items-center gap-2"
+              className="hud-controls pointer-events-none absolute right-2 z-20 flex items-center gap-2"
               style={{ bottom: 'calc(4.75rem + env(safe-area-inset-bottom, 0px))' }}
             >
               <div className={`pointer-events-auto flex items-center gap-1 rounded-2xl border px-2 py-1.5 ${glass}`}>
-                <button type="button" onClick={() => setPassengers((p) => Math.max(1, p - 1))} className="w-8 h-8 rounded-lg font-bold text-base opacity-80">−</button>
+                <button type="button" onClick={() => setPassengers((p) => Math.max(1, p - 1))} className="hud-ctl-step w-8 h-8 rounded-lg font-bold text-base opacity-80">−</button>
                 <span className="text-sm font-bold min-w-[3rem] text-center">👥 {passengers}</span>
-                <button type="button" onClick={() => setPassengers((p) => Math.min(5, p + 1))} className="w-8 h-8 rounded-lg font-bold text-base opacity-80">+</button>
+                <button type="button" onClick={() => setPassengers((p) => Math.min(5, p + 1))} className="hud-ctl-step w-8 h-8 rounded-lg font-bold text-base opacity-80">+</button>
                 <button
                   type="button"
                   onClick={() => {

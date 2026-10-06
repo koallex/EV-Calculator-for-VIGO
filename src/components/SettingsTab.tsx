@@ -43,6 +43,14 @@ import { useBackupImport, type ImportMode } from '../hooks/useBackupImport';
 import { useFeedback } from './ui/Feedback';
 import { pluralTrips } from '../utils/backup';
 import { APP_VERSION } from '../appInfo';
+import {
+  useCarMode,
+  useFullscreen,
+  setCarModePref,
+  isFullscreenSupported,
+  toggleFullscreen,
+  type CarModePref,
+} from '../utils/carMode';
 
 interface SettingsTabProps {
   settings: UserSettings;
@@ -107,6 +115,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   }, [form]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isDark = form.theme !== 'light';
+  const car = useCarMode();
+  const fullscreen = useFullscreen();
 
   // Public ЭЗС tariffs for Belarus are no longer manually edited here — they're kept in sync
   // automatically in the background (see App.tsx) from live pricing data, so this list is
@@ -202,6 +212,66 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
         <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
           Регион, тарифы ЭЗС и параметры автомобиля. Валюта подставляется из региона.
         </p>
+      </div>
+
+      {/* Режим авто: крупный интерфейс для экрана мультимедиа */}
+      <div
+        className={`border rounded-2xl p-3 space-y-2 ${
+          isDark ? 'bg-slate-900/60 border-slate-800/80' : 'bg-white border-slate-200/80 shadow-xs'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            Экран автомобиля
+          </p>
+          <span className={`text-[11px] font-semibold ${car.active ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+            {car.active ? 'Включён' : 'Выключен'}
+          </span>
+        </div>
+        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+          Увеличивает панель HUD, кнопки и навигацию. В режиме «Авто» включается сам на широком экране с сенсорным вводом.
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            { id: 'auto', label: 'Авто' },
+            { id: 'on', label: 'Вкл' },
+            { id: 'off', label: 'Выкл' },
+          ] as { id: CarModePref; label: string }[]).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => {
+                triggerHaptic('light', form.hapticFeedback);
+                setCarModePref(opt.id);
+              }}
+              className={`py-2.5 rounded-xl border text-xs font-semibold min-h-[44px] ${
+                car.pref === opt.id
+                  ? isDark
+                    ? 'bg-cyan-500/15 border-cyan-400/60 text-cyan-300'
+                    : 'bg-cyan-50 border-cyan-500 text-cyan-700'
+                  : isDark
+                    ? 'bg-slate-950 border-slate-800 text-slate-300'
+                    : 'bg-slate-50 border-slate-200 text-slate-700'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {isFullscreenSupported() && (
+          <button
+            type="button"
+            onClick={() => {
+              triggerHaptic('light', form.hapticFeedback);
+              void toggleFullscreen();
+            }}
+            className={`w-full py-2.5 rounded-xl border text-xs font-semibold min-h-[44px] ${
+              isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700'
+            }`}
+          >
+            {fullscreen ? 'Выйти из полноэкранного режима' : 'Во весь экран'}
+          </button>
+        )}
       </div>
 
       {/* Account / actions previously in the header — available in landscape via «Ещё» */}
