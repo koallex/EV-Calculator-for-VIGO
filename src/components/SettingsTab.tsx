@@ -43,6 +43,7 @@ import { useBackupImport, type ImportMode } from '../hooks/useBackupImport';
 import { useFeedback } from './ui/Feedback';
 import { pluralTrips } from '../utils/backup';
 import { APP_VERSION } from '../appInfo';
+import { NAV_APP_OPTIONS, getNavApp, setNavApp, type NavApp } from '../utils/openNavigator';
 import {
   useCarMode,
   useFullscreen,
@@ -117,6 +118,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
   const isDark = form.theme !== 'light';
   const car = useCarMode();
+  const [navApp, setNavAppState] = useState<NavApp>(() => getNavApp());
   const fullscreen = useFullscreen();
 
   // Public ЭЗС tariffs for Belarus are no longer manually edited here — they're kept in sync
@@ -292,6 +294,45 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             {fullscreen ? 'Выйти из полноэкранного режима' : 'Во весь экран'}
           </button>
         )}
+      </div>
+
+      {/* Навигатор: какое приложение открывать по кнопкам «Яндекс Навигатор» */}
+      <div
+        className={`border rounded-2xl p-3 space-y-2 ${
+          isDark ? 'bg-slate-900/60 border-slate-800/80' : 'bg-white border-slate-200/80 shadow-xs'
+        }`}
+      >
+        <p className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+          Навигатор
+        </p>
+        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+          Что открывать по кнопкам «Начать» и «Яндекс Навигатор». Если на ГУ нет Яндекс Навигатора, выберите установленное
+          приложение или «Любое приложение» (система сама предложит из установленных).
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {NAV_APP_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => {
+                triggerHaptic('light', form.hapticFeedback);
+                setNavApp(opt.id);
+                setNavAppState(opt.id);
+              }}
+              className={`py-2.5 rounded-xl border text-xs font-semibold min-h-[44px] ${
+                navApp === opt.id
+                  ? isDark
+                    ? 'bg-cyan-500/15 border-cyan-400/60 text-cyan-300'
+                    : 'bg-cyan-50 border-cyan-500 text-cyan-700'
+                  : isDark
+                    ? 'bg-slate-950 border-slate-800 text-slate-300'
+                    : 'bg-slate-50 border-slate-200 text-slate-700'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Account / actions previously in the header — available in landscape via «Ещё» */}

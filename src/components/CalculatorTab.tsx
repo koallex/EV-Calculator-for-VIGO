@@ -36,6 +36,8 @@ import { BatteryVisual } from './BatteryVisual';
 import { DecimalInput } from './DecimalInput';
 import { getTariffForType, getOperatorLabel, estimateTripConsumption, estimateSegmentedRouteConsumption, calculateClimateImpact } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
+import { openInNavigator, openWebInNewTab, webUrl, type NavFailInfo } from '../utils/openNavigator';
+import { useFeedback } from './ui/Feedback';
 import { saveLastRouteForecast } from '../utils/routeForecastBridge';
 import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress } from '../services/routeElevation';
 import { AddressAutocomplete } from './AddressAutocomplete';
@@ -104,6 +106,16 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   onOpenAddModalWithData,
   onSendToHud,
 }) => {
+  const { toast } = useFeedback();
+  /** Навигатор не открылся (на ГУ может не быть приложения): подсказка + запасной вариант на сайте. */
+  const notifyNavFail = (info: NavFailInfo) =>
+    toast({
+      message: `Не открылся «${info.appLabel}». На ГУ его может не быть — другой навигатор выбирается в «Ещё».`,
+      actionLabel: 'Открыть на сайте',
+      onAction: () => openWebInNewTab(info.web),
+      durationMs: 9000,
+      tone: 'error',
+    });
   // Input states (restored from last session when available)
   const [startSoc, setStartSoc] = useState<number>(() => {
     try {
@@ -537,31 +549,19 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     const b = pts[pts.length - 1];
     const vias =
       chargingSuggestionStatus === 'ready' && chargingStops.length
-        ? chargingStops.map((s) => ({ lat: s.station.lat, lon: s.station.lon }))
+        ? chargingStops.map((st) => ({ lat: st.station.lat, lon: st.station.lon }))
         : chargingSuggestionStatus === 'ready' && chargingSuggestion
           ? [{ lat: chargingSuggestion.station.lat, lon: chargingSuggestion.station.lon }]
           : [];
-    let app = `yandexnavi://build_route_on_map?lat_from=${a.lat}&lon_from=${a.lon}&lat_to=${b.lat}&lon_to=${b.lon}`;
-    vias.forEach((v, i) => {
-      app += `&lat_via_${i}=${v.lat}&lon_via_${i}=${v.lon}`;
-    });
-    const parts = [`${a.lat},${a.lon}`, ...vias.map((v) => `${v.lat},${v.lon}`), `${b.lat},${b.lon}`];
-    const web = `https://yandex.ru/navi/?rtext=${parts.join('~')}&rtt=auto`;
-    return { app, web };
+    const target = { from: { lat: a.lat, lon: a.lon }, to: { lat: b.lat, lon: b.lon }, vias };
+    return { web: webUrl(target), target };
   })();
 
   const openYandexNavi = (e: React.MouseEvent) => {
     if (yandexNaviHref === '#' || typeof yandexNaviHref === 'string') return;
     e.preventDefault();
     e.stopPropagation();
-    const { app, web } = yandexNaviHref;
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
-    // On phones only the Navi app scheme — a delayed https fallback was also opening Maps.
-    if (isMobile) {
-      window.location.href = app;
-      return;
-    }
-    window.open(web, '_blank', 'noopener,noreferrer');
+    openInNavigator(yandexNaviHref.target, notifyNavFail);
   };
 
   const searchNearbyFreeChargers = useCallback(async () => {
@@ -1908,12 +1908,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
   const openStationInNavi = (lat: number, lon: number) => {
     triggerHaptic('medium', settings.hapticFeedback);
-    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
-    if (isMobile) {
-      window.location.href = `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lon}`;
-    } else {
-      window.open(`https://yandex.ru/maps/?rtext=~${lat},${lon}&rtt=auto`, '_blank', 'noopener,noreferrer');
-    }
+    openInNavigator({ to: { lat, lon } }, notifyNavFail);
   };
 
   const buildRouteToSelectedStation = () => {

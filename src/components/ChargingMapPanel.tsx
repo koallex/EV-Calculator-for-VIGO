@@ -28,6 +28,8 @@ import {
 } from '../data/vehicleProfiles';
 import type { VehicleConnector } from '../services/chargingStations';
 import { triggerHaptic } from '../utils/haptics';
+import { openInNavigator, openWebInNewTab } from '../utils/openNavigator';
+import { useFeedback } from './ui/Feedback';
 import { findNearbyFreeCcsChargers, type FreeChargerResult } from '../services/nearbyFreeCharging';
 import { useEvraceTariffs, matchEvraceTariff, type EvraceTariff } from '../hooks/useEvraceTariffs';
 
@@ -356,6 +358,7 @@ function operatorForLive(station: any): (typeof LIVE_OPS)[number] | null {
 }
 
 export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, active = true }) => {
+  const { toast } = useFeedback();
   const activeRef = useRef(active);
   activeRef.current = active;
   const isDark = settings.theme !== 'light';
@@ -1715,19 +1718,15 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
                     onClick={() => {
                       triggerHaptic('medium', settings.hapticFeedback);
                       const { lat, lon } = selected;
-                      // One target only — timed web fallback opened Maps + Navigator together.
-                      const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(
-                        navigator.userAgent || '',
+                      openInNavigator({ to: { lat, lon } }, (info) =>
+                        toast({
+                          message: `Не открылся «${info.appLabel}». На ГУ его может не быть — другой навигатор выбирается в «Ещё».`,
+                          actionLabel: 'Открыть на сайте',
+                          onAction: () => openWebInNewTab(info.web),
+                          durationMs: 9000,
+                          tone: 'error',
+                        }),
                       );
-                      if (isMobile) {
-                        window.location.href = `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lon}`;
-                      } else {
-                        window.open(
-                          `https://yandex.ru/maps/?rtext=~${lat},${lon}&rtt=auto`,
-                          '_blank',
-                          'noopener,noreferrer',
-                        );
-                      }
                     }}
                     className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-yellow-500 py-2.5 text-[13px] font-black text-slate-950 active:scale-[0.98] landscape:py-2"
                   >
