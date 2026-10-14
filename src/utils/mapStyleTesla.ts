@@ -23,8 +23,11 @@ export const LITE_STYLE_EXTRAS: VectorCustomizationItem[] = [
   },
 ];
 
-// Маршрут — яркий циан: по тону и яркости отличается от воды (тёмно-бирюзовая) и от дорог (серо-голубые).
+// Маршрут — ярко-салатовый: хорошо виден на стандартной карте Яндекса и не сливается с водой, дорогами и парками.
 // Имена констант оставлены прежними, чтобы не трогать RouteMap.
-export const TESLA_ROUTE_BLUE = '#3CE0F5';
+export const TESLA_ROUTE_BLUE = '#39FF5A';
 export const TESLA_ROUTE_TRAVELED = '#3b4a63';
-export const TESLA_ROUTE_GLOW = 'rgba(60, 224, 245, 0.26)';
+export const TESLA_ROUTE_GLOW = 'rgba(57, 255, 90, 0.30)';
+// Светлая тема: чуть темнее салатовый, чтобы линия не терялась на светлой карте.
+export const ROUTE_GREEN_LIGHT = '#16D945';
+export const ROUTE_GREEN_LIGHT_GLOW = 'rgba(22, 217, 69, 0.22)';
