@@ -14,6 +14,14 @@ export function initViewportHeight(): () => void {
   const root = document.documentElement;
   let raf = 0;
   let last = -1;
+  let lastLh = -1;
+
+  // «Большая» высота окна (lvh): когда панели браузера (Safari на iPhone) свёрнуты. Нужна, чтобы карта доходила
+  // до нижнего края сразу, а не «доезжала» после первого скролла, когда панель Safari прячется.
+  const probe = document.createElement('div');
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:100lvh;visibility:hidden;pointer-events:none;';
+  (document.body || root).appendChild(probe);
 
   const measure = () => {
     raf = 0;
@@ -21,6 +29,11 @@ export function initViewportHeight(): () => void {
     if (h > 0 && h !== last) {
       last = h;
       root.style.setProperty('--app-h', `${h}px`);
+    }
+    const lh = Math.max(h, Math.round(probe.offsetHeight || 0));
+    if (lh > 0 && lh !== lastLh) {
+      lastLh = lh;
+      root.style.setProperty('--app-lh', `${lh}px`);
     }
   };
   const schedule = () => {
@@ -40,6 +53,7 @@ export function initViewportHeight(): () => void {
 
   return () => {
     if (raf) window.cancelAnimationFrame(raf);
+    probe.remove();
     timers.forEach((t) => window.clearTimeout(t));
     window.removeEventListener('resize', schedule);
     window.removeEventListener('orientationchange', schedule);
