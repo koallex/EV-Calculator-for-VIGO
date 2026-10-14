@@ -10,7 +10,7 @@ declare global {
   }
 }
 
-import { TESLA_DARK_STYLE, LITE_STYLE_EXTRAS } from './mapStyleTesla';
+import { LITE_STYLE_EXTRAS } from './mapStyleTesla';
 
 const YANDEX_MAPS_API_KEY = (import.meta.env.VITE_YANDEX_MAPS_API_KEY as string | undefined)?.trim();
 
@@ -272,30 +272,20 @@ export async function createV3Map(
     map = new YMap(container, baseProps);
   }
 
+  // Штатная схема Яндекса: day / night без собственной стилизации.
+  // customization передаём только для опции «Лёгкая карта» (без зданий и подписей дорог).
+  const theme = isDark ? 'dark' : 'light';
   let schemeLayer: any;
   try {
-    if (isDark) {
-      // Tesla-like dark basemap: try customization, fall back to plain dark theme.
-      try {
-        schemeLayer = new YMapDefaultSchemeLayer({
-          theme: 'dark',
-          customization: opts.lite ? [...TESLA_DARK_STYLE, ...LITE_STYLE_EXTRAS] : TESLA_DARK_STYLE,
-        });
-      } catch (styleErr) {
-        console.warn('[maps] Tesla customization unsupported, plain dark theme', styleErr);
-        schemeLayer = new YMapDefaultSchemeLayer({ theme: 'dark' });
-      }
-    } else if (opts.lite) {
-      try {
-        schemeLayer = new YMapDefaultSchemeLayer({ theme: 'light', customization: LITE_STYLE_EXTRAS });
-      } catch {
-        schemeLayer = new YMapDefaultSchemeLayer({ theme: 'light' });
-      }
-    } else {
-      schemeLayer = new YMapDefaultSchemeLayer({ theme: 'light' });
-    }
+    schemeLayer = opts.lite
+      ? new YMapDefaultSchemeLayer({ theme, customization: LITE_STYLE_EXTRAS })
+      : new YMapDefaultSchemeLayer({ theme });
   } catch {
-    schemeLayer = new YMapDefaultSchemeLayer();
+    try {
+      schemeLayer = new YMapDefaultSchemeLayer({ theme });
+    } catch {
+      schemeLayer = new YMapDefaultSchemeLayer();
+    }
   }
   map.addChild(schemeLayer);
   try {
@@ -337,18 +327,10 @@ export async function createV3Map(
     },
     setTheme: (dark: boolean) => {
       try {
-        if (dark) {
-          try {
-            schemeLayer.update?.({
-              theme: 'dark',
-              customization: opts.lite ? [...TESLA_DARK_STYLE, ...LITE_STYLE_EXTRAS] : TESLA_DARK_STYLE,
-            });
-          } catch {
-            schemeLayer.update?.({ theme: 'dark' });
-          }
-        } else {
-          schemeLayer.update?.({ theme: 'light', customization: opts.lite ? LITE_STYLE_EXTRAS : [] });
-        }
+        schemeLayer.update?.({
+          theme: dark ? 'dark' : 'light',
+          customization: opts.lite ? LITE_STYLE_EXTRAS : [],
+        });
       } catch {
         /* ignore */
       }
@@ -426,7 +408,6 @@ export async function createV21Map(
 
   const el: HTMLElement | null =
     typeof map.container?.getElement === 'function' ? map.container.getElement() : null;
-  if (el && opts.isDark) el.classList.add('vigo-ymaps-dark');
 
   // DOM scrub — covers hashed class names and late-injected promo nodes.
   const stopPromoScrub = scrubYandexOpenMapsPromo(el || container);
@@ -447,11 +428,8 @@ export async function createV21Map(
         /* ignore */
       }
     },
-    setTheme: (dark: boolean) => {
-      const node: HTMLElement | null =
-        typeof map.container?.getElement === 'function' ? map.container.getElement() : null;
-      node?.classList.toggle('vigo-ymaps-dark', !!dark);
-    },
+    // В 2.1 нет штатной тёмной схемы; инвертировать плитки не будем — остаётся стандартная карта Яндекса.
+    setTheme: (_dark: boolean) => {},
     setLocation: (la: number, lo: number, z?: number) => {
       try {
         map.setCenter([la, lo], z ?? map.getZoom(), { duration: 300 });

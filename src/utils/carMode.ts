@@ -43,11 +43,33 @@ function readAutoTheme(): boolean {
   }
 }
 
+/** UA головных устройств: Яндекс.Авто / Android Automotive / Яндекс Браузер для авто и т.п. */
+const CAR_UA_RE = /android\s*automotive|automotive|yaauto|yandex\s*auto|yandexauto|carplay|android\s*auto\b|\bcar\b/i;
+
+function isCarUserAgent(): boolean {
+  try {
+    return CAR_UA_RE.test(navigator.userAgent || '');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Экран мультимедиа определяем по нескольким признакам: браузеры ГУ нередко отдают `pointer: fine`
+ * (эмуляция мыши) или не отдают `pointer` вовсе, поэтому одного (pointer: coarse) мало.
+ *  - UA головного устройства — достаточно ширины ≥ 900 px;
+ *  - иначе: большой ландшафтный экран с сенсором и БЕЗ hover (ноутбук с мышью/тачпадом сюда не попадает).
+ */
 function detectAuto(): boolean {
   if (typeof window === 'undefined') return false;
   const landscape = window.innerWidth > window.innerHeight * 1.05;
-  const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-  return landscape && window.innerWidth >= 1100 && coarse;
+  if (!landscape) return false;
+  if (isCarUserAgent() && window.innerWidth >= 900) return true;
+  if (window.innerWidth < 1100) return false;
+  const mm = (q: string) => window.matchMedia?.(q).matches ?? false;
+  const coarse = mm('(pointer: coarse)') || mm('(any-pointer: coarse)');
+  const touchNoHover = (navigator.maxTouchPoints ?? 0) > 0 && !mm('(hover: hover)');
+  return coarse || touchNoHover;
 }
 
 /** 1280 px → ~1.4, 1920 px → 1.6 (потолок). Округляем до 0.05, чтобы не дёргать стили на каждый пиксель ресайза. */
