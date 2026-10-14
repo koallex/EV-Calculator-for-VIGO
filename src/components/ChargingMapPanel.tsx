@@ -361,6 +361,29 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
   const { toast } = useFeedback();
   const activeRef = useRef(active);
   activeRef.current = active;
+
+  // Портрет: высота панели = «большая» высота окна (lvh) минус реальный отступ сверху (шапка + переключатель).
+  // Так карта сразу доходит до нижнего края и не «доезжает» после скролла, когда Safari прячет свою панель.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [panelTop, setPanelTop] = useState<number | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    const measure = () => {
+      const el = rootRef.current;
+      if (!el) return;
+      const top = Math.round(el.getBoundingClientRect().top + window.scrollY);
+      if (top > 0) setPanelTop((prev) => (prev === top ? prev : top));
+    };
+    measure();
+    const timers = [100, 400, 1000].map((ms) => window.setTimeout(measure, ms));
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t));
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+    };
+  }, [active]);
   const isDark = settings.theme !== 'light';
   const profileConnectors = useMemo(
     () =>
@@ -1267,7 +1290,10 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
     : 'bg-white/95 border border-slate-200 text-slate-900 shadow-lg';
 
   return (
-    <div className="relative h-[calc(var(--app-h)-7rem)] sm:h-[calc(var(--app-h)-8rem)] landscape:h-full max-h-none min-h-[320px] w-full overflow-hidden rounded-none sm:rounded-2xl border-0 sm:border border-slate-800/60">
+    <div
+      ref={rootRef}
+      style={panelTop != null ? ({ '--chg-top': `${panelTop}px` } as React.CSSProperties) : undefined}
+      className="relative h-[calc(var(--app-lh)-var(--chg-top,7rem))] landscape:h-full max-h-none min-h-[320px] w-full overflow-hidden rounded-none sm:rounded-2xl border-0 sm:border border-slate-800/60">
       <div ref={containerRef} className="absolute inset-0 bg-slate-900" />
 
       {/*

@@ -80,7 +80,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings, sessions = [
   const isDark = settings.theme !== 'light';
 
   return (
-    <div id="charging-tab-container" data-view={view} className={`space-y-3 max-w-2xl mx-auto ${view === 'map' ? 'pb-4 max-w-none landscape:max-w-none' : 'pb-12'}`}>
+    <div id="charging-tab-container" data-view={view} className={`space-y-3 max-w-2xl mx-auto ${view === 'map' ? 'pb-0 max-w-none landscape:max-w-none' : 'pb-12'}`}>
       {/* View switcher: map search vs cost calculator */}
       <div
         className={`flex p-1 rounded-xl border ${
