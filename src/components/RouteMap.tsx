@@ -452,15 +452,15 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     const strokeGlow = isDark ? TESLA_ROUTE_GLOW : ROUTE_GREEN_LIGHT_GLOW;
     // Тёмная обводка вокруг салатового ядра даёт контраст и на тёмной, и на светлой схеме Яндекса.
     const strokeOutline = isDark ? 'rgba(3, 20, 10, 0.88)' : 'rgba(4, 70, 30, 0.85)';
-    const strokeCore = 'rgba(235, 255, 240, 0.85)'; // тонкая светлая «жила» по центру — неоновый эффект
+    const strokeCore = 'rgba(245, 255, 235, 0.8)'; // тонкая светлая «жила» по центру — неоновый эффект
     const strokeTraveled = isDark ? TESLA_ROUTE_TRAVELED : '#94a3b8';
     // Толщина линии. На обзоре всего маршрута (калькулятор) тонкая и чёткая, в навигации (HUD, масштаб 16–17)
     // толще — иначе линия теряется на фоне широких дорог. Подсветка одна: раньше она рисовалась дважды
     // (в обводке и в основной линии), полупрозрачные слои складывались и давали мутную «полосу».
-    const wGlow = followMode ? 22 : 16;
-    const wCase = followMode ? 13 : 10;
-    const wMain = followMode ? 8 : 6;
-    const wCore = followMode ? 2.2 : 1.6;
+    const wGlow = followMode ? 12 : 9;
+    const wCase = followMode ? 7 : 5.5;
+    const wMain = followMode ? 4.5 : 3.5;
+    const wCore = followMode ? 1.2 : 1;
 
     // Draw-in animation A→B unless actively following GPS (HUD trip).
     // Pre-start HUD uses fill=true but followMode=false — still animate.
@@ -485,7 +485,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
                 { width: wGlow, color: strokeGlow },
                 { width: wCase, color: strokeOutline },
               ]
-            : [{ width: followMode ? 11 : 8.5, color: strokeOutline }],
+            : [{ width: followMode ? 6.5 : 5, color: strokeOutline }],
         },
       });
       map.addChild(outline);
@@ -498,7 +498,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             ? [{ width: 5, color: strokeMain }]
             : isDark
             ? [{ width: wMain, color: strokeMain }, { width: wCore, color: strokeCore }]
-            : [{ width: followMode ? 6.5 : 5, color: strokeMain }, { width: wCore, color: strokeCore }],
+            : [{ width: followMode ? 4.5 : 3.5, color: strokeMain }, { width: wCore, color: strokeCore }],
         },
       });
       map.addChild(feature);
@@ -681,10 +681,10 @@ export const RouteMap: React.FC<RouteMapProps> = ({
             style: {
               stroke: [
                 {
-                  width: 6,
+                  width: 3.5,
                   color: isDark ? TESLA_ROUTE_BLUE : ROUTE_GREEN_LIGHT,
                 },
-                { width: 1.8, color: 'rgba(235, 255, 240, 0.85)' },
+                { width: 1, color: 'rgba(245, 255, 235, 0.8)' },
               ],
             },
           });
@@ -778,7 +778,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         try {
           featureRef.current.update({
             geometry: { type: 'LineString', coordinates: remainCoords },
-            style: { stroke: lite ? [{ width: 5, color: strokeMain }] : isDark ? [{ width: 8, color: strokeMain }, { width: 2.2, color: 'rgba(235, 255, 240, 0.85)' }] : [{ width: 6.5, color: strokeMain }, { width: 1.8, color: 'rgba(235, 255, 240, 0.85)' }] },
+            style: { stroke: lite ? [{ width: 5, color: strokeMain }] : isDark ? [{ width: 4.5, color: strokeMain }, { width: 1.2, color: 'rgba(245, 255, 235, 0.8)' }] : [{ width: 4.5, color: strokeMain }, { width: 1.2, color: 'rgba(245, 255, 235, 0.8)' }] },
           });
         } catch { /* ignore */ }
       }
