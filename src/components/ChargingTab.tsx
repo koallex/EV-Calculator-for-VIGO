@@ -128,7 +128,7 @@ export const ChargingTab: React.FC<ChargingTabProps> = ({ settings, sessions = [
       </div>
 
       {/* Keep map mounted to avoid reloading Yandex API on every switch */}
-      <div className={view === 'map' ? 'block' : 'hidden'}>
+      <div className={view === 'map' ? 'chg-map-slot block' : 'hidden'}>
         <ChargingMapPanel settings={settings} active={active && view === 'map'} />
       </div>
 

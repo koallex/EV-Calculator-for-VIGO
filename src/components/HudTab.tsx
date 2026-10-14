@@ -2456,8 +2456,8 @@ export const HudTab: React.FC<HudTabProps> = ({
           // Telemetry strip sits ~4.75rem + ~3.5rem card → keep EVSE above it in portrait.
           : 'calc(11.75rem + env(safe-area-inset-bottom, 0px))',
         maxHeight: isLandscape
-          ? 'calc(100dvh - 9rem - env(safe-area-inset-bottom, 0px))'
-          : 'calc(100dvh - 14.5rem - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px))',
+          ? 'calc(var(--app-h) - 9rem - env(safe-area-inset-bottom, 0px))'
+          : 'calc(var(--app-h) - 14.5rem - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px))',
       }}
     >
       <div className="flex items-start gap-2">
@@ -2577,7 +2577,7 @@ export const HudTab: React.FC<HudTabProps> = ({
         paddingBottom: 'calc(5.75rem + env(safe-area-inset-bottom, 0px))',
       }}
     >
-      <div className={`border rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl text-left max-h-[min(78dvh,calc(100dvh-7.5rem))] overflow-y-auto overscroll-contain ${
+      <div className={`border rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl text-left max-h-[min(calc(var(--app-h)*0.78),calc(var(--app-h)-7.5rem))] overflow-y-auto overscroll-contain ${
         isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
       }`}>
         <div className={`flex items-center justify-between border-b pb-3 ${
@@ -2684,7 +2684,7 @@ export const HudTab: React.FC<HudTabProps> = ({
       <div
         id="hud-tab-container"
         className={`relative flex flex-col items-center justify-center gap-4 p-5 select-none ${
-          isLandscape ? 'h-[100dvh]' : 'h-[calc(100dvh-7.5rem)] min-h-[420px]'
+          isLandscape ? 'h-[var(--app-h)]' : 'h-[calc(var(--app-h)-7.5rem)] min-h-[420px]'
         } ${isDark ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}
       >
         <div
@@ -2805,8 +2805,8 @@ export const HudTab: React.FC<HudTabProps> = ({
         id="hud-tab-container"
         className={`relative overflow-hidden select-none ${
           isLandscape
-            ? 'h-[100dvh] min-h-0 max-h-none rounded-none border-0'
-            : 'h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] rounded-3xl'
+            ? 'h-[var(--app-h)] min-h-0 max-h-none rounded-none border-0'
+            : 'h-[calc(var(--app-h)-7.5rem)] min-h-[480px] max-h-[980px] rounded-3xl'
         } ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'}`}
       >
         {mapLayer}
@@ -3035,8 +3035,8 @@ export const HudTab: React.FC<HudTabProps> = ({
         id="hud-tab-container"
         className={`relative overflow-hidden select-none ${
           isLandscape
-            ? 'h-[100dvh] min-h-0 max-h-none rounded-none border-0'
-            : 'h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] rounded-3xl'
+            ? 'h-[var(--app-h)] min-h-0 max-h-none rounded-none border-0'
+            : 'h-[calc(var(--app-h)-7.5rem)] min-h-[480px] max-h-[980px] rounded-3xl'
         } ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'}`}
       >
         {completedTripModal}
@@ -3234,8 +3234,8 @@ export const HudTab: React.FC<HudTabProps> = ({
       id="hud-tab-container"
       className={`relative overflow-hidden select-none ${
         isLandscape
-          ? 'h-[100dvh] min-h-0 max-h-none rounded-none border-0'
-          : 'h-[calc(100dvh-7.5rem)] min-h-[480px] max-h-[980px] rounded-3xl'
+          ? 'h-[var(--app-h)] min-h-0 max-h-none rounded-none border-0'
+          : 'h-[calc(var(--app-h)-7.5rem)] min-h-[480px] max-h-[980px] rounded-3xl'
       } ${isDark ? 'bg-slate-950 border border-slate-800' : 'bg-slate-100 border border-slate-200'}`}
     >
       {mapLayer}

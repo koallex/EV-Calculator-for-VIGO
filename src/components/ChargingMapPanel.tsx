@@ -1267,7 +1267,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
     : 'bg-white/95 border border-slate-200 text-slate-900 shadow-lg';
 
   return (
-    <div className="relative h-[calc(100dvh-7rem)] sm:h-[calc(100dvh-8rem)] landscape:h-[100dvh] max-h-none min-h-[320px] w-full overflow-hidden rounded-none sm:rounded-2xl border-0 sm:border border-slate-800/60">
+    <div className="relative h-[calc(var(--app-h)-7rem)] sm:h-[calc(var(--app-h)-8rem)] landscape:h-full max-h-none min-h-[320px] w-full overflow-hidden rounded-none sm:rounded-2xl border-0 sm:border border-slate-800/60">
       <div ref={containerRef} className="absolute inset-0 bg-slate-900" />
 
       {/*
@@ -1285,7 +1285,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
         }}
       >
         {/* Filters chip + counter + locate */}
-        <div className="pointer-events-none flex items-start gap-2 landscape:col-start-1 landscape:row-start-1">
+        <div className="chg-ov-filters pointer-events-none flex items-start gap-2 landscape:col-start-1 landscape:row-start-1">
           <div
             className={`pointer-events-auto flex min-w-0 flex-1 flex-wrap items-center gap-1.5 rounded-xl px-2 py-1.5 backdrop-blur-md ${
               isDark ? 'bg-slate-950/85 text-slate-100' : 'bg-white/90 text-slate-900 shadow'
@@ -1326,7 +1326,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
         </div>
 
         {/* CTA: portrait — centred under filters; landscape — top-right column */}
-        <div className="pointer-events-none flex justify-center landscape:col-start-3 landscape:row-start-1 landscape:justify-end">
+        <div className="chg-ov-cta pointer-events-none flex justify-center landscape:col-start-3 landscape:row-start-1 landscape:justify-end">
           <button
             type="button"
             onClick={findNearestFree}
@@ -1353,12 +1353,12 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
 
         {/*
           Кнопки масштаба. Ландшафт: у ПРАВОГО края экрана, сверху (под кнопкой «Ближайшая свободная»); при открытом списке «ближайших» сдвигаются левее него, при открытой карточке станции скрыты. Историческая справка (прежняя схема — центральная колонка):
-          панель карты высотой 100dvh начинается под переключателем «Карта ЭЗС / Стоимость» и частично уходит за нижний край,
+          панель карты высотой var(--app-h) начинается под переключателем «Карта ЭЗС / Стоимость» и частично уходит за нижний край,
           так что «центр» сетки оказывался под нижней навигацией; сверху кнопки видны всегда и не мешают карточке станции
           (она прижата к правому нижнему углу). Портрет: справа по центру свободной области; пока открыт список/фильтры/карточка — скрыты.
         */}
         <div
-          className={`pointer-events-none flex col-start-1 row-start-3 justify-self-end self-center landscape:absolute landscape:col-auto landscape:row-auto landscape:z-30 landscape:top-[calc(env(safe-area-inset-top,0px)_+_3.75rem)] ${
+          className={`chg-ov-zoomwrap pointer-events-none flex col-start-1 row-start-3 justify-self-end self-center landscape:absolute landscape:col-auto landscape:row-auto landscape:z-30 landscape:top-[calc(env(safe-area-inset-top,0px)_+_3.75rem)] ${
             nearestFreeOpen
               ? 'landscape:right-[calc(min(19rem,38%)_+_max(0.5rem,env(safe-area-inset-right,0px)))]'
               : 'landscape:right-[max(0.5rem,env(safe-area-inset-right,0px))]'
@@ -1370,8 +1370,8 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
         {/* Nearest free list. Landscape: right column, hidden while a station card is open. */}
         {nearestFreeOpen && (
           <div
-            className={`pointer-events-auto flex min-h-0 flex-col self-start overflow-hidden rounded-2xl backdrop-blur-md landscape:col-start-3 landscape:row-start-2 landscape:max-h-full ${
-              selected ? 'max-h-[min(22dvh,11rem)] landscape:hidden' : 'max-h-[min(42dvh,20rem)]'
+            className={`chg-ov-sheet pointer-events-auto flex min-h-0 flex-col self-start overflow-hidden rounded-2xl backdrop-blur-md landscape:col-start-3 landscape:row-start-2 landscape:max-h-full ${
+              selected ? 'max-h-[min(calc(var(--app-h)*0.22),11rem)] landscape:hidden' : 'max-h-[min(calc(var(--app-h)*0.42),20rem)]'
             } ${panelSurface}`}
           >
             <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-3 py-2">
@@ -1442,8 +1442,8 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
         {/* Filter sheet. Landscape: left column under the filters chip. */}
         {filtersOpen && (
           <div
-            className={`pointer-events-auto min-h-0 self-start overflow-y-auto overscroll-contain rounded-2xl p-3 backdrop-blur-md landscape:col-start-1 landscape:row-start-2 landscape:max-h-full landscape:p-2.5 ${
-              selected ? 'max-h-[min(30dvh,17rem)]' : 'max-h-[min(56dvh,26rem)]'
+            className={`chg-ov-sheet pointer-events-auto min-h-0 self-start overflow-y-auto overscroll-contain rounded-2xl p-3 backdrop-blur-md landscape:col-start-1 landscape:row-start-2 landscape:max-h-full landscape:p-2.5 ${
+              selected ? 'max-h-[min(calc(var(--app-h)*0.3),17rem)]' : 'max-h-[min(calc(var(--app-h)*0.56),26rem)]'
             } ${panelSurface}`}
           >
             <div className={`mb-3 rounded-xl px-3 py-2 text-[11px] landscape:mb-2 ${isDark ? 'bg-slate-900 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
@@ -1574,7 +1574,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
       {error && (
         <div
           className={`absolute left-2 right-2 z-50 rounded-xl bg-rose-950/90 px-3 py-2 text-[11px] text-rose-200 landscape:bottom-3 landscape:left-1/2 landscape:right-auto landscape:w-[min(28rem,50vw)] landscape:-translate-x-1/2 ${
-            selected ? 'bottom-[calc(6rem_+_min(40dvh,24rem))]' : 'bottom-24'
+            selected ? 'bottom-[calc(6rem_+_min(calc(var(--app-h)*0.4),24rem))]' : 'bottom-24'
           }`}
         >
           {error}
@@ -1589,7 +1589,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
       */}
       {selected && (
         <div
-          className={`fixed left-3 right-3 z-40 mx-auto max-w-md overflow-y-auto overscroll-contain rounded-2xl border p-3 shadow-2xl backdrop-blur-md bottom-[calc(5.25rem_+_env(safe-area-inset-bottom,0px))] max-h-[min(40dvh,24rem)] landscape:left-auto landscape:right-[max(0.5rem,env(safe-area-inset-right,0px))] landscape:mx-0 landscape:w-[min(26rem,54vw)] landscape:max-w-none landscape:bottom-[max(0.5rem,env(safe-area-inset-bottom,0px))] landscape:max-h-[calc(100dvh_-_4rem_-_env(safe-area-inset-top,0px)_-_env(safe-area-inset-bottom,0px))] landscape:p-2.5 ${
+          className={`chg-ov-card fixed left-3 right-3 z-40 mx-auto max-w-md overflow-y-auto overscroll-contain rounded-2xl border p-3 shadow-2xl backdrop-blur-md bottom-[calc(5.25rem_+_env(safe-area-inset-bottom,0px))] max-h-[min(calc(var(--app-h)*0.4),24rem)] landscape:left-auto landscape:right-[max(0.5rem,env(safe-area-inset-right,0px))] landscape:mx-0 landscape:w-[min(26rem,54vw)] landscape:max-w-none landscape:bottom-[max(0.5rem,env(safe-area-inset-bottom,0px))] landscape:max-h-[calc(var(--app-h)_-_4rem_-_env(safe-area-inset-top,0px)_-_env(safe-area-inset-bottom,0px))] landscape:p-2.5 ${
             isDark
               ? 'border-slate-700 bg-slate-950/95 text-slate-100'
               : 'border-slate-200 bg-white/95 text-slate-900'

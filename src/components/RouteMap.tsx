@@ -1332,7 +1332,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
   return (
     <div
       className={`route-map-shell overflow-hidden ${fill ? 'route-map-shell--fill' : ''} ${
-        isDark ? 'bg-slate-950 vigo-ymaps-dark' : 'bg-slate-100'
+        isDark ? 'bg-slate-950' : 'bg-slate-100'
       }`}
     >
       <div

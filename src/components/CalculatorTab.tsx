@@ -2624,7 +2624,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       id="calculator-tab-container"
       ref={shellRef}
       style={shellHeight ? { height: shellHeight, marginBottom: shellBleed ? -shellBleed : undefined } : undefined}
-      className={`calculator-map-shell relative isolate mx-auto h-[calc(100dvh-11.5rem)] min-h-[360px] w-full overflow-hidden rounded-3xl border landscape:h-[calc(100dvh-4.75rem)] landscape:min-h-[10rem] landscape:rounded-2xl ${
+      className={`calculator-map-shell relative isolate mx-auto h-[calc(var(--app-h)-11.5rem)] min-h-[360px] w-full overflow-hidden rounded-3xl border landscape:h-[calc(var(--app-h)-4.75rem)] landscape:min-h-[10rem] landscape:rounded-2xl ${
         isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-100'
       }`}
     >
