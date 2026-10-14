@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { initNativeApp } from './utils/nativeApp';
+import { initViewportHeight } from './utils/viewport';
 
 class RootErrorBoundary extends Component<
   { children: ReactNode },
@@ -19,7 +20,7 @@ class RootErrorBoundary extends Component<
       return (
         <div
           style={{
-            minHeight: '100vh',
+            minHeight: 'var(--app-h, 100vh)',
             background: '#0b1220',
             color: '#fca5a5',
             padding: 24,
@@ -50,6 +51,8 @@ class RootErrorBoundary extends Component<
     return this.props.children;
   }
 }
+
+initViewportHeight();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -647,7 +647,7 @@ function AppInner() {
   };
 
   if (authChecking) {
-    return <div className="min-h-screen bg-[#0b1220] text-slate-100 flex items-center justify-center text-xs text-slate-400">Проверка авторизации…</div>;
+    return <div className="min-h-[var(--app-h)] bg-[#0b1220] text-slate-100 flex items-center justify-center text-xs text-slate-400">Проверка авторизации…</div>;
   }
 
   if (!authUser) {
@@ -657,7 +657,7 @@ function AppInner() {
   const headerHidden = isLandscape;
 
   return (
-    <div className={`min-h-screen transition-colors duration-200 flex flex-col font-sans ${
+    <div className={`min-h-[var(--app-h)] transition-colors duration-200 flex flex-col font-sans ${
       settings.theme === 'light' 
         ? 'bg-[#f0f6fb] text-slate-900 selection:bg-cyan-400 selection:text-slate-950' 
         : 'bg-[#0b1220] text-slate-100 selection:bg-cyan-500 selection:text-slate-950'
@@ -684,7 +684,7 @@ function AppInner() {
         data-tab={activeTab}
         className={
           isLandscape
-            ? `flex-1 w-full h-[100dvh] max-h-[100dvh] overflow-auto m-0 ${
+            ? `flex-1 w-full h-[var(--app-h)] max-h-[var(--app-h)] overflow-auto m-0 ${
                 activeTab === 'hud' || activeTab === 'charging'
                   ? 'p-0'
                   : 'px-4 py-3 pb-24'
