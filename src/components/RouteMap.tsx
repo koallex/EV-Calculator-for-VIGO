@@ -15,7 +15,7 @@ import {
   toLonLat,
   type AnyMapBundle,
 } from '../utils/yandexMaps';
-import { TESLA_ROUTE_BLUE, TESLA_ROUTE_TRAVELED, TESLA_ROUTE_GLOW } from '../utils/mapStyleTesla';
+import { TESLA_ROUTE_BLUE, TESLA_ROUTE_TRAVELED, TESLA_ROUTE_GLOW, ROUTE_GREEN_LIGHT, ROUTE_GREEN_LIGHT_GLOW } from '../utils/mapStyleTesla';
 import { HeadingFilter, headingDelta } from '../utils/headingFilter';
 import {
   CourseSmoother,
@@ -448,8 +448,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     let timer: number | null = null;
 
     // Dark HUD: Tesla-like bright blue route + soft glow. Light theme keeps cyan accent.
-    const strokeMain = isDark ? TESLA_ROUTE_BLUE : 'rgba(6, 182, 212, 0.95)';
-    const strokeGlow = isDark ? TESLA_ROUTE_GLOW : 'rgba(6, 182, 212, 0.2)';
+    const strokeMain = isDark ? TESLA_ROUTE_BLUE : ROUTE_GREEN_LIGHT;
+    const strokeGlow = isDark ? TESLA_ROUTE_GLOW : ROUTE_GREEN_LIGHT_GLOW;
     const strokeOutline = isDark ? 'rgba(20, 23, 29, 0.75)' : 'rgba(255, 255, 255, 0.65)';
     const strokeTraveled = isDark ? TESLA_ROUTE_TRAVELED : '#94a3b8';
     // Толщина линии. На обзоре всего маршрута (калькулятор) тонкая и чёткая, в навигации (HUD, масштаб 16–17)
@@ -572,7 +572,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       const polyline = new ymaps.Polyline(
         positions.slice(0, count),
         {},
-        { strokeColor: '#06b6d4', strokeWidth: 5, strokeOpacity: 0.95 },
+        { strokeColor: isDark ? TESLA_ROUTE_BLUE : ROUTE_GREEN_LIGHT, strokeWidth: 5, strokeOpacity: 0.95 },
       );
       map.geoObjects.add(polyline);
       featureRef.current = polyline;
@@ -679,7 +679,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
               stroke: [
                 {
                   width: 4.5,
-                  color: isDark ? 'rgba(34, 211, 238, 0.95)' : 'rgba(6, 182, 212, 0.95)',
+                  color: isDark ? TESLA_ROUTE_BLUE : ROUTE_GREEN_LIGHT,
                 },
               ],
             },
@@ -743,7 +743,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     const remainingPos = positions.slice(Math.max(0, bestIdx));
     if (remainingPos.length < 2) return;
 
-    const strokeMain = isDark ? TESLA_ROUTE_BLUE : 'rgba(6, 182, 212, 0.95)';
+    const strokeMain = isDark ? TESLA_ROUTE_BLUE : ROUTE_GREEN_LIGHT;
     const strokeTraveled = isDark ? TESLA_ROUTE_TRAVELED : 'rgba(148, 163, 184, 0.8)';
 
     if (bundle.apiVersion === 3) {
