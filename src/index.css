@@ -15,9 +15,17 @@
 
 /* Видимая высота окна. JS (utils/viewport.ts) подставляет точное значение в px;
    до его запуска и в браузерах без JS-замера работают fallback'и: 100vh → 100dvh (если поддерживается). */
-:root { --app-h: 100vh; }
+:root { --app-h: 100vh; --app-lh: 100vh; }
 @supports (height: 100dvh) {
   :root { --app-h: 100dvh; }
+}
+@supports (height: 100lvh) {
+  :root { --app-lh: 100lvh; }
+}
+
+/* Карта ЭЗС в портрете: у страницы нет лишнего нижнего отступа, иначе документ скроллится и карта «уезжает». */
+@media (orientation: portrait) {
+  #app-main:has(#charging-tab-container[data-view="map"]) { padding-bottom: 0; }
 }
 
 /* Theme-specific custom styles */
