@@ -498,8 +498,7 @@ html {
     margin: 0.4rem auto 0.4rem;
   }
   #charging-tab-container[data-view="map"] > .chg-map-slot {
-    flex: 1 1 0;
-    min-height: 0;
+    flex: 0 0 auto;
     margin: 0;
   }
 
