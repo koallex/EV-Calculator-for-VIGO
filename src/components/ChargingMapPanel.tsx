@@ -1293,7 +1293,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
     <div
       ref={rootRef}
       style={panelTop != null ? ({ '--chg-top': `${panelTop}px` } as React.CSSProperties) : undefined}
-      className="relative h-[calc(var(--app-lh)-var(--chg-top,7rem))] landscape:h-full max-h-none min-h-[320px] w-full overflow-hidden rounded-none sm:rounded-2xl border-0 sm:border border-slate-800/60">
+      className="relative h-[calc(var(--app-lh)-var(--chg-top,7rem))] landscape:h-[calc(var(--app-h)-var(--chg-top,3.5rem))] max-h-none min-h-[320px] w-full overflow-hidden rounded-none sm:rounded-2xl border-0 sm:border border-slate-800/60">
       <div ref={containerRef} className="absolute inset-0 bg-slate-900" />
 
       {/*
