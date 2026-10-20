@@ -1,4 +1,4 @@
-import { getEvraceGroups, getEvraceStats } from '../_lib/evrace.js';
+import { getEvraceGroups, getEvraceGroupsNear, getEvraceStats } from '../_lib/evrace.js';
 
 export const config = { maxDuration: 15 };
 
@@ -20,6 +20,29 @@ export default async function handler(req, res) {
     const minLon = numberParam(req.query?.minLon);
     const maxLon = numberParam(req.query?.maxLon);
     const hasBbox = [minLat, maxLat, minLon, maxLon].every((v) => v !== undefined);
+
+    // Диагностика: /api/evrace/stations?near=55.116287,27.670994&r=1 — что лежит в снимке рядом с точкой.
+    const nearRaw = Array.isArray(req.query?.near) ? req.query.near[0] : req.query?.near;
+    if (nearRaw) {
+      const [nLat, nLon] = String(nearRaw).split(',').map(Number);
+      if (Number.isFinite(nLat) && Number.isFinite(nLon)) {
+        const radius = numberParam(req.query?.r) ?? 1;
+        const found = await getEvraceGroupsNear(nLat, nLon, Math.min(radius, 25));
+        const nearStats = await getEvraceStats();
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(200).json({
+          query: { lat: nLat, lon: nLon, radiusKm: radius },
+          found: found.length,
+          snapshot: {
+            totalGroups: nearStats.totalGroups,
+            groupsStored: nearStats.groupsStored,
+            failedPages: nearStats.failedPages,
+            ageMs: nearStats.ageMs,
+          },
+          results: found.slice(0, 20),
+        });
+      }
+    }
 
     const groups = await getEvraceGroups(
       hasBbox ? { minLat, maxLat, minLon, maxLon } : undefined

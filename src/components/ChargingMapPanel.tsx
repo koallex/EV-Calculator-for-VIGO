@@ -204,7 +204,14 @@ const isType2Label = (label: unknown) => {
   const s = String(label ?? '')
     .toLowerCase()
     .replace(/[\s_-]+/g, '');
-  return s.includes('type2') || s === 'type2ac';
+  return (
+    s.includes('type2') ||
+    s === 'type2ac' ||
+    s.includes('mennekes') ||
+    s.includes('iec62196') ||
+    s === 't2' ||
+    s === 'ac'
+  );
 };
 
 const isAvailable = (status: unknown) => {
@@ -497,7 +504,10 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
         (profileConnectors.includes('ccs2') && s.hasCcs2) ||
         (profileConnectors.includes('gbt') && s.hasGbt) ||
         (profileConnectors.includes('type2') && s.hasType2);
-      if (!typeOk) return false;
+      // Станция без распознанных разъёмов (в реестре не указаны или нестандартная подпись) — показываем:
+      // раньше такие станции молча пропадали с карты (например, зарядки на АЗС).
+      const connectorsUnknown = !s.hasCcs2 && !s.hasGbt && !s.hasType2;
+      if (!typeOk && !connectorsUnknown) return false;
       if (operatorFilter.length && !operatorFilter.includes(s.operatorKey)) return false;
       if (minPowerKw != null) {
         const pw = stationMaxPowerKw(s);

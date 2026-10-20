@@ -8,7 +8,8 @@ import { Redis } from '@upstash/redis';
 
 const EVRACE_API = 'https://evrace.by/api/stations-page';
 const PAGE_SIZE = 100;
-const PAGE_DELAY_MS = 1200;
+const PAGE_DELAY_MS = 900;
+const PAGE_CONCURRENCY = 2;
 const REQUEST_TIMEOUT_MS = 12000;
 const REFRESH_DEADLINE_MS = 55000;
 
@@ -81,7 +82,17 @@ function groupId(group) {
   );
 }
 
-async function fetchAllGroupsLive() {
+async function fetchPageWithRetry(offset) {
+  try {
+    return await fetchPage(offset);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await sleep(message.includes('429') ? 6000 : 1500);
+    return fetchPage(offset); // одна повторная попытка
+  }
+}
+
+async function fetchAllGroupsLive(previous) {
   const deadline = Date.now() + REFRESH_DEADLINE_MS;
   const first = await fetchPage(0);
   if (!first.groups.length) throw new Error('EVRACE returned no station groups');
@@ -93,27 +104,44 @@ async function fetchAllGroupsLive() {
     if (!unique.has(id)) unique.set(id, group);
   }
 
+  const offsets = [];
+  for (let offset = PAGE_SIZE; offset < totalGroups; offset += PAGE_SIZE) offsets.push(offset);
+
   let failedPages = 0;
-  for (let offset = PAGE_SIZE; offset < totalGroups; offset += PAGE_SIZE) {
+  // Две страницы параллельно: полный обход укладывается в лимит функции, а не обрывается на середине реестра.
+  for (let i = 0; i < offsets.length; i += PAGE_CONCURRENCY) {
     if (Date.now() >= deadline) {
-      failedPages += Math.ceil((totalGroups - offset) / PAGE_SIZE);
-      console.warn(`[evrace] refresh deadline at offset=${offset}`);
+      failedPages += offsets.length - i;
+      console.warn(`[evrace] refresh deadline at offset=${offsets[i]}`);
       break;
     }
     await sleep(PAGE_DELAY_MS);
-    try {
-      const page = await fetchPage(offset);
-      for (const group of page.groups) {
-        const id = groupId(group);
-        if (!unique.has(id)) unique.set(id, group);
+    const batch = offsets.slice(i, i + PAGE_CONCURRENCY);
+    const settled = await Promise.allSettled(batch.map((o) => fetchPageWithRetry(o)));
+    settled.forEach((r, idx) => {
+      if (r.status === 'fulfilled') {
+        for (const group of r.value.groups) {
+          const id = groupId(group);
+          if (!unique.has(id)) unique.set(id, group);
+        }
+      } else {
+        failedPages++;
+        console.error(`[evrace] page offset=${batch[idx]} failed:`, r.reason);
       }
-    } catch (error) {
-      failedPages++;
-      console.error(`[evrace] page offset=${offset} failed:`, error);
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes('429')) await sleep(8000);
-      else await sleep(2000);
+    });
+  }
+
+  // Часть страниц не загрузилась — не теряем станции из прошлого снимка (иначе они «исчезали» до следующего обновления).
+  if (failedPages > 0 && previous?.groups?.length) {
+    let kept = 0;
+    for (const group of previous.groups) {
+      const id = groupId(group);
+      if (!unique.has(id)) {
+        unique.set(id, group);
+        kept++;
+      }
     }
+    console.warn(`[evrace] kept ${kept} groups from previous snapshot (failedPages=${failedPages})`);
   }
 
   return {
@@ -223,6 +251,24 @@ export async function getEvraceGroups(bbox) {
   });
 }
 
+/** Диагностика: группы в радиусе radiusKm от точки (для проверки, есть ли станция в снимке). */
+export async function getEvraceGroupsNear(lat, lon, radiusKm = 1) {
+  const registry = await loadRegistry();
+  if (!registry?.groups?.length) return [];
+  const r = Math.PI / 180;
+  const out = [];
+  for (const group of registry.groups) {
+    const p = groupCoordinates(group);
+    if (!p) continue;
+    const dLat = (p.lat - lat) * r;
+    const dLon = (p.lon - lon) * r;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat * r) * Math.cos(p.lat * r) * Math.sin(dLon / 2) ** 2;
+    const km = 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(a)));
+    if (km <= radiusKm) out.push({ distanceKm: Number(km.toFixed(3)), group });
+  }
+  return out.sort((x, y) => x.distanceKm - y.distanceKm);
+}
+
 export async function getEvraceStats() {
   const registry = memoryCache ?? (await loadRegistry());
   if (!registry) {
@@ -250,7 +296,16 @@ export async function getEvraceStats() {
 }
 
 export async function forceRefreshEvraceCache() {
-  const fresh = await fetchAllGroupsLive();
+  let previous = memoryCache;
+  if (!previous) {
+    try {
+      const r = getRedis();
+      previous = r ? await readRegistryFromRedis(r) : null;
+    } catch {
+      previous = null;
+    }
+  }
+  const fresh = await fetchAllGroupsLive(previous);
   memoryCache = fresh;
 
   const redis = getRedis();
