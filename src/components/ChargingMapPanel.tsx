@@ -110,10 +110,41 @@ function operatorColor(op: string): string {
   return OPERATOR_COLORS[key] || OPERATOR_COLORS.other || '#64748b';
 }
 
+/** Идентификатор столба в реестре EVRACE (ключи у разных записей отличаются). */
+function poleExtId(p: any): string {
+  return String(p?.external_id ?? p?.externalId ?? p?.pole_id ?? p?.poleId ?? p?.uid ?? p?.id ?? '').trim();
+}
+
+/** Подписи разъёмов столба: gun1..4_type, массивы connectors/guns/evses/ports, строковые поля. */
+function poleGunTypes(p: any): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    if (v === null || v === undefined) return;
+    const t = String(v).trim();
+    if (t) out.push(t);
+  };
+  for (const k of ['gun1_type', 'gun2_type', 'gun3_type', 'gun4_type', 'gun5_type', 'gun6_type']) push(p?.[k]);
+  for (const key of ['connectors', 'guns', 'evses', 'ports', 'sockets']) {
+    const arr = p?.[key];
+    if (!Array.isArray(arr)) continue;
+    for (const c of arr) {
+      if (typeof c === 'string') push(c);
+      else push(c?.type ?? c?.label ?? c?.connector_type ?? c?.standard ?? c?.name ?? c?.gun_type);
+    }
+  }
+  for (const key of ['connector_type', 'connector_types', 'gun_type', 'gun_types', 'types']) {
+    const v = p?.[key];
+    if (Array.isArray(v)) v.forEach(push);
+    else if (typeof v === 'string') v.split(/[,;/|]+/).forEach(push);
+  }
+  return out;
+}
+
 function connectorLabelFromGun(g: string): string | null {
   if (isCcsLabel(g)) return 'CCS';
   if (isGbtLabel(g)) return 'GB/T';
   if (isType2Label(g) || /type\s*2/i.test(g)) return 'Type2';
+  if (/chademo|чад?емо/i.test(g)) return 'CHAdeMO';
   return null;
 }
 
@@ -134,9 +165,8 @@ function buildPortGroups(poles: any[], group: any): PortGroup[] {
       parsePowerKw(p?.dc_power) ??
       parsePowerKw(p?.ac_power);
     let anyGun = false;
-    for (const k of ['gun1_type', 'gun2_type', 'gun3_type', 'gun4_type']) {
-      if (!p?.[k]) continue;
-      const label = connectorLabelFromGun(String(p[k]));
+    for (const gun of poleGunTypes(p)) {
+      const label = connectorLabelFromGun(gun);
       if (!label) continue;
       anyGun = true;
       const power =
@@ -167,11 +197,8 @@ function buildPortGroups(poles: any[], group: any): PortGroup[] {
     const dc = maxDc.length ? Math.max(...maxDc) : undefined;
     const ac = parsePowerKw(group?.ac_power ?? poles[0]?.ac_power);
     const guns: string[] = [];
-    for (const p of poles) {
-      for (const k of ['gun1_type', 'gun2_type', 'gun3_type', 'gun4_type']) {
-        if (p?.[k]) guns.push(String(p[k]));
-      }
-    }
+    for (const p of poles) guns.push(...poleGunTypes(p));
+    for (const g of poleGunTypes(group)) guns.push(g);
     if (guns.some((g) => isCcsLabel(g))) add('CCS', dc);
     if (guns.some((g) => isGbtLabel(g))) add('GB/T', dc);
     if (guns.some((g) => isType2Label(g) || /type\s*2/i.test(g))) add('Type2', ac);
@@ -289,11 +316,8 @@ function groupToMapStation(group: any, index: number): MapStation | null {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
   const guns: string[] = [];
-  for (const p of poles) {
-    for (const k of ['gun1_type', 'gun2_type', 'gun3_type', 'gun4_type']) {
-      if (p?.[k]) guns.push(String(p[k]));
-    }
-  }
+  for (const p of poles) guns.push(...poleGunTypes(p));
+  guns.push(...poleGunTypes(group));
   const hasCcs2 = guns.some((g) => isCcsLabel(g));
   const hasGbt = guns.some((g) => isGbtLabel(g));
   const hasType2 = guns.some((g) => isType2Label(g) || /type\s*2/i.test(g));
@@ -308,7 +332,7 @@ function groupToMapStation(group: any, index: number): MapStation | null {
     .filter((v): v is number => v !== undefined && v > 0);
   const maxDc = dcPowers.length ? Math.max(...dcPowers) : undefined;
 
-  const id = String(group?.location_id ?? group?.slug ?? poles[0]?.external_id ?? index);
+  const id = String(group?.location_id ?? group?.slug ?? (poleExtId(poles[0]) || index));
 
   const operator = String(group?.operator || poles[0]?.operator || '');
   const portGroups = buildPortGroups(poles, group);
@@ -391,8 +415,15 @@ function tariffFromEvrace(
 const LIVE_OPS = ['forevo', 'malanka', 'zaryadka', 'batteryfly', 'evika'] as const;
 
 function operatorForLive(station: any): (typeof LIVE_OPS)[number] | null {
-  const op = String(station?.operator || '').toLowerCase();
-  const agg = String(station?.aggregator || '').toLowerCase();
+  const opRaw = String(station?.operator || '');
+  const aggRaw = String(station?.aggregator || '');
+  // normalizeOperatorKey понимает и «Malanka», и «Маланка», и «ООО Маланка».
+  const norm = (v: string) => {
+    const k = normalizeOperatorKey(v);
+    return ['malanka', 'zaryadka', 'forevo', 'batteryfly', 'evika'].includes(k) ? k : v.toLowerCase().trim();
+  };
+  const op = norm(opRaw);
+  const agg = norm(aggRaw);
   const ext = String(station?.external_id || '');
   if (op === 'forevo' && ext.includes('forevo-ocpi-')) return 'forevo';
   if (op === 'zaryadka') return 'zaryadka';
@@ -552,7 +583,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
     const stationByExt = new Map<string, MapStation>();
     for (const s of list) {
       for (const pole of s._poles || []) {
-        const ext = String(pole.external_id || '').trim();
+        const ext = poleExtId(pole);
         if (!ext) continue;
         const op = operatorForLive({
           operator: pole.operator || s.operator,
@@ -579,7 +610,8 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
             if (!res.ok) continue;
             const data = await res.json();
             for (const pole of data.poles || []) {
-              if (pole?.external_id) liveByExt.set(String(pole.external_id), pole);
+              const pid = poleExtId(pole);
+              if (pid) liveByExt.set(pid, pole);
             }
           } catch {
             /* ignore */
@@ -610,25 +642,31 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
       const connectors = Array.isArray(livePole.connectors) ? livePole.connectors : [];
       if (connectors.length) {
         for (const c of connectors) {
-          const free = isAvailable(c.status);
-          if (isCcsLabel(c.label)) {
+          const free = isAvailable(c.status ?? c.state ?? c.availability);
+          const cl = c.label ?? c.type ?? c.connector_type ?? c.standard ?? c.name;
+          if (isCcsLabel(cl)) {
             cur.totalCcs = (cur.totalCcs || 0) + 1;
             if (free) cur.freeCcs = (cur.freeCcs || 0) + 1;
-          } else if (isGbtLabel(c.label)) {
+          } else if (isGbtLabel(cl)) {
             cur.totalGbt = (cur.totalGbt || 0) + 1;
             if (free) cur.freeGbt = (cur.freeGbt || 0) + 1;
-          } else if (isType2Label(c.label)) {
+          } else if (isType2Label(cl)) {
             cur.totalType2 = (cur.totalType2 || 0) + 1;
             if (free) cur.freeType2 = (cur.freeType2 || 0) + 1;
           }
         }
-      } else if (isAvailable(livePole.status)) {
+      } else {
+        // Живой статус без разбивки по разъёмам: считаем столб целиком (занятые тоже идут в «всего»).
+        const free = isAvailable(livePole.status ?? livePole.state);
         if (cur.hasCcs2) {
-          cur.freeCcs = (cur.freeCcs || 0) + 1;
           cur.totalCcs = (cur.totalCcs || 0) + 1;
+          if (free) cur.freeCcs = (cur.freeCcs || 0) + 1;
         } else if (cur.hasGbt) {
-          cur.freeGbt = (cur.freeGbt || 0) + 1;
           cur.totalGbt = (cur.totalGbt || 0) + 1;
+          if (free) cur.freeGbt = (cur.freeGbt || 0) + 1;
+        } else if (cur.hasType2) {
+          cur.totalType2 = (cur.totalType2 || 0) + 1;
+          if (free) cur.freeType2 = (cur.freeType2 || 0) + 1;
         }
       }
     }
