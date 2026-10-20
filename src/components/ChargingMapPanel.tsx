@@ -65,6 +65,8 @@ interface MapStation {
   totalType2?: number;
   liveChecked?: boolean;
   _poles?: any[];
+  /** Разъёмы не удалось определить по основным полям (gun1..4_type) — такую станцию не прячем фильтром. */
+  legacyUnknown?: boolean;
 }
 
 const OPERATOR_COLORS: Record<string, string> = {
@@ -318,6 +320,16 @@ function groupToMapStation(group: any, index: number): MapStation | null {
   const guns: string[] = [];
   for (const p of poles) guns.push(...poleGunTypes(p));
   guns.push(...poleGunTypes(group));
+  // Основные поля (как до расширенного разбора): если по ним разъёмы не определились, станция всегда остаётся на карте.
+  const legacyGuns: string[] = [];
+  for (const p of poles) {
+    for (const k of ['gun1_type', 'gun2_type', 'gun3_type', 'gun4_type']) {
+      if (p?.[k]) legacyGuns.push(String(p[k]));
+    }
+  }
+  const legacyUnknown = !legacyGuns.some(
+    (g) => isCcsLabel(g) || isGbtLabel(g) || isType2Label(g) || /type\s*2/i.test(g),
+  );
   const hasCcs2 = guns.some((g) => isCcsLabel(g));
   const hasGbt = guns.some((g) => isGbtLabel(g));
   const hasType2 = guns.some((g) => isType2Label(g) || /type\s*2/i.test(g));
@@ -356,6 +368,7 @@ function groupToMapStation(group: any, index: number): MapStation | null {
     type2PowerKw: parsePowerKw(group?.ac_power ?? poles[0]?.ac_power),
     portGroups,
     _poles: poles,
+    legacyUnknown,
   };
 }
 
@@ -546,7 +559,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
         (profileConnectors.includes('type2') && s.hasType2);
       // Станция без распознанных разъёмов (в реестре не указаны или нестандартная подпись) — показываем:
       // раньше такие станции молча пропадали с карты (например, зарядки на АЗС).
-      const connectorsUnknown = !s.hasCcs2 && !s.hasGbt && !s.hasType2;
+      const connectorsUnknown = (!s.hasCcs2 && !s.hasGbt && !s.hasType2) || !!s.legacyUnknown;
       if (!typeOk && !connectorsUnknown) return false;
       if (operatorFilter.length && !operatorFilter.includes(s.operatorKey)) return false;
       if (minPowerKw != null) {
