@@ -90,6 +90,44 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentLogin, onClose, o
     }
   };
 
+  // Диагностика: что лежит в снимке EVRACE рядом с точкой (помогает понять, почему станции нет на карте).
+  const [diagCoords, setDiagCoords] = useState('55.116287, 27.670994');
+  const [diagBusy, setDiagBusy] = useState(false);
+  const [diagText, setDiagText] = useState('');
+  const runDiag = async () => {
+    const parts = diagCoords.split(/[,;\s]+/).map(Number).filter((n) => Number.isFinite(n));
+    if (parts.length < 2) {
+      setDiagText('Укажите координаты: широта, долгота.');
+      return;
+    }
+    setDiagBusy(true);
+    setDiagText('');
+    try {
+      const res = await fetch(`/api/evrace/stations?near=${parts[0]},${parts[1]}&r=1`, { cache: 'no-store' });
+      const data = await res.json();
+      const snap = data?.snapshot || {};
+      const lines: string[] = [
+        `В снимке: ${snap.groupsStored ?? '?'} из ${snap.totalGroups ?? '?'} · не загружено страниц: ${snap.failedPages ?? '?'}`,
+        `Найдено станций в радиусе 1 км: ${data?.found ?? 0}`,
+      ];
+      const first = Array.isArray(data?.results) ? data.results[0] : null;
+      if (first?.group) {
+        const g = first.group;
+        const poles = Array.isArray(g.poles) ? g.poles : [];
+        lines.push(`Ближайшая: ${first.distanceKm} км · ${g.location_name || g.address || '—'} · оператор: ${g.operator || poles[0]?.operator || '—'}`);
+        lines.push(`Ключи группы: ${Object.keys(g).join(', ')}`);
+        lines.push(`Столбов: ${poles.length}${poles[0] ? ` · ключи столба: ${Object.keys(poles[0]).join(', ')}` : ''}`);
+        lines.push('--- сырая запись (первые 3500 символов) ---');
+        lines.push(JSON.stringify(g, null, 1).slice(0, 3500));
+      }
+      setDiagText(lines.join('\n'));
+    } catch (e) {
+      setDiagText(e instanceof Error ? e.message : 'Ошибка запроса.');
+    } finally {
+      setDiagBusy(false);
+    }
+  };
+
   const loadUsers = async () => {
     setError('');
     try {
@@ -182,6 +220,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentLogin, onClose, o
           {dbBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           {dbBusy ? 'Обновляем… (до минуты)' : 'Обновить базу станций'}
         </button>
+        <div className="pt-2 border-t border-slate-800 space-y-2">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Проверить станцию в базе</div>
+          <div className="flex gap-2">
+            <input
+              value={diagCoords}
+              onChange={(e) => setDiagCoords(e.target.value)}
+              placeholder="55.116287, 27.670994"
+              className="flex-1 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs outline-none focus:border-cyan-500"
+            />
+            <button
+              type="button"
+              onClick={runDiag}
+              disabled={diagBusy}
+              className="h-9 px-3 rounded-xl border border-slate-600 text-slate-200 text-xs font-bold disabled:opacity-60"
+            >
+              {diagBusy ? '…' : 'Найти'}
+            </button>
+          </div>
+          {diagText && (
+            <>
+              <pre className="max-h-64 overflow-auto rounded-xl border border-slate-800 bg-slate-950 p-2 text-[10px] leading-snug text-slate-300 whitespace-pre-wrap break-all">{diagText}</pre>
+              <button
+                type="button"
+                onClick={() => { void navigator.clipboard?.writeText(diagText).catch(() => {}); }}
+                className="text-[11px] font-bold text-cyan-400"
+              >
+                Скопировать
+              </button>
+            </>
+          )}
+        </div>
         {dbResult && (
           <div className={`rounded-xl border px-3 py-2 text-xs ${dbResult.ok ? 'border-emerald-900/60 bg-emerald-950/30 text-emerald-300' : 'border-amber-900/60 bg-amber-950/30 text-amber-300'}`}>
             {dbResult.text}

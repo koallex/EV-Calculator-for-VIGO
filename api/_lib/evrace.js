@@ -77,9 +77,12 @@ async function fetchPage(offset) {
 }
 
 function groupId(group) {
-  return String(
-    group?.location_id ?? group?.id ?? `${group?.latitude}:${group?.longitude}:${group?.address ?? ''}`
-  );
+  // Раньше ключом был только location_id: если у разных станций он совпадал, в снимке оставалась лишь первая.
+  // Добавляем координаты — настоящие дубли (одна станция на соседних страницах) по-прежнему схлопываются.
+  const base = String(group?.location_id ?? group?.id ?? group?.slug ?? group?.address ?? '');
+  const c = groupCoordinates(group);
+  const xy = c ? `${c.lat.toFixed(5)}:${c.lon.toFixed(5)}` : '';
+  return `${base}|${xy}`;
 }
 
 async function fetchPageWithRetry(offset) {
@@ -104,8 +107,11 @@ async function fetchAllGroupsLive(previous) {
     if (!unique.has(id)) unique.set(id, group);
   }
 
+  // Если API режет limit (отдал меньше запрошенных PAGE_SIZE), шагаем по фактическому размеру страницы.
+  // Иначе при шаге 100 и странице в 50 каждая вторая страница пропускалась — станции пропадали «случайным» образом.
+  const stride = first.groups.length < PAGE_SIZE && totalGroups > first.groups.length ? first.groups.length : PAGE_SIZE;
   const offsets = [];
-  for (let offset = PAGE_SIZE; offset < totalGroups; offset += PAGE_SIZE) offsets.push(offset);
+  for (let offset = stride; offset < totalGroups; offset += stride) offsets.push(offset);
 
   let failedPages = 0;
   // Две страницы параллельно: полный обход укладывается в лимит функции, а не обрывается на середине реестра.
