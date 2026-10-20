@@ -1069,3 +1069,29 @@ html.native-app-lite *::after {
     max-height: calc(100% - var(--nav-clear, 5rem) - 0.75rem);
   }
 }
+
+
+/* ── Портрет: карта на всю ширину экрана, без отступов и скруглений (калькулятор, HUD, карта ЭЗС) ── */
+@media (orientation: portrait) {
+  #app-main[data-tab="calculator"],
+  #app-main[data-tab="hud"],
+  #app-main:has(#charging-tab-container[data-view="map"]) {
+    max-width: none;
+    padding: 0;
+  }
+  .calculator-map-shell {
+    border-radius: 0;
+    border-width: 0;
+  }
+  #charging-tab-container[data-view="map"] > .chg-map-slot > div {
+    border-radius: 0;
+    border-width: 0;
+  }
+  /* HUD: до нижнего края экрана (отступ сверху замеряет utils/viewport.ts → --hud-top). */
+  #hud-tab-container {
+    border-radius: 0;
+    border-width: 0;
+    max-height: none;
+    height: calc(var(--app-lh, 100vh) - var(--hud-top, 4.5rem));
+  }
+}

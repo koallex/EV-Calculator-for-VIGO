@@ -26,6 +26,7 @@ export function initViewportHeight(): () => void {
   const measure = () => {
     raf = 0;
     measureNav();
+    measureHud();
     const h = Math.round(window.innerHeight || root.clientHeight || 0);
     if (h > 0 && h !== last) {
       last = h;
@@ -59,6 +60,17 @@ export function initViewportHeight(): () => void {
       root.style.setProperty('--nav-clear', `${clear}px`);
     }
   };
+  // Отступ HUD-карты от верха документа → --hud-top (в портрете карта HUD тянется до нижнего края экрана).
+  let lastHud = -1;
+  const measureHud = () => {
+    const el = document.getElementById('hud-tab-container');
+    if (!el || !(el.offsetParent || el.getClientRects().length)) return;
+    const top = Math.round(el.getBoundingClientRect().top + window.scrollY);
+    if (top > 0 && top !== lastHud) {
+      lastHud = top;
+      root.style.setProperty('--hud-top', `${top}px`);
+    }
+  };
   const schedule = () => {
     if (raf) return;
     raf = window.requestAnimationFrame(measure);
@@ -67,6 +79,22 @@ export function initViewportHeight(): () => void {
   measure();
   // Браузеры ГУ уточняют размер окна уже после загрузки (скрывают/показывают свои панели) — перемеряем.
   const timers = [150, 500, 1200, 3000].map((ms) => window.setTimeout(measure, ms));
+
+  // Переключение вкладки меняет data-tab у #app-main — перемеряем отступ HUD-карты.
+  let mainMo: MutationObserver | null = null;
+  const attachMainObserver = () => {
+    const main = document.getElementById('app-main');
+    if (!main || typeof MutationObserver === 'undefined') return false;
+    mainMo = new MutationObserver(schedule);
+    mainMo.observe(main, { attributes: true, attributeFilter: ['data-tab'] });
+    return true;
+  };
+  if (!attachMainObserver()) {
+    const retry = window.setInterval(() => {
+      if (attachMainObserver()) window.clearInterval(retry);
+    }, 400);
+    timers.push(retry);
+  }
 
   window.addEventListener('resize', schedule, { passive: true });
   window.addEventListener('orientationchange', schedule, { passive: true });
@@ -78,7 +106,8 @@ export function initViewportHeight(): () => void {
     if (raf) window.cancelAnimationFrame(raf);
     probe.remove();
     navRo?.disconnect();
-    timers.forEach((t) => window.clearTimeout(t));
+    mainMo?.disconnect();
+    timers.forEach((t) => { window.clearTimeout(t); window.clearInterval(t); });
     window.removeEventListener('resize', schedule);
     window.removeEventListener('orientationchange', schedule);
     window.removeEventListener('pageshow', schedule);
