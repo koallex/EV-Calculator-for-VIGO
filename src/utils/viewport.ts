@@ -25,6 +25,7 @@ export function initViewportHeight(): () => void {
 
   const measure = () => {
     raf = 0;
+    measureNav();
     const h = Math.round(window.innerHeight || root.clientHeight || 0);
     if (h > 0 && h !== last) {
       last = h;
@@ -34,6 +35,28 @@ export function initViewportHeight(): () => void {
     if (lh > 0 && lh !== lastLh) {
       lastLh = lh;
       root.style.setProperty('--app-lh', `${lh}px`);
+    }
+  };
+  // Высота плавающей нижней навигации (вместе с отступом от края) → --nav-clear.
+  // Нужна экранам, у которых карта идёт под навигацией (калькулятор): их нижние шторки/диалоги поднимаются над баром.
+  let navObserved: Element | null = null;
+  let navRo: ResizeObserver | null = null;
+  let lastNav = -1;
+  const measureNav = () => {
+    const wrap = document.getElementById('main-bottom-nav-wrap');
+    if (wrap && wrap !== navObserved && typeof ResizeObserver !== 'undefined') {
+      navRo?.disconnect();
+      navRo = new ResizeObserver(measureNav);
+      navRo.observe(wrap);
+      const inner = wrap.firstElementChild;
+      if (inner) navRo.observe(inner);
+      navObserved = wrap;
+    }
+    const h = wrap ? Math.round(wrap.getBoundingClientRect().height) : 0;
+    const clear = Math.max(h, 12);
+    if (clear !== lastNav) {
+      lastNav = clear;
+      root.style.setProperty('--nav-clear', `${clear}px`);
     }
   };
   const schedule = () => {
@@ -54,6 +77,7 @@ export function initViewportHeight(): () => void {
   return () => {
     if (raf) window.cancelAnimationFrame(raf);
     probe.remove();
+    navRo?.disconnect();
     timers.forEach((t) => window.clearTimeout(t));
     window.removeEventListener('resize', schedule);
     window.removeEventListener('orientationchange', schedule);
