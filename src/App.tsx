@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import confetti from 'canvas-confetti';
+import { MotionConfig } from 'motion/react';
 import { UserSettings, TripSession } from './types';
 import {
   DEFAULT_SETTINGS,
@@ -825,8 +826,11 @@ function AppInner() {
 
 export default function App() {
   return (
-    <FeedbackProvider>
-      <AppInner />
-    </FeedbackProvider>
+    // reducedMotion="user": при включённом «уменьшении движения» в системе motion-анимации превращаются в простые fade.
+    <MotionConfig reducedMotion="user">
+      <FeedbackProvider>
+        <AppInner />
+      </FeedbackProvider>
+    </MotionConfig>
   );
 }

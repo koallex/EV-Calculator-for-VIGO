@@ -41,6 +41,46 @@
   .chg-cta-idle { animation: none; }
 }
 
+/* ── Общие анимации интерфейса ───────────────────────────────────────────────
+   Только transform/opacity и одноразовые эффекты — чтобы не греть телефон и слабые экраны ГУ. */
+
+/* Индикатор поиска станций (StationSearchIndicator) */
+@keyframes vigo-radar {
+  0%   { transform: scale(0.55); opacity: 0.75; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+@keyframes vigo-indeterminate {
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(310%); }
+}
+.vigo-radar-ring { animation: vigo-radar 1.8s ease-out infinite; }
+.vigo-radar-ring--late { animation-delay: 0.9s; }
+.vigo-indeterminate { animation: vigo-indeterminate 1.3s ease-in-out infinite; }
+
+/* Плавное появление вкладки при переключении (display none → block перезапускает анимацию).
+   Только opacity: transform на контейнере карты ломал бы позиционирование fixed-оверлеев. */
+@keyframes vigo-tab-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+[data-tab-panel] { animation: vigo-tab-in 0.18s ease-out; }
+
+/* Отклик на нажатие для основных кнопок (opt-in: класс vigo-press). */
+.vigo-press {
+  transition: transform 0.12s ease, filter 0.12s ease, background-color 0.18s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.vigo-press:active:not(:disabled) { transform: scale(0.97); filter: brightness(1.08); }
+
+@media (prefers-reduced-motion: reduce) {
+  .vigo-radar-ring,
+  .vigo-indeterminate,
+  [data-tab-panel] { animation: none; }
+  .vigo-indeterminate { width: 100%; opacity: 0.5; }
+  .vigo-press { transition: none; }
+  .vigo-press:active:not(:disabled) { transform: none; }
+}
+
 /* Theme-specific custom styles */
 html.light {
   color-scheme: light;

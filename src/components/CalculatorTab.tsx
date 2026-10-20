@@ -43,6 +43,7 @@ import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress 
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
 import { fetchChargingStationsAlongRoute, stationSupportsConnectors, ChargingStation } from '../services/chargingStations';
+import { StationSearchIndicator } from './ui/StationSearchIndicator';
 import { findNearbyFreeCcsChargers, FreeChargerResult } from '../services/nearbyFreeCharging';
 import { resolveEffectiveConnectors, resolveChargeLimits } from '../data/vehicleProfiles';
 import { estimateChargingSession, findOptimalChargeTargetSoc, DEFAULT_UNKNOWN_STATION_POWER_KW, ChargeConnector, ChargePowerParams, ChargeSessionEstimate } from '../utils/chargingPlanner';
@@ -2134,6 +2135,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     const displayArrival = hasChargingAdjustedFinishSoc ? chargingFinishSoc! : arrival;
     const tone = displayArrival >= 20 ? 'good' : displayArrival >= ARRIVAL_RESERVE_SOC ? 'ok' : 'low';
     const needsCharge = arrival < CHARGE_SUGGEST_SOC;
+    // Плавное появление/сворачивание блоков поиска зарядок (loading → ready / unavailable).
+    const blockMotion = {
+      initial: { opacity: 0, height: 0 },
+      animate: { opacity: 1, height: 'auto' as const },
+      exit: { opacity: 0, height: 0 },
+      transition: { duration: 0.22, ease: [0.22, 1, 0.36, 1] as [number, number, number, number] },
+      style: { overflow: 'hidden' as const },
+    };
     const searching = chargingSuggestionStatus === 'loading';
     const noStations = chargingSuggestionStatus === 'unavailable' || chargingSuggestionStatus === 'error';
     const verdict =
@@ -2351,9 +2360,13 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         {planStops.length > 0 && (
           <div className="-mx-1 mt-2 flex gap-1.5 overflow-x-auto px-1 pb-1">
             {planStops.map((s, i) => (
-              <button
+              <motion.button
                 key={`${s.station.id}-${i}`}
                 type="button"
+                initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ delay: Math.min(i, 5) * 0.06, duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                whileTap={{ scale: 0.97 }}
                 onClick={() => { triggerHaptic('light', settings.hapticFeedback); setSelectedRouteStop(s); }}
                 className={`shrink-0 rounded-xl border px-2.5 py-1.5 text-left ${isDark ? 'border-amber-700/40 bg-amber-950/30' : 'border-amber-200 bg-amber-50'}`}
               >
@@ -2364,65 +2377,82 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 <div className={`text-[11px] ${muted}`}>
                   {Math.round(s.station.distanceAlongRouteKm)} км · {Math.round(s.socAtStation)}%{!chargingSearchForced && <> → {Math.round(s.targetSoc)}%</>} · {s.session.minutes} мин
                 </div>
-              </button>
+              </motion.button>
             ))}
           </div>
         )}
 
-        {/* Charge search states that need an explicit action */}
-        {arrival >= CHARGE_SUGGEST_SOC && chargingSuggestionStatus === 'idle' && (
-          <button
-            type="button"
-            onClick={() => {
-              triggerHaptic('light', settings.hapticFeedback);
-              setShowAllRouteStations(true);
-              void searchChargingStations();
-            }}
-            className={`mt-2 w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold ${chipBg}`}
-          >
-            Найти зарядку по маршруту
-          </button>
-        )}
-        {/* After plan / search: toggle all corridor stations on the map (merged with find-on-route) */}
-        {routeElevation && chargingSuggestionStatus === 'ready' && extraRouteStationCount > 0 && (
-          <button
-            type="button"
-            onClick={() => {
-              triggerHaptic('light', settings.hapticFeedback);
-              setShowAllRouteStations((v) => !v);
-            }}
-            className={`mt-2 w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold ${
-              showAllRouteStations
-                ? isDark ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-800'
-                : isDark ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-50 text-cyan-800'
-            }`}
-          >
-            {showAllRouteStations
-              ? 'Только остановки плана'
-              : `Показать все ЭЗС на маршруте · ${extraRouteStationCount}`}
-          </button>
-        )}
-        {chargingSuggestionStatus === 'unavailable' && (
-          <div className="mt-2 space-y-2">
-            <p className={`text-[12px] ${muted}`}>
-              {stationsFoundAlongRoute > 0 ? 'Подходящей остановки по правилам комфорта нет.' : 'Станций на маршруте не найдено.'}
-            </p>
-            {stationsFoundAlongRoute > 0 && (
+        {/* Charge search states: каждый блок плавно появляется/сворачивается, во время поиска — индикатор */}
+        <AnimatePresence initial={false}>
+          {arrival >= CHARGE_SUGGEST_SOC && chargingSuggestionStatus === 'idle' && (
+            <motion.div key="cs-idle" {...blockMotion}>
               <button
                 type="button"
                 onClick={() => {
                   triggerHaptic('light', settings.hapticFeedback);
                   setShowAllRouteStations(true);
-                  void searchChargingStations({ force: true });
+                  void searchChargingStations();
                 }}
-                className={`w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold ${isDark ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-50 text-cyan-800'}`}
+                className={`vigo-press mt-2 w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold ${chipBg}`}
               >
-                Показать станции на маршруте
+                Найти зарядку по маршруту
               </button>
-            )}
-          </div>
-        )}
-        {chargingSuggestionStatus === 'error' && <p className={`mt-2 text-[12px] ${muted}`}>Не удалось загрузить станции.</p>}
+            </motion.div>
+          )}
+          {chargingSuggestionStatus === 'loading' && (
+            <motion.div key="cs-loading" {...blockMotion}>
+              <StationSearchIndicator isDark={isDark} forced={chargingSearchForced} />
+            </motion.div>
+          )}
+          {/* After plan / search: toggle all corridor stations on the map (merged with find-on-route) */}
+          {routeElevation && chargingSuggestionStatus === 'ready' && extraRouteStationCount > 0 && (
+            <motion.div key="cs-ready" {...blockMotion}>
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('light', settings.hapticFeedback);
+                  setShowAllRouteStations((v) => !v);
+                }}
+                className={`vigo-press mt-2 w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold ${
+                  showAllRouteStations
+                    ? isDark ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-800'
+                    : isDark ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-50 text-cyan-800'
+                }`}
+              >
+                {showAllRouteStations
+                  ? 'Только остановки плана'
+                  : `Показать все ЭЗС на маршруте · ${extraRouteStationCount}`}
+              </button>
+            </motion.div>
+          )}
+          {chargingSuggestionStatus === 'unavailable' && (
+            <motion.div key="cs-unavailable" {...blockMotion}>
+              <div className="mt-2 space-y-2">
+                <p className={`text-[12px] ${muted}`}>
+                  {stationsFoundAlongRoute > 0 ? 'Подходящей остановки по правилам комфорта нет.' : 'Станций на маршруте не найдено.'}
+                </p>
+                {stationsFoundAlongRoute > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerHaptic('light', settings.hapticFeedback);
+                      setShowAllRouteStations(true);
+                      void searchChargingStations({ force: true });
+                    }}
+                    className={`vigo-press w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold ${isDark ? 'bg-cyan-500/15 text-cyan-300' : 'bg-cyan-50 text-cyan-800'}`}
+                  >
+                    Показать станции на маршруте
+                  </button>
+                )}
+              </div>
+            </motion.div>
+          )}
+          {chargingSuggestionStatus === 'error' && (
+            <motion.div key="cs-error" {...blockMotion}>
+              <p className={`mt-2 text-[12px] ${muted}`}>Не удалось загрузить станции.</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
 
         {routeElevation && !routeElevation.elevationAvailable && routeElevation.elevationNote && (
