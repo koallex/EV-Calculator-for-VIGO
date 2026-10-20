@@ -514,3 +514,58 @@ export async function fetchChargingStationsAlongRoute(points: RouteRefPoint[], b
   try { localStorage.setItem(cacheKey, JSON.stringify({ expiresAt: Date.now() + CACHE_TTL_MS, stations })); } catch { /* ignore cache */ }
   return stations;
 }
+
+
+// ── OSM-дозагрузка для вкладки «ЭЗС» ─────────────────────────────────────────────────────────
+// EVRACE не знает часть станций (например, зарядки на АЗС, добавленные только в OpenStreetMap).
+// Карта ЭЗС догружает их по видимой области; результат кэшируется по «плиткам» ~0.1°.
+const osmTileCache = new Map<string, Promise<ChargingStation[]>>();
+const OSM_TILE_DEG = 0.1;
+
+const fetchOsmTile = (south: number, west: number): Promise<ChargingStation[]> => {
+  const key = `${south.toFixed(2)}_${west.toFixed(2)}`;
+  const hit = osmTileCache.get(key);
+  if (hit) return hit;
+  const task = (async () => {
+    const params = new URLSearchParams({
+      south: south.toFixed(5),
+      west: west.toFixed(5),
+      north: (south + OSM_TILE_DEG).toFixed(5),
+      east: (west + OSM_TILE_DEG).toFixed(5),
+    });
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), OSM_PROXY_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${OSM_PROXY_API}?${params.toString()}`, { headers: { Accept: 'application/json' }, signal: controller.signal });
+      if (!res.ok) throw new Error(`OSM ${res.status}`);
+      const data = await res.json();
+      const out: ChargingStation[] = [];
+      for (const el of data.elements || []) {
+        const st = stationFromOsmElement(el);
+        if (st) out.push(st);
+      }
+      return out;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  })();
+  osmTileCache.set(key, task);
+  // Неудачный запрос не кэшируем — повторим при следующем движении карты.
+  task.catch(() => osmTileCache.delete(key));
+  return task;
+};
+
+/** Станции OSM в прямоугольнике (не более 12 плиток за раз, чтобы не перегружать Overpass). */
+export async function fetchOsmStationsInBounds(minLat: number, minLon: number, maxLat: number, maxLon: number): Promise<ChargingStation[]> {
+  const s0 = Math.floor(minLat / OSM_TILE_DEG) * OSM_TILE_DEG;
+  const w0 = Math.floor(minLon / OSM_TILE_DEG) * OSM_TILE_DEG;
+  const tiles: Array<[number, number]> = [];
+  for (let la = s0; la < maxLat; la += OSM_TILE_DEG) {
+    for (let lo = w0; lo < maxLon; lo += OSM_TILE_DEG) tiles.push([la, lo]);
+  }
+  if (tiles.length > 12) return [];
+  const results = await Promise.allSettled(tiles.map(([la, lo]) => fetchOsmTile(la, lo)));
+  const byId = new Map<string, ChargingStation>();
+  for (const r of results) if (r.status === 'fulfilled') for (const st of r.value) byId.set(st.id, st);
+  return Array.from(byId.values());
+}

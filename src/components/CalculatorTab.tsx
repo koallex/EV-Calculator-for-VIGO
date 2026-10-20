@@ -349,21 +349,17 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     const measure = () => {
       const el = shellRef.current;
       if (!el) return;
-      const top = el.getBoundingClientRect().top;
       if (!(el.offsetParent || el.getClientRects().length)) return; // tab is hidden
-      const nav = (document.querySelector('#main-bottom-nav-wrap nav') ||
-        document.querySelector('nav')) as HTMLElement | null;
-      const navTop = nav ? nav.getBoundingClientRect().top : window.innerHeight;
-      if (!Number.isFinite(navTop) || navTop <= top) return;
-      // В портрете карта не должна быть совсем низкой (360 px). В ландшафте высота — самый дефицитный ресурс:
-      // жёсткие 360 px вылезали за экран телефона (≈320–400 px) и уходили под нижнюю навигацию.
+      // Отступ карты от верха документа (не зависит от текущего скролла).
+      const docTop = el.getBoundingClientRect().top + window.scrollY;
       const isLand = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches;
-      const h = Math.max(isLand ? 160 : 360, Math.floor(navTop - top - 10));
+      // Карта на всю высоту до нижнего края экрана (в обеих ориентациях), нижняя навигация плавает поверх неё.
+      // Портрет: берём «большую» высоту окна (lvh) — у iPhone Safari панель прячется при скролле, и карта не «доезжает».
+      const lhVar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-lh')) || 0;
+      const viewH = isLand ? window.innerHeight : Math.max(window.innerHeight, lhVar);
+      const h = Math.max(isLand ? 160 : 360, Math.floor(viewH - docTop));
       setShellHeight((prev) => (prev !== null && Math.abs(prev - h) < 2 ? prev : h));
-      const main = el.closest('main');
-      const padBottom = main ? parseFloat(getComputedStyle(main).paddingBottom) || 0 : 0;
-      const bleed = Math.max(0, Math.min(padBottom, Math.ceil(top + window.scrollY + h + padBottom - window.innerHeight)));
-      setShellBleed((prev) => (Math.abs(prev - bleed) < 2 ? prev : bleed));
+      setShellBleed((prev) => (prev === 0 ? prev : 0));
     };
     measure();
     const t = window.setTimeout(measure, 350); // nav slides in with a spring animation
@@ -2624,7 +2620,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       id="calculator-tab-container"
       ref={shellRef}
       style={shellHeight ? { height: shellHeight, marginBottom: shellBleed ? -shellBleed : undefined } : undefined}
-      className={`calculator-map-shell relative isolate mx-auto h-[calc(var(--app-h)-11.5rem)] min-h-[360px] w-full overflow-hidden rounded-3xl border landscape:h-[calc(var(--app-h)-4.75rem)] landscape:min-h-[10rem] landscape:rounded-2xl ${
+      className={`calculator-map-shell relative isolate mx-auto h-[calc(var(--app-h)-11.5rem)] min-h-[360px] w-full overflow-hidden rounded-3xl border landscape:h-[var(--app-h)] landscape:min-h-[10rem] landscape:rounded-none landscape:border-0 ${
         isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-100'
       }`}
     >

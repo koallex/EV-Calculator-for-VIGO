@@ -27,6 +27,7 @@ import {
   type ConnectorOverride,
 } from '../data/vehicleProfiles';
 import type { VehicleConnector } from '../services/chargingStations';
+import { fetchOsmStationsInBounds } from '../services/chargingStations';
 import { triggerHaptic } from '../utils/haptics';
 import { openInNavigator, openWebInNewTab } from '../utils/openNavigator';
 import { useFeedback } from './ui/Feedback';
@@ -221,6 +222,36 @@ const parsePowerKw = (raw?: unknown): number | undefined => {
     .match(/([\d.]+)/);
   return m ? Number(m[1]) : undefined;
 };
+
+function distM(aLat: number, aLon: number, bLat: number, bLon: number): number {
+  const r = Math.PI / 180;
+  const dLat = (bLat - aLat) * r;
+  const dLon = (bLon - aLon) * r;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+/** Станция из OpenStreetMap (нет в EVRACE) → формат карты. Живого статуса у неё нет. */
+function osmToMapStation(st: import('../services/chargingStations').ChargingStation): MapStation {
+  const operator = st.operator || '';
+  return {
+    id: st.id,
+    lat: st.lat,
+    lon: st.lon,
+    name: st.name || 'Зарядная станция',
+    address: st.address || '',
+    operator,
+    operatorKey: normalizeOperatorKey(operator),
+    hasCcs2: st.hasCcs2,
+    hasGbt: !!st.hasGbt,
+    hasType2: st.hasType2,
+    ccs2PowerKw: st.ccs2PowerKw,
+    gbtPowerKw: st.gbtPowerKw,
+    type2PowerKw: st.type2PowerKw,
+    portGroups: [],
+    _poles: [],
+  };
+}
 
 function groupToMapStation(group: any, index: number): MapStation | null {
   const poles = Array.isArray(group?.poles) ? group.poles : [];
@@ -639,7 +670,33 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
         s.lon >= minLon - padLon &&
         s.lon <= maxLon + padLon,
     );
-    if (out.length > 120) out = out.slice(0, 120);
+    if (out.length > 120) {
+      // Не режем «первые 120» по порядку снапшота (из-за этого часть станций пропадала) — оставляем ближайшие к центру экрана.
+      const cLat = (minLat + maxLat) / 2;
+      const cLon = (minLon + maxLon) / 2;
+      out = out
+        .map((s) => ({ s, d: (s.lat - cLat) ** 2 + (s.lon - cLon) ** 2 }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 120)
+        .map((x) => x.s);
+    }
+    return out;
+  }, []);
+
+  /** Станции из OSM, которых нет в EVRACE (накапливаются по мере движения карты). */
+  const osmExtraRef = useRef<Map<string, MapStation>>(new Map());
+  const osmBoundsKeyRef = useRef('');
+  const mergeOsmExtras = useCallback((list: MapStation[], bounds: number[][]): MapStation[] => {
+    if (!osmExtraRef.current.size) return list;
+    const minLat = Math.min(bounds[0][0], bounds[1][0]);
+    const maxLat = Math.max(bounds[0][0], bounds[1][0]);
+    const minLon = Math.min(bounds[0][1], bounds[1][1]);
+    const maxLon = Math.max(bounds[0][1], bounds[1][1]);
+    const out = list.slice();
+    osmExtraRef.current.forEach((o) => {
+      if (o.lat < minLat || o.lat > maxLat || o.lon < minLon || o.lon > maxLon) return;
+      out.push(o);
+    });
     return out;
   }, []);
 
@@ -668,6 +725,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
     // groupToMapStation is a stable helper in this module scope of the component body
   }, []);
 
+  const applyBoundsFromCacheRef = useRef<((b: number[][], o?: { silent?: boolean }) => Promise<void>) | null>(null);
   const applyBoundsFromCache = useCallback(
     async (bounds: number[][], opts?: { silent?: boolean }) => {
       const silent = !!opts?.silent && stations.length > 0;
@@ -677,7 +735,31 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
       }
       try {
         let list = await ensureAllStations();
+        const evraceAll = list;
         list = filterStationsToBounds(list, bounds);
+        // OSM-дозагрузка: только когда не включён режим «только свободные» (у OSM нет живого статуса).
+        if (!onlyFreeRef.current) list = mergeOsmExtras(list, bounds);
+        const bKey = bounds.flat().map((n) => n.toFixed(2)).join(',');
+        if (bKey !== osmBoundsKeyRef.current) {
+          osmBoundsKeyRef.current = bKey;
+          const [[la1, lo1], [la2, lo2]] = bounds;
+          void fetchOsmStationsInBounds(Math.min(la1, la2), Math.min(lo1, lo2), Math.max(la1, la2), Math.max(lo1, lo2))
+            .then((osm) => {
+              let added = 0;
+              for (const st of osm) {
+                if (osmExtraRef.current.has(st.id)) continue;
+                const dup = evraceAll.some((e) => Math.abs(e.lat - st.lat) < 0.0012 && Math.abs(e.lon - st.lon) < 0.0012 && distM(e.lat, e.lon, st.lat, st.lon) <= 80);
+                if (dup) continue;
+                osmExtraRef.current.set(st.id, osmToMapStation(st));
+                added++;
+              }
+              if (added > 0) {
+                const b = readMapBounds();
+                if (b) void applyBoundsFromCacheRef.current?.(b, { silent: true });
+              }
+            })
+            .catch(() => { /* OSM опционален */ });
+        }
         if (onlyFreeRef.current) {
           setLiveBusy(true);
           try {
@@ -695,8 +777,10 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
         if (!silent) setLoading(false);
       }
     },
-    [ensureAllStations, filterStationsToBounds, enrichLive, stations.length],
+    [ensureAllStations, filterStationsToBounds, mergeOsmExtras, readMapBounds, enrichLive, stations.length],
   );
+
+  applyBoundsFromCacheRef.current = applyBoundsFromCache;
 
   const scheduleFetch = useCallback(
     (opts?: { immediate?: boolean }) => {
@@ -1357,20 +1441,20 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
             type="button"
             onClick={findNearestFree}
             disabled={findingNearest}
-            className={`pointer-events-auto inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-[13px] font-black shadow-lg backdrop-blur-md active:scale-[0.98] disabled:opacity-80 landscape:px-4 landscape:py-2 landscape:text-[12px] ${
+            className={`pointer-events-auto inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-[13px] font-black shadow-lg backdrop-blur-md active:scale-[0.98] disabled:opacity-80 landscape:gap-2.5 landscape:px-7 landscape:py-3.5 landscape:text-[16px] landscape:border-2 landscape:shadow-2xl ${
               findingNearest
-                ? 'bg-cyan-700 text-white border-cyan-500/50 shadow-cyan-950/50'
-                : 'bg-cyan-500 text-slate-950 border-cyan-300/40 shadow-cyan-500/30 hover:bg-cyan-400'
+                ? 'bg-cyan-700 text-white border-cyan-400/60 shadow-cyan-950/50'
+                : 'chg-cta-idle bg-gradient-to-r from-cyan-400 to-sky-400 text-slate-950 border-white/60 shadow-cyan-400/50 hover:from-cyan-300 hover:to-sky-300'
             }`}
           >
             {findingNearest ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin landscape:h-6 landscape:w-6" />
                 Ищем свободную…
               </>
             ) : (
               <>
-                <PlugZap className="h-4 w-4" />
+                <PlugZap className="h-4 w-4 landscape:h-6 landscape:w-6" />
                 Ближайшая свободная
               </>
             )}
@@ -1384,7 +1468,7 @@ export const ChargingMapPanel: React.FC<ChargingMapPanelProps> = ({ settings, ac
           (она прижата к правому нижнему углу). Портрет: справа по центру свободной области; пока открыт список/фильтры/карточка — скрыты.
         */}
         <div
-          className={`chg-ov-zoomwrap pointer-events-none flex col-start-1 row-start-3 justify-self-end self-center landscape:absolute landscape:col-auto landscape:row-auto landscape:z-30 landscape:top-[calc(env(safe-area-inset-top,0px)_+_3.75rem)] ${
+          className={`chg-ov-zoomwrap pointer-events-none flex col-start-1 row-start-3 justify-self-end self-center landscape:absolute landscape:col-auto landscape:row-auto landscape:z-30 landscape:top-[calc(env(safe-area-inset-top,0px)_+_5rem)] ${
             nearestFreeOpen
               ? 'landscape:right-[calc(min(19rem,38%)_+_max(0.5rem,env(safe-area-inset-right,0px)))]'
               : 'landscape:right-[max(0.5rem,env(safe-area-inset-right,0px))]'

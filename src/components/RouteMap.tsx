@@ -457,10 +457,11 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     // Толщина линии. На обзоре всего маршрута (калькулятор) тонкая и чёткая, в навигации (HUD, масштаб 16–17)
     // толще — иначе линия теряется на фоне широких дорог. Подсветка одна: раньше она рисовалась дважды
     // (в обводке и в основной линии), полупрозрачные слои складывались и давали мутную «полосу».
-    const wGlow = followMode ? 12 : 9;
-    const wCase = followMode ? 7 : 5.5;
-    const wMain = followMode ? 4.5 : 3.5;
-    const wCore = followMode ? 1.2 : 1;
+    // HUD (followMode): масштаб 16–17, широкие дороги и яркий экран — линия заметно толще, чем на обзоре в калькуляторе.
+    const wGlow = followMode ? 18 : 9;
+    const wCase = followMode ? 11 : 5.5;
+    const wMain = followMode ? 7 : 3.5;
+    const wCore = followMode ? 2 : 1;
 
     // Draw-in animation A→B unless actively following GPS (HUD trip).
     // Pre-start HUD uses fill=true but followMode=false — still animate.
@@ -479,13 +480,13 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         geometry: { type: 'LineString', coordinates: lonLatPath.slice(0, count) },
         style: {
           stroke: lite
-            ? [{ width: 8, color: strokeOutline }]
+            ? [{ width: followMode ? 11 : 8, color: strokeOutline }]
             : isDark
             ? [
                 { width: wGlow, color: strokeGlow },
                 { width: wCase, color: strokeOutline },
               ]
-            : [{ width: followMode ? 6.5 : 5, color: strokeOutline }],
+            : [{ width: followMode ? 10 : 5, color: strokeOutline }],
         },
       });
       map.addChild(outline);
@@ -495,10 +496,10 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         geometry: { type: 'LineString', coordinates: lonLatPath.slice(0, count) },
         style: {
           stroke: lite
-            ? [{ width: 5, color: strokeMain }]
+            ? [{ width: followMode ? 7 : 5, color: strokeMain }]
             : isDark
             ? [{ width: wMain, color: strokeMain }, { width: wCore, color: strokeCore }]
-            : [{ width: followMode ? 4.5 : 3.5, color: strokeMain }, { width: wCore, color: strokeCore }],
+            : [{ width: wMain, color: strokeMain }, { width: wCore, color: strokeCore }],
         },
       });
       map.addChild(feature);
@@ -759,7 +760,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         try {
           traveledFeatureRef.current.update({
             geometry: { type: 'LineString', coordinates: traveledCoords },
-            style: { stroke: [{ width: 4.5, color: strokeTraveled }] },
+            style: { stroke: [{ width: 7, color: strokeTraveled }] },
           });
         } catch {
           removeObj(bundle, traveledFeatureRef.current);
@@ -769,7 +770,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
       if (!traveledFeatureRef.current && traveledPos.length >= 2) {
         const traveled = new YMapFeature({
           geometry: { type: 'LineString', coordinates: traveledCoords },
-          style: { stroke: [{ width: 4.5, color: strokeTraveled }] },
+          style: { stroke: [{ width: 7, color: strokeTraveled }] },
         });
         map.addChild(traveled);
         traveledFeatureRef.current = traveled;
@@ -778,7 +779,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         try {
           featureRef.current.update({
             geometry: { type: 'LineString', coordinates: remainCoords },
-            style: { stroke: lite ? [{ width: 5, color: strokeMain }] : isDark ? [{ width: 4.5, color: strokeMain }, { width: 1.2, color: 'rgba(245, 255, 235, 0.8)' }] : [{ width: 4.5, color: strokeMain }, { width: 1.2, color: 'rgba(245, 255, 235, 0.8)' }] },
+            style: { stroke: lite ? [{ width: followMode ? 7 : 5, color: strokeMain }] : [{ width: followMode ? 7 : 4.5, color: strokeMain }, { width: followMode ? 2 : 1.2, color: 'rgba(245, 255, 235, 0.85)' }] },
           });
         } catch { /* ignore */ }
       }

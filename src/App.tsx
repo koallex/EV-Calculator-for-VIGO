@@ -685,11 +685,11 @@ function AppInner() {
         className={
           isLandscape
             ? `flex-1 w-full h-[var(--app-h)] max-h-[var(--app-h)] overflow-auto m-0 ${
-                activeTab === 'hud' || activeTab === 'charging'
+                activeTab === 'hud' || activeTab === 'charging' || activeTab === 'calculator'
                   ? 'p-0'
                   : 'px-4 py-3 pb-24'
               }`
-            : 'flex-1 max-w-4xl w-full mx-auto p-3 sm:p-4 pb-28'
+            : `flex-1 max-w-4xl w-full mx-auto p-3 sm:p-4 ${activeTab === 'calculator' ? 'pb-0' : 'pb-28'}`
         }
       >
         {showAdmin ? (
