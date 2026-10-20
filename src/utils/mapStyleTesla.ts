@@ -25,9 +25,9 @@ export const LITE_STYLE_EXTRAS: VectorCustomizationItem[] = [
 
 // Маршрут — ярко-салатовый: хорошо виден на стандартной карте Яндекса и не сливается с водой, дорогами и парками.
 // Имена констант оставлены прежними, чтобы не трогать RouteMap.
-export const TESLA_ROUTE_BLUE = '#8CFF2E';
+export const TESLA_ROUTE_BLUE = '#86FF1F';
 export const TESLA_ROUTE_TRAVELED = '#3b4a63';
-export const TESLA_ROUTE_GLOW = 'rgba(140, 255, 46, 0.30)';
+export const TESLA_ROUTE_GLOW = 'rgba(134, 255, 31, 0.36)';
 // Светлая тема: чуть темнее салатовый, чтобы линия не терялась на светлой карте.
-export const ROUTE_GREEN_LIGHT = '#5BD816';
-export const ROUTE_GREEN_LIGHT_GLOW = 'rgba(91, 216, 22, 0.22)';
+export const ROUTE_GREEN_LIGHT = '#7BF51A';
+export const ROUTE_GREEN_LIGHT_GLOW = 'rgba(123, 245, 26, 0.30)';

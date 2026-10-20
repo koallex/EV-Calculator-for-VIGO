@@ -451,8 +451,8 @@ export const RouteMap: React.FC<RouteMapProps> = ({
     const strokeMain = isDark ? TESLA_ROUTE_BLUE : ROUTE_GREEN_LIGHT;
     const strokeGlow = isDark ? TESLA_ROUTE_GLOW : ROUTE_GREEN_LIGHT_GLOW;
     // Тёмная обводка вокруг салатового ядра даёт контраст и на тёмной, и на светлой схеме Яндекса.
-    const strokeOutline = isDark ? 'rgba(3, 20, 10, 0.88)' : 'rgba(4, 70, 30, 0.85)';
-    const strokeCore = 'rgba(245, 255, 235, 0.8)'; // тонкая светлая «жила» по центру — неоновый эффект
+    const strokeOutline = 'rgba(12, 72, 6, 0.85)';
+    const strokeCore = 'rgba(212, 255, 140, 0.9)'; // тонкая светлая «жила» по центру — неоновый эффект
     const strokeTraveled = isDark ? TESLA_ROUTE_TRAVELED : '#94a3b8';
     // Толщина линии. На обзоре всего маршрута (калькулятор) тонкая и чёткая, в навигации (HUD, масштаб 16–17)
     // толще — иначе линия теряется на фоне широких дорог. Подсветка одна: раньше она рисовалась дважды
@@ -685,7 +685,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
                   width: 3.5,
                   color: isDark ? TESLA_ROUTE_BLUE : ROUTE_GREEN_LIGHT,
                 },
-                { width: 1, color: 'rgba(245, 255, 235, 0.8)' },
+                { width: 1, color: 'rgba(212, 255, 140, 0.9)' },
               ],
             },
           });
@@ -779,7 +779,7 @@ export const RouteMap: React.FC<RouteMapProps> = ({
         try {
           featureRef.current.update({
             geometry: { type: 'LineString', coordinates: remainCoords },
-            style: { stroke: lite ? [{ width: followMode ? 7 : 5, color: strokeMain }] : [{ width: followMode ? 7 : 4.5, color: strokeMain }, { width: followMode ? 2 : 1.2, color: 'rgba(245, 255, 235, 0.85)' }] },
+            style: { stroke: lite ? [{ width: followMode ? 7 : 5, color: strokeMain }] : [{ width: followMode ? 7 : 4.5, color: strokeMain }, { width: followMode ? 2 : 1.2, color: 'rgba(212, 255, 140, 0.9)' }] },
           });
         } catch { /* ignore */ }
       }
