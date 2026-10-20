@@ -199,37 +199,62 @@ async function readRegistryFromRedis(redis) {
   };
 }
 
-async function loadRegistry() {
-  if (memoryCache) return memoryCache;
+let memoryCheckedAt = 0;
+const MEMORY_REVALIDATE_MS = 60 * 1000;
 
+async function loadRegistry() {
   const redis = getRedis();
   if (!redis) {
+    if (memoryCache) return memoryCache;
     console.warn('[evrace] Redis env missing');
     return null;
   }
 
+  // Тёплый инстанс функции раньше отдавал снимок из памяти «вечно» — после ручного/ночного обновления
+  // (которое выполняется в ДРУГОМ инстансе) пользователи продолжали видеть старые данные.
+  // Теперь раз в минуту сверяем fetchedAt в Redis (один лёгкий GET) и перечитываем снимок только при изменении.
+  if (memoryCache && Date.now() - memoryCheckedAt < MEMORY_REVALIDATE_MS) return memoryCache;
+
   try {
+    if (memoryCache) {
+      const meta = await redis.get(META_KEY);
+      if (!meta || meta.fetchedAt === memoryCache.fetchedAt) {
+        memoryCheckedAt = Date.now();
+        return memoryCache;
+      }
+    }
     const fromRedis = await readRegistryFromRedis(redis);
     if (fromRedis) {
       memoryCache = fromRedis;
+      memoryCheckedAt = Date.now();
       return fromRedis;
     }
   } catch (error) {
     console.error('[evrace] Redis read failed:', error);
+    if (memoryCache) return memoryCache;
   }
   return null;
+}
+
+function pickNum(...vals) {
+  for (const v of vals) {
+    if (v === null || v === undefined || v === '') continue;
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
 }
 
 function groupCoordinates(group) {
   const poles = Array.isArray(group?.poles) ? group.poles : [];
   for (const pole of poles) {
-    const lat = Number(pole?.lat ?? pole?.latitude);
-    const lon = Number(pole?.lng ?? pole?.lon ?? pole?.longitude);
-    if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+    const lat = pickNum(pole?.lat, pole?.latitude, pole?.y, pole?.location?.lat, pole?.location?.latitude);
+    const lon = pickNum(pole?.lng, pole?.lon, pole?.longitude, pole?.x, pole?.location?.lng, pole?.location?.lon, pole?.location?.longitude);
+    if (lat !== undefined && lon !== undefined) return { lat, lon };
   }
-  const lat = Number(group?.lat ?? group?.latitude);
-  const lon = Number(group?.lng ?? group?.lon ?? group?.longitude);
-  if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+  const lat = pickNum(group?.lat, group?.latitude, group?.y, group?.location?.lat, group?.location?.latitude, group?.coordinates?.lat, group?.coordinates?.latitude);
+  const lon = pickNum(group?.lng, group?.lon, group?.longitude, group?.x, group?.location?.lng, group?.location?.lon, group?.location?.longitude, group?.coordinates?.lng, group?.coordinates?.lon, group?.coordinates?.longitude);
+  if (lat !== undefined && lon !== undefined) return { lat, lon };
   return null;
 }
 
@@ -307,6 +332,7 @@ export async function forceRefreshEvraceCache() {
   }
   const fresh = await fetchAllGroupsLive(previous);
   memoryCache = fresh;
+  memoryCheckedAt = Date.now();
 
   const redis = getRedis();
   if (!redis) {

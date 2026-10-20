@@ -262,20 +262,29 @@ function osmToMapStation(st: import('../services/chargingStations').ChargingStat
 
 function groupToMapStation(group: any, index: number): MapStation | null {
   const poles = Array.isArray(group?.poles) ? group.poles : [];
+  // Координаты: у разных записей EVRACE ключи отличаются (lat/lng, latitude/longitude, y/x, вложенный location/coordinates).
+  const pick = (...vals: unknown[]): number | undefined => {
+    for (const v of vals) {
+      if (v === null || v === undefined || v === '') continue;
+      const n = Number(v);
+      if (Number.isFinite(n)) return n;
+    }
+    return undefined;
+  };
   let lat: number | undefined;
   let lon: number | undefined;
   for (const p of poles) {
-    const la = Number(p?.lat);
-    const lo = Number(p?.lng ?? p?.lon);
-    if (Number.isFinite(la) && Number.isFinite(lo)) {
+    const la = pick(p?.lat, p?.latitude, p?.y, p?.location?.lat, p?.location?.latitude);
+    const lo = pick(p?.lng, p?.lon, p?.longitude, p?.x, p?.location?.lng, p?.location?.lon, p?.location?.longitude);
+    if (la !== undefined && lo !== undefined) {
       lat = la;
       lon = lo;
       break;
     }
   }
   if (lat === undefined || lon === undefined) {
-    lat = Number(group?.lat);
-    lon = Number(group?.lng ?? group?.lon);
+    lat = pick(group?.lat, group?.latitude, group?.y, group?.location?.lat, group?.location?.latitude, group?.coordinates?.lat, group?.coordinates?.latitude);
+    lon = pick(group?.lng, group?.lon, group?.longitude, group?.x, group?.location?.lng, group?.location?.lon, group?.location?.longitude, group?.coordinates?.lng, group?.coordinates?.lon, group?.coordinates?.longitude);
   }
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
