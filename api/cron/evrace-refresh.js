@@ -1,5 +1,6 @@
 import { forceRefreshEvraceCache } from '../_lib/evrace.js';
 import { refreshTariffsSnapshot } from '../_lib/evraceTariffs.js';
+import { getCurrentUser } from '../_lib/auth.js';
 
 export const config = { maxDuration: 60 };
 
@@ -9,10 +10,20 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // Доступ: Bearer CRON_SECRET (cron Vercel / curl) ИЛИ сессия администратора (кнопка в админ-панели).
   const expected = process.env.CRON_SECRET;
   if (expected) {
     const auth = req.headers.authorization || '';
-    if (auth !== `Bearer ${expected}`) {
+    let allowed = auth === `Bearer ${expected}`;
+    if (!allowed) {
+      try {
+        const current = await getCurrentUser(req);
+        allowed = !!current && current.role === 'admin';
+      } catch {
+        allowed = false;
+      }
+    }
+    if (!allowed) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
   }

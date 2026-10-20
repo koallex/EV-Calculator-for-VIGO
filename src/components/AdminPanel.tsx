@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, ShieldCheck, Trash2, UserRound, X, RefreshCw, LogOut, BarChart3 } from 'lucide-react';
+import { Plus, ShieldCheck, Trash2, UserRound, X, RefreshCw, LogOut, BarChart3, Database, Loader2 } from 'lucide-react';
 
 interface AdminPanelProps {
   currentLogin: string;
@@ -56,6 +56,39 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentLogin, onClose, o
     totals: { opens30Days: 0, anonymousOpens30Days: 0, uniqueVisitors30Days: 0 },
     users: [],
   });
+
+  // Ручное обновление базы станций (EVRACE) и тарифов — только для администратора (сервер проверяет роль).
+  const [dbBusy, setDbBusy] = useState(false);
+  const [dbResult, setDbResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const refreshStationsDb = async () => {
+    if (dbBusy) return;
+    setDbBusy(true);
+    setDbResult(null);
+    try {
+      const res = await fetch('/api/cron/evrace-refresh', { method: 'POST', credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({} as any));
+      if (res.status === 401 || res.status === 403) {
+        setDbResult({ ok: false, text: 'Нет доступа: нужна сессия администратора.' });
+      } else if (!res.ok || !data?.stations?.ok) {
+        const err = data?.stations?.error || data?.error || `Ошибка ${res.status}`;
+        setDbResult({ ok: false, text: `Не удалось обновить станции: ${err}` });
+      } else {
+        const st = data.stations;
+        const failed = Number(st.failedPages || 0);
+        const tariffs = data.tariffs?.ok ? `тарифы: ${data.tariffs.operatorsFetched} операторов` : 'тарифы не обновились';
+        setDbResult({
+          ok: failed === 0,
+          text: `Станций загружено: ${st.groupsFetched} из ${st.totalGroups}` +
+            (failed ? ` · не загружено страниц: ${failed} (прежние данные сохранены, повтори обновление)` : '') +
+            ` · ${tariffs}`,
+        });
+      }
+    } catch (e) {
+      setDbResult({ ok: false, text: e instanceof Error ? e.message : 'Сеть недоступна.' });
+    } finally {
+      setDbBusy(false);
+    }
+  };
 
   const loadUsers = async () => {
     setError('');
@@ -130,6 +163,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentLogin, onClose, o
             <X className="w-4 h-4" />
           </button>
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Database className="w-4 h-4 text-cyan-400" />
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">База карты ЭЗС</h3>
+        </div>
+        <p className="text-xs text-slate-400">
+          Загружает свежий реестр станций EVRACE и тарифы. Занимает до минуты; на карте изменения появятся после перезагрузки страницы.
+        </p>
+        <button
+          type="button"
+          onClick={refreshStationsDb}
+          disabled={dbBusy}
+          className="h-10 px-4 rounded-xl bg-cyan-600 text-white text-xs font-bold flex items-center gap-2 disabled:opacity-60"
+        >
+          {dbBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          {dbBusy ? 'Обновляем… (до минуты)' : 'Обновить базу станций'}
+        </button>
+        {dbResult && (
+          <div className={`rounded-xl border px-3 py-2 text-xs ${dbResult.ok ? 'border-emerald-900/60 bg-emerald-950/30 text-emerald-300' : 'border-amber-900/60 bg-amber-950/30 text-amber-300'}`}>
+            {dbResult.text}
+          </div>
+        )}
       </div>
 
       <form onSubmit={addUser} className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
