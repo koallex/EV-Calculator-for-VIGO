@@ -2432,8 +2432,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   setShowAllRouteStations(true);
                   void searchChargingStations();
                 }}
-                className={`vigo-press mt-2 w-full rounded-xl px-3 py-2.5 text-[12px] font-semibold ${chipBg}`}
+                className="vigo-press vigo-cta-sheen mt-2 flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-600 px-3 py-3 text-[13px] font-bold text-white shadow-sm shadow-cyan-600/30 hover:bg-cyan-500"
               >
+                <PlugZap className="h-4 w-4" />
                 Найти зарядку по маршруту
               </button>
             </motion.div>

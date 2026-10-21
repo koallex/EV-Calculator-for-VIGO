@@ -72,7 +72,25 @@
 }
 .vigo-press:active:not(:disabled) { transform: scale(0.97); filter: brightness(1.08); }
 
+/* Главная кнопка действия: один короткий «блик» (2 прохода) после появления — привлекает взгляд, дальше статична. */
+@keyframes vigo-sheen {
+  0%   { transform: translateX(-120%) skewX(-20deg); }
+  100% { transform: translateX(420%) skewX(-20deg); }
+}
+.vigo-cta-sheen { position: relative; overflow: hidden; }
+.vigo-cta-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 28%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  transform: translateX(-120%) skewX(-20deg);
+  animation: vigo-sheen 1.3s ease-in-out 0.7s 2;
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .vigo-cta-sheen::after { animation: none; }
   .vigo-radar-ring,
   .vigo-indeterminate,
   [data-tab-panel] { animation: none; }
