@@ -42,6 +42,7 @@ import { getPersonalBenchmarkKwh100 } from '../utils/storage';
 import { exportBackupJSON, exportSessionsCSV, calculateHistoricalDriverStyle, deriveDrivingStyleFactor, getDrivingStyleLabel, getOperatorLabel } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
 import { useBackupImport, type ImportMode } from '../hooks/useBackupImport';
+import { ForecastLogCard } from './ForecastLogCard';
 
 interface HistoryTabProps {
   sessions: TripSession[];
@@ -687,6 +688,9 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Pre-trip forecast archive + actual finish SoC entry */}
+      <ForecastLogCard isDark={isDark} hapticFeedback={settings.hapticFeedback} />
 
       {/* Trips Session List */}
       <div className="history-list space-y-2.5">

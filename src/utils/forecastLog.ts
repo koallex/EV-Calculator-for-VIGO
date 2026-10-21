@@ -57,11 +57,22 @@ export interface ForecastLogEntry {
   elevationLossM: number;
   parts: ForecastLogParts;
   speedProfile: Array<{ distanceKm: number; speedKmH: number }>;
+  /** Расчётные скорости модели: средняя = дистанция / расчётное время, максимальная = пик профиля скорости. */
+  calcAvgSpeedKmH?: number;
+  calcMaxSpeedKmH?: number;
   /** Заполняется вручную после поездки. */
   actualEndSoc?: number;
+  actualAvgSpeedKmH?: number;
+  actualMaxSpeedKmH?: number;
 }
 
-export type NewForecastLogEntry = Omit<ForecastLogEntry, 'id' | 'createdAt' | 'updatedAt' | 'actualEndSoc'>;
+type ActualFields = 'actualEndSoc' | 'actualAvgSpeedKmH' | 'actualMaxSpeedKmH';
+export type ForecastActualsPatch = Partial<Record<ActualFields, number | undefined>>;
+export type NewForecastLogEntry = Omit<ForecastLogEntry, 'id' | 'createdAt' | 'updatedAt' | ActualFields | 'calcAvgSpeedKmH' | 'calcMaxSpeedKmH'>;
+
+/** Есть ли у записи хоть один введённый вручную фактический показатель. */
+export const hasActuals = (e: ForecastLogEntry) =>
+  e.actualEndSoc !== undefined || e.actualAvgSpeedKmH !== undefined || e.actualMaxSpeedKmH !== undefined;
 
 function readAll(): ForecastLogEntry[] {
   try {
@@ -121,10 +132,16 @@ const sameRoute = (a: NewForecastLogEntry, b: ForecastLogEntry) =>
 export function upsertForecastLogEntry(input: NewForecastLogEntry): void {
   if (typeof window === 'undefined') return;
   const now = Date.now();
-  const entry = { ...input, speedProfile: downsampleProfile(input.speedProfile) };
+  const profileMax = (input.speedProfile ?? []).reduce((m, p) => Math.max(m, p.speedKmH), 0);
+  const entry = {
+    ...input,
+    calcAvgSpeedKmH: input.durationHours > 0 ? Math.round(input.distanceKm / input.durationHours) : undefined,
+    calcMaxSpeedKmH: profileMax > 0 ? Math.round(profileMax) : undefined,
+    speedProfile: downsampleProfile(input.speedProfile),
+  };
   const all = readAll().sort((a, b) => b.createdAt - a.createdAt);
   const latest = all[0];
-  if (latest && latest.actualEndSoc === undefined && now - latest.updatedAt < DEDUPE_WINDOW_MS && sameRoute(entry, latest)) {
+  if (latest && !hasActuals(latest) && now - latest.updatedAt < DEDUPE_WINDOW_MS && sameRoute(entry, latest)) {
     all[0] = { ...latest, ...entry, id: latest.id, createdAt: latest.createdAt, updatedAt: now };
     writeAll(all);
     return;
@@ -134,19 +151,26 @@ export function upsertForecastLogEntry(input: NewForecastLogEntry): void {
   while (all.length > MAX_ENTRIES) {
     let idx = -1;
     for (let i = all.length - 1; i >= 0; i--) {
-      if (all[i].actualEndSoc === undefined) { idx = i; break; }
+      if (!hasActuals(all[i])) { idx = i; break; }
     }
     all.splice(idx === -1 ? all.length - 1 : idx, 1);
   }
   writeAll(all);
 }
 
-export function setForecastActualEndSoc(id: string, actualEndSoc: number | undefined): void {
+/** Обновляет фактические показатели записи; ключ со значением undefined очищает поле. */
+export function setForecastActuals(id: string, patch: ForecastActualsPatch): void {
   const all = readAll();
   const i = all.findIndex((e) => e.id === id);
   if (i === -1) return;
-  all[i] = { ...all[i], actualEndSoc, updatedAt: Date.now() };
+  const next = { ...all[i], ...patch, updatedAt: Date.now() };
+  (Object.keys(patch) as ActualFields[]).forEach((k) => { if (patch[k] === undefined) delete next[k]; });
+  all[i] = next;
   writeAll(all);
+}
+
+export function setForecastActualEndSoc(id: string, actualEndSoc: number | undefined): void {
+  setForecastActuals(id, { actualEndSoc });
 }
 
 export function deleteForecastLogEntry(id: string): void {
@@ -167,7 +191,8 @@ export function forecastLogToCSV(entries: ForecastLogEntry[]): string {
   const headers = [
     'Дата', 'Откуда', 'Куда', 'Дистанция (км)', 'Старт %', 'Прогноз финиш %', 'Факт финиш %',
     'Откл. (п.п.)', 'Откл. (п.п./100км)', 'Прогноз кВт⋅ч', 'Прогноз кВт⋅ч/100км',
-    'Скорость сред. (км/ч)', 'Скорость макс. (км/ч)', 'Время (ч)', 'Погода: режим', 'Темп. °C',
+    'План: скорость сред. (км/ч)', 'План: скорость макс. (км/ч)', 'Модель: скорость сред. (км/ч)', 'Модель: скорость макс. (км/ч)',
+    'Факт: скорость сред. (км/ч)', 'Факт: скорость макс. (км/ч)', 'Время (ч)', 'Погода: режим', 'Темп. °C',
     'Ветер км/ч', 'Угол ветра °', 'Ветер (подпись)', 'Осадки мм/ч', 'Осадки (подпись)', 'Климат',
     'Климат кВт', 'Пассажиры', 'Набор м', 'Спуск м', 'База кВт⋅ч', 'Темп. кВт⋅ч', 'Ветер кВт⋅ч',
     'Осадки кВт⋅ч', 'Стиль кВт⋅ч', 'Рельеф кВт⋅ч', 'Климат кВт⋅ч', 'Рекуперация кВт⋅ч', 'Профиль скорости (JSON)',
@@ -181,7 +206,8 @@ export function forecastLogToCSV(entries: ForecastLogEntry[]): string {
     return [
       new Date(e.createdAt).toISOString().slice(0, 16).replace('T', ' '), e.from, e.to, e.distanceKm, e.startSoc,
       e.forecastEndSoc, e.actualEndSoc ?? '', d ? d.deltaPp.toFixed(1) : '', d ? d.per100Km.toFixed(2) : '',
-      e.energyKwh, e.consumptionPer100Km, e.plannedSpeedKmH, e.plannedMaxSpeedKmH, e.durationHours.toFixed(2),
+      e.energyKwh, e.consumptionPer100Km, e.plannedSpeedKmH, e.plannedMaxSpeedKmH, e.calcAvgSpeedKmH ?? '', e.calcMaxSpeedKmH ?? '',
+      e.actualAvgSpeedKmH ?? '', e.actualMaxSpeedKmH ?? '', e.durationHours.toFixed(2),
       e.weatherMode === 'current' ? 'прогноз' : 'ручной', e.temperatureC, e.windKmH, Math.round(e.relativeWindAngleDeg),
       e.windLabel, e.precipitationMmH, e.precipitationLabel, e.climateOn ? 'Вкл' : 'Выкл', e.climatePowerKw,
       e.passengers, Math.round(e.elevationGainM), Math.round(e.elevationLossM), e.parts.baseKwh, e.parts.temperatureKwh,

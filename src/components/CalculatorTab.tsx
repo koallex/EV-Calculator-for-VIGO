@@ -39,6 +39,7 @@ import { triggerHaptic } from '../utils/haptics';
 import { openInNavigator, openWebInNewTab, webUrl, type NavFailInfo } from '../utils/openNavigator';
 import { useFeedback } from './ui/Feedback';
 import { saveLastRouteForecast } from '../utils/routeForecastBridge';
+import { upsertForecastLogEntry } from '../utils/forecastLog';
 import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress } from '../services/routeElevation';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
@@ -1355,6 +1356,44 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         arrivalSoc,
         consumptionPer100Km: Number((energyKwh / data.distanceKm * 100).toFixed(2)),
         energyKwh: Number(energyKwh.toFixed(2)),
+        speedProfile: segmented.speedProfile,
+      });
+      // Persistent archive of pre-trip forecasts (the bridge above keeps only one slot and drops it
+      // once a trip is saved). Lets us compare forecast vs real finish SoC after long trips.
+      upsertForecastLogEntry({
+        from: startMode === 'gps' ? 'Моя геопозиция' : shortPlaceLabel(startAddress, 'Точка А'),
+        to: shortPlaceLabel(destinationAddress, 'Точка Б'),
+        distanceKm: Number(data.distanceKm.toFixed(1)),
+        durationHours: segmented.durationHours,
+        startSoc,
+        forecastEndSoc: arrivalSoc,
+        energyKwh: Number(energyKwh.toFixed(2)),
+        consumptionPer100Km: Number((energyKwh / data.distanceKm * 100).toFixed(2)),
+        plannedSpeedKmH,
+        plannedMaxSpeedKmH,
+        weatherMode: weatherMode === 'planning' ? 'planning' : 'current',
+        temperatureC: Number(segmented.avgTemperature.toFixed(1)),
+        windKmH: Number(segmented.avgWindSpeed.toFixed(1)),
+        relativeWindAngleDeg: Number(avgRelativeWindAngle.toFixed(0)),
+        windLabel: segmentedForecast.windStatusText || '',
+        precipitationMmH: Number(segmented.avgPrecipitation.toFixed(2)),
+        precipitationLabel: segmentedForecast.precipitationLabel || 'Без существенных осадков',
+        weatherCode: avgWeatherCode,
+        climateOn,
+        climatePowerKw: Number(segmented.climatePowerKw.toFixed(2)),
+        passengers,
+        elevationGainM: data.elevationGainM,
+        elevationLossM: data.elevationLossM,
+        parts: {
+          baseKwh: Number(segmented.baseEnergyKwh.toFixed(2)),
+          temperatureKwh: Number(segmented.temperatureDeltaKwh.toFixed(2)),
+          windKwh: Number(segmented.windDeltaKwh.toFixed(2)),
+          precipitationKwh: Number(segmented.precipitationDeltaKwh.toFixed(2)),
+          driverKwh: Number(segmented.driverDeltaKwh.toFixed(2)),
+          elevationKwh: Number(segmented.elevationDeltaKwh.toFixed(2)),
+          climateKwh: Number(segmented.climateEnergyKwh.toFixed(2)),
+          regenKwh: Number(segmented.regenEnergyKwh.toFixed(2)),
+        },
         speedProfile: segmented.speedProfile,
       });
       // Keep secondary panels collapsed so the hero result stays in view
