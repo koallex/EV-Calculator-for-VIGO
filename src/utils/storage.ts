@@ -1,3 +1,4 @@
+import { loadForecastLog } from './forecastLog';
 import { UserSettings, TripSession } from '../types';
 import { APP_VERSION } from '../appInfo';
 
@@ -1714,6 +1715,8 @@ export function exportBackupJSON(settings: UserSettings, sessions: TripSession[]
     exportDate: new Date().toISOString(),
     settings,
     sessions,
+    // Архив предрейсовых прогнозов (в бэкап попадает для анализа; при восстановлении пока не импортируется).
+    forecastLog: loadForecastLog(),
   };
   void saveTextFile(
     `dongfeng_vigo_ev_history_${new Date().toISOString().slice(0, 10)}.json`,
