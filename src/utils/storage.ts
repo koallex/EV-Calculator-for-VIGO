@@ -1448,8 +1448,24 @@ function buildCruiseRoadSpeeds(
   return rawRoadSpeeds.map((v, i) => (isCruise[i] ? cruise : Math.max(10, Math.min(cruise, v * scale))));
 }
 
-/** Режим профиля скорости: legacy — прежний (основной), cruise — теневой «крейсер по максимуму». */
+/** Режим профиля скорости: legacy — прежний (потолок максимума), cruise — «крейсер по максимуму». */
 export type SpeedProfileMode = 'legacy' | 'cruise';
+
+/** Основной метод профиля скорости в Калькуляторе. Единый переключатель отката: поставьте 'legacy' — и всё как раньше. */
+export const MAIN_SPEED_PROFILE: SpeedProfileMode = 'cruise';
+/** Значение «Максимальная» по умолчанию в Калькуляторе. Это потолок, а не крейсерская скорость, поэтому при нём остаётся прежний метод. */
+export const DEFAULT_PLANNED_MAX_KMH = 120;
+
+/**
+ * Какой метод основной, а какой считается «для сравнения» (пишется только в журнал прогнозов).
+ * При максимуме по умолчанию (120) крейсер дал бы +4 кВт·ч/100 км (быстрые участки на 115 км/ч), поэтому
+ * остаётся прежний метод, а сравнительный прогноз не считается (shadow = null).
+ */
+export function resolveSpeedProfileModes(plannedMaxKmH: number): { main: SpeedProfileMode; shadow: SpeedProfileMode | null } {
+  if (plannedMaxKmH === DEFAULT_PLANNED_MAX_KMH) return { main: 'legacy', shadow: null };
+  const main: SpeedProfileMode = MAIN_SPEED_PROFILE;
+  return { main, shadow: main === 'cruise' ? 'legacy' : 'cruise' };
+}
 
 export function estimateSegmentedRouteConsumption(
   points: SegmentedRoutePoint[],

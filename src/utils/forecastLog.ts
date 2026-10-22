@@ -66,6 +66,8 @@ export interface ForecastLogEntry {
    * чтобы по фактам понять, какой метод ближе к реальности, прежде чем переключать основной.
    */
   shadow?: ForecastShadow;
+  /** Метод профиля скорости основного прогноза (в старых записях не указан — это был legacy). */
+  profileMode?: ProfileMode;
   /** Ёмкость батареи, с которой считался прогноз (для сверки «кВт·ч на 100% SoC»). */
   batteryCapacityKwh?: number;
   /** Заполняется вручную после поездки. */
@@ -80,7 +82,11 @@ export interface ForecastLogEntry {
   startType?: StartType;
 }
 
+export type ProfileMode = 'legacy' | 'cruise';
+
 export interface ForecastShadow {
+  /** Метод профиля скорости теневого прогноза (в старых записях не указан — это был cruise). */
+  mode?: ProfileMode;
   forecastEndSoc: number;
   energyKwh: number;
   consumptionPer100Km: number;
@@ -256,43 +262,61 @@ export function forecastEnergyCheck(entry: ForecastLogEntry): {
   return { energyDelta, energyDeltaPct: (energyDelta / entry.consumptionPer100Km) * 100, kwhPer100Soc, capacityDevPct };
 }
 
-/** Сравнение основного и теневого прогноза с фактом. Ошибка = факт − прогноз (п.п.): минус — прогноз оптимистичнее. */
+const mainModeOf = (e: ForecastLogEntry): ProfileMode => e.profileMode ?? 'legacy';
+const shadowModeOf = (e: ForecastLogEntry): ProfileMode => e.shadow?.mode ?? 'cruise';
+
+/**
+ * Сравнение основного и сравнительного (теневого) прогноза с фактом. Ошибка = факт − прогноз (п.п.):
+ * минус — прогноз оптимистичнее. Отдельно считается ошибка по методам (legacy / cruise) независимо от того,
+ * какой из них в этой записи был основным — роли менялись, а сравнивать надо методы.
+ */
 export function forecastShadowCompare(entry: ForecastLogEntry): {
   mainErrPp: number;
   shadowErrPp: number;
+  legacyErrPp: number;
+  cruiseErrPp: number;
   closer: 'main' | 'shadow' | 'equal';
+  closerMethod: ProfileMode | 'equal';
 } | null {
   if (!entry.shadow || entry.actualEndSoc === undefined || !Number.isFinite(entry.actualEndSoc)) return null;
   const mainErrPp = entry.actualEndSoc - entry.forecastEndSoc;
   const shadowErrPp = entry.actualEndSoc - entry.shadow.forecastEndSoc;
   const diff = Math.abs(mainErrPp) - Math.abs(shadowErrPp);
-  return { mainErrPp, shadowErrPp, closer: Math.abs(diff) < 0.3 ? 'equal' : diff > 0 ? 'shadow' : 'main' };
+  const closer = Math.abs(diff) < 0.3 ? 'equal' : diff > 0 ? 'shadow' : 'main';
+  const mainIsCruise = mainModeOf(entry) === 'cruise';
+  const cruiseErrPp = mainIsCruise ? mainErrPp : shadowErrPp;
+  const legacyErrPp = mainIsCruise ? shadowErrPp : mainErrPp;
+  const closerMethod: ProfileMode | 'equal' =
+    closer === 'equal' ? 'equal' : (closer === 'main' ? mainModeOf(entry) : shadowModeOf(entry));
+  return { mainErrPp, shadowErrPp, legacyErrPp, cruiseErrPp, closer, closerMethod };
 }
 
-/** Итог по всем записям с фактом и теневым прогнозом: смещение и средняя абсолютная ошибка, п.п. на 100 км. */
+/** Итог по записям с фактом и двумя методами: смещение и средняя абсолютная ошибка, п.п. на 100 км. */
 export function forecastShadowSummary(entries: ForecastLogEntry[]): {
   n: number;
-  mainBias: number;
-  shadowBias: number;
-  mainMae: number;
-  shadowMae: number;
-  shadowCloser: number;
+  legacyBias: number;
+  cruiseBias: number;
+  legacyMae: number;
+  cruiseMae: number;
+  cruiseCloser: number;
+  legacyCloser: number;
 } | null {
   const rows = entries
     .map((e) => ({ e, c: forecastShadowCompare(e) }))
     .filter((x): x is { e: ForecastLogEntry; c: NonNullable<ReturnType<typeof forecastShadowCompare>> } => x.c !== null);
   if (rows.length === 0) return null;
   const per100 = (e: ForecastLogEntry, v: number) => (v / (e.actualDistanceKm ?? e.distanceKm)) * 100;
-  const main = rows.map(({ e, c }) => per100(e, c.mainErrPp));
-  const shadow = rows.map(({ e, c }) => per100(e, c.shadowErrPp));
+  const legacy = rows.map(({ e, c }) => per100(e, c.legacyErrPp));
+  const cruise = rows.map(({ e, c }) => per100(e, c.cruiseErrPp));
   const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
   return {
     n: rows.length,
-    mainBias: mean(main),
-    shadowBias: mean(shadow),
-    mainMae: mean(main.map(Math.abs)),
-    shadowMae: mean(shadow.map(Math.abs)),
-    shadowCloser: rows.filter(({ c }) => c.closer === 'shadow').length,
+    legacyBias: mean(legacy),
+    cruiseBias: mean(cruise),
+    legacyMae: mean(legacy.map(Math.abs)),
+    cruiseMae: mean(cruise.map(Math.abs)),
+    cruiseCloser: rows.filter(({ c }) => c.closerMethod === 'cruise').length,
+    legacyCloser: rows.filter(({ c }) => c.closerMethod === 'legacy').length,
   };
 }
 
@@ -313,7 +337,8 @@ export function forecastLogToCSV(entries: ForecastLogEntry[]): string {
     'Климат кВт', 'Пассажиры', 'Набор м', 'Спуск м', 'База кВт⋅ч', 'Темп. кВт⋅ч', 'Ветер кВт⋅ч',
     'Осадки кВт⋅ч', 'Стиль кВт⋅ч', 'Рельеф кВт⋅ч', 'Климат кВт⋅ч', 'Рекуперация кВт⋅ч', 'Профиль скорости (JSON)',
     'Теневой: прогноз финиш %', 'Теневой: расход (кВт⋅ч/100км)', 'Теневой: энергия (кВт⋅ч)', 'Теневой: скорость сред. модели (км/ч)',
-    'Теневой: скорость макс. модели (км/ч)', 'Теневой: откл. (п.п.)', 'Ближе к факту', 'Теневой: профиль скорости (JSON)',
+    'Теневой: скорость макс. модели (км/ч)', 'Теневой: откл. (п.п.)', 'Ближе к факту (метод)', 'Теневой: профиль скорости (JSON)',
+    'Метод основного', 'Метод теневого',
   ];
   const esc = (v: unknown) => {
     const s = v === undefined || v === null ? '' : String(v);
@@ -339,8 +364,9 @@ export function forecastLogToCSV(entries: ForecastLogEntry[]): string {
       e.shadow?.forecastEndSoc ?? '', e.shadow?.consumptionPer100Km ?? '', e.shadow?.energyKwh ?? '',
       e.shadow?.calcAvgSpeedKmH ?? '', e.shadow?.calcMaxSpeedKmH ?? '',
       sc ? sc.shadowErrPp.toFixed(1) : '',
-      sc ? (sc.closer === 'shadow' ? 'теневой' : sc.closer === 'main' ? 'основной' : 'одинаково') : '',
+      sc ? (sc.closerMethod === 'cruise' ? 'крейсер' : sc.closerMethod === 'legacy' ? 'прежний' : 'одинаково') : '',
       e.shadow ? JSON.stringify(e.shadow.speedProfile) : '',
+      mainModeOf(e) === 'cruise' ? 'крейсер' : 'прежний', e.shadow ? (shadowModeOf(e) === 'cruise' ? 'крейсер' : 'прежний') : '',
     ].map(esc).join(';');
   });
   return '\uFEFF' + [headers.join(';'), ...rows].join('\n');

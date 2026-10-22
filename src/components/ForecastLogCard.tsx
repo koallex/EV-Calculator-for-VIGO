@@ -136,7 +136,8 @@ const EntryRow: React.FC<{ entry: ForecastLogEntry; isDark: boolean; haptic: boo
       {entry.shadow && (
         <div className={`mt-2 rounded-lg border border-dashed px-2.5 py-2 ${isDark ? 'border-violet-500/40 bg-violet-500/5' : 'border-violet-300 bg-violet-50/60'}`}>
           <p className={`text-[11px] font-bold ${isDark ? 'text-violet-300' : 'text-violet-700'}`}>
-            Теневой прогноз · профиль «крейсер по максимуму»
+            Прогноз для сравнения · {(entry.shadow.mode ?? 'cruise') === 'legacy' ? 'прежний метод (профиль без крейсера)' : 'профиль «крейсер по максимуму»'}
+            {' '}<span className="font-normal">(основной: {(entry.profileMode ?? 'legacy') === 'cruise' ? 'крейсер' : 'прежний'})</span>
           </p>
           <p className={`text-[12px] ${muted}`}>
             Финиш <b className={strong}>{entry.shadow.forecastEndSoc}%</b>{' '}
@@ -145,7 +146,7 @@ const EntryRow: React.FC<{ entry: ForecastLogEntry; isDark: boolean; haptic: boo
           </p>
           <p className={`text-[11px] ${muted}`}>
             Скорость по модели: средняя {entry.shadow.calcAvgSpeedKmH ?? '—'} · макс. {entry.shadow.calcMaxSpeedKmH ?? '—'} км/ч
-            {entry.calcMaxSpeedKmH !== undefined && <> (основной: макс. {entry.calcMaxSpeedKmH})</>}
+            {entry.calcMaxSpeedKmH !== undefined && <> (основной: ср. {entry.calcAvgSpeedKmH ?? '—'} · макс. {entry.calcMaxSpeedKmH})</>}
           </p>
         </div>
       )}
@@ -235,9 +236,9 @@ const EntryRow: React.FC<{ entry: ForecastLogEntry; isDark: boolean; haptic: boo
                 )}
                 {shadowCmp && (
                   <p className={`text-[12px] ${muted}`}>
-                    Теневой: <b className={strong}>{fmtSigned(shadowCmp.shadowErrPp)} п.п.</b> к факту (основной {fmtSigned(shadowCmp.mainErrPp)}) ·{' '}
+                    Прежний метод: <b className={strong}>{fmtSigned(shadowCmp.legacyErrPp)} п.п.</b> · крейсер: <b className={strong}>{fmtSigned(shadowCmp.cruiseErrPp)} п.п.</b> к факту ·{' '}
                     <b className={isDark ? 'text-violet-300' : 'text-violet-700'}>
-                      {shadowCmp.closer === 'shadow' ? 'ближе к факту теневой' : shadowCmp.closer === 'main' ? 'ближе к факту основной' : 'оба одинаково близки'}
+                      {shadowCmp.closerMethod === 'cruise' ? 'ближе к факту крейсер' : shadowCmp.closerMethod === 'legacy' ? 'ближе к факту прежний' : 'оба одинаково близки'}
                     </b>
                   </p>
                 )}
@@ -321,15 +322,16 @@ export const ForecastLogCard: React.FC<ForecastLogCardProps> = ({ isDark, haptic
                   {summary && (
                     <div className={`rounded-xl border px-3 py-2 text-[12px] ${isDark ? 'border-violet-500/30 bg-violet-500/5 text-slate-300' : 'border-violet-200 bg-violet-50/60 text-slate-700'}`}>
                       <p className={`text-[11px] font-bold ${isDark ? 'text-violet-300' : 'text-violet-700'}`}>
-                        Основной и теневой метод · поездок с фактом: {summary.n}
+                        Прежний метод и крейсер · поездок с фактом: {summary.n}
                       </p>
                       <p>
-                        Смещение (п.п./100 км, минус — прогноз оптимистичнее): основной{' '}
-                        <b>{fmtSigned(summary.mainBias)}</b>, теневой <b>{fmtSigned(summary.shadowBias)}</b>
+                        Смещение (п.п./100 км, минус — прогноз оптимистичнее): прежний{' '}
+                        <b>{fmtSigned(summary.legacyBias)}</b>, крейсер <b>{fmtSigned(summary.cruiseBias)}</b>
                       </p>
                       <p>
-                        Средняя ошибка: основной <b>{summary.mainMae.toFixed(1).replace('.', ',')}</b>, теневой{' '}
-                        <b>{summary.shadowMae.toFixed(1).replace('.', ',')}</b> · теневой ближе в {summary.shadowCloser} из {summary.n}
+                        Средняя ошибка: прежний <b>{summary.legacyMae.toFixed(1).replace('.', ',')}</b>, крейсер{' '}
+                        <b>{summary.cruiseMae.toFixed(1).replace('.', ',')}</b> · крейсер ближе в {summary.cruiseCloser} из {summary.n}
+                        {summary.legacyCloser > 0 && `, прежний в ${summary.legacyCloser}`}
                       </p>
                       {summary.n < 4 && <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Пока мало поездок для выводов — нужно хотя бы 4–5.</p>}
                     </div>

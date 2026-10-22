@@ -34,7 +34,7 @@ import {
 import { UserSettings, RoadType, TripSession } from '../types';
 import { BatteryVisual } from './BatteryVisual';
 import { DecimalInput } from './DecimalInput';
-import { getTariffForType, getOperatorLabel, estimateTripConsumption, estimateSegmentedRouteConsumption, calculateClimateImpact } from '../utils/storage';
+import { getTariffForType, getOperatorLabel, estimateTripConsumption, estimateSegmentedRouteConsumption, calculateClimateImpact, resolveSpeedProfileModes } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
 import { openInNavigator, openWebInNewTab, webUrl, type NavFailInfo } from '../utils/openNavigator';
 import { useFeedback } from './ui/Feedback';
@@ -1329,11 +1329,14 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         temperature: avgTemperature, weatherCode: avgWeatherCode, precipitation: avgPrecipitation,
         windSpeed: avgWindSpeed, windDirection: weatherMode === 'planning' ? manualWindDirection : (samples[0]?.weather.windDirection ?? 0),
       };
+      // Speed-profile method: "cruise at max" is the main one when the user set a realistic maximum;
+      // the other method is computed only for the forecast log (comparison). See resolveSpeedProfileModes.
+      const speedModes = resolveSpeedProfileModes(plannedMaxSpeedKmH);
       const segmented = estimateSegmentedRouteConsumption(
         data.points,
         samples.map(s => ({ distanceFromStartKm: s.distanceFromStartKm, weather: s.weather, routeBearing: s.routeBearing })),
         fallbackWeather, plannedSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, undefined, passengers, plannedMaxSpeedKmH,
-        settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true,
+        settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true, speedModes.main,
       );
       const energyKwh = segmented.energyKwh;
       const arrivalSoc = Math.max(0, Number((startSoc - (energyKwh/(settings.batteryCapacityKwh||51.87))*100).toFixed(1)));
@@ -1360,17 +1363,19 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       });
       // Persistent archive of pre-trip forecasts (the bridge above keeps only one slot and drops it
       // once a trip is saved). Lets us compare forecast vs real finish SoC after long trips.
-      // Shadow forecast: same route and inputs, but the "cruise at max" speed profile. Never shown on
-      // the Calculator screen — only written to the forecast log for later comparison with the main one.
+      // Comparison ("shadow") forecast: same route and inputs, but with the OTHER speed-profile method
+      // than the main one. Never shown on the Calculator screen — only written to the forecast log.
       let shadowForLog: Parameters<typeof upsertForecastLogEntry>[0]['shadow'];
       try {
+        if (!speedModes.shadow) throw new Error('no comparison forecast for the default maximum');
         const segShadow = estimateSegmentedRouteConsumption(
           data.points,
           samples.map(s => ({ distanceFromStartKm: s.distanceFromStartKm, weather: s.weather, routeBearing: s.routeBearing })),
           fallbackWeather, plannedSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, undefined, passengers, plannedMaxSpeedKmH,
-          settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true, 'cruise',
+          settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true, speedModes.shadow,
         );
         shadowForLog = {
+          mode: speedModes.shadow,
           forecastEndSoc: Math.max(0, Number((startSoc - (segShadow.energyKwh / (settings.batteryCapacityKwh || 51.87)) * 100).toFixed(1))),
           energyKwh: Number(segShadow.energyKwh.toFixed(2)),
           consumptionPer100Km: Number((segShadow.energyKwh / data.distanceKm * 100).toFixed(2)),
@@ -1388,6 +1393,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         startSoc,
         forecastEndSoc: arrivalSoc,
         batteryCapacityKwh: settings.batteryCapacityKwh || 51.87,
+        profileMode: speedModes.main,
         shadow: shadowForLog,
         energyKwh: Number(energyKwh.toFixed(2)),
         consumptionPer100Km: Number((energyKwh / data.distanceKm * 100).toFixed(2)),
@@ -1457,6 +1463,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       settings.batteryCapacityKwh,
       climateOn, undefined, passengers, Math.max(plannedMaxSpeedKmH, speed),
       settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true,
+      resolveSpeedProfileModes(plannedMaxSpeedKmH).main, // same method as the main forecast, so scenarios are comparable
     );
     const energyKwh = breakdown.energyKwh;
     const arrivalSoc = Math.max(0, Number((startSoc - (energyKwh / (settings.batteryCapacityKwh || 51.87)) * 100).toFixed(1)));
@@ -3062,12 +3069,16 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   </div>
                 </div>
                 <div className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-slate-50'}`}>
-                  <span className="text-[12px] font-semibold">Максимальная</span>
+                  <span className="text-[12px] font-semibold">Макс. (крейсер на трассе)</span>
                   <div className="flex items-center gap-1">
                     <DecimalInput value={plannedMaxSpeedKmH} onChange={(v) => { setPlannedMaxSpeedKmH(Math.max(plannedSpeedKmH, Math.min(150, v))); dirty(); }} min={20} max={150} className="w-20 text-right" />
                     <span className={`shrink-0 whitespace-nowrap text-xs ${muted}`}>км/ч</span>
                   </div>
                 </div>
+                <p className={`px-1 text-[11px] leading-snug ${muted}`}>
+                  Быстрые участки считаются на 5 км/ч ниже этого значения, остальные подстраиваются под среднюю. Укажите скорость,
+                  которую держите на открытой дороге. Значение 120 (по умолчанию) — прежний расчёт.
+                </p>
               </section>
 
               </div>{/* /calc-params-col (заряд, люди, скорость) */}
