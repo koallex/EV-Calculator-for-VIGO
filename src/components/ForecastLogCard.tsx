@@ -5,6 +5,7 @@ import {
   ForecastLogEntry,
   deleteForecastLogEntry,
   forecastDelta,
+  forecastEnergyCheck,
   forecastLogToCSV,
   loadForecastLog,
   setForecastActuals,
@@ -78,6 +79,7 @@ const ActualField: React.FC<ActualFieldProps> = ({ id, label, value, min, max, i
 
 const EntryRow: React.FC<{ entry: ForecastLogEntry; isDark: boolean; haptic: boolean }> = ({ entry, isDark, haptic }) => {
   const delta = forecastDelta(entry);
+  const energy = forecastEnergyCheck(entry);
   const muted = isDark ? 'text-slate-400' : 'text-slate-500';
   const strong = isDark ? 'text-slate-100' : 'text-slate-900';
 
@@ -146,10 +148,46 @@ const EntryRow: React.FC<{ entry: ForecastLogEntry; isDark: boolean; haptic: boo
             isDark={isDark} haptic={haptic}
             onCommit={(v) => setForecastActuals(entry.id, { actualMaxSpeedKmH: v })}
           />
+          <ActualField
+            id={`fc-dist-${entry.id}`} label="Дистанция авто, км" value={entry.actualDistanceKm} min={1} max={3000}
+            isDark={isDark} haptic={haptic}
+            onCommit={(v) => setForecastActuals(entry.id, { actualDistanceKm: v })}
+          />
+          <ActualField
+            id={`fc-cons-${entry.id}`} label="Расход авто, кВт⋅ч/100" value={entry.actualConsumptionKwh100} min={3} max={80}
+            isDark={isDark} haptic={haptic}
+            onCommit={(v) => setForecastActuals(entry.id, { actualConsumptionKwh100: v })}
+          />
+          <div className="flex flex-col gap-1">
+            <span className={`text-[11px] font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Старт</span>
+            <div className={`flex overflow-hidden rounded-lg border text-[11px] font-bold ${isDark ? 'border-slate-700' : 'border-slate-300'}`}>
+              {(['cold', 'warm'] as const).map((t) => {
+                const on = entry.startType === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => {
+                      triggerHaptic('light', haptic);
+                      setForecastActuals(entry.id, { startType: on ? undefined : t });
+                    }}
+                    className={`vigo-press flex-1 px-1 py-1.5 ${
+                      on
+                        ? 'bg-cyan-600 text-white'
+                        : isDark ? 'bg-slate-950 text-slate-400' : 'bg-white text-slate-500'
+                    }`}
+                  >
+                    {t === 'cold' ? 'Прогрев' : 'С колёс'}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         <AnimatePresence initial={false}>
-          {(delta || avgDiff || maxDiff) && (
+          {(delta || avgDiff || maxDiff || energy) && (
             <motion.div
               key="deltas"
               initial={{ opacity: 0, height: 0 }}
@@ -173,6 +211,19 @@ const EntryRow: React.FC<{ entry: ForecastLogEntry; isDark: boolean; haptic: boo
                     <span className={`ml-1 font-normal ${muted}`}>
                       {Math.abs(delta.deltaPp) < 1 ? 'в норме' : delta.deltaPp < 0 ? 'прогноз оптимистичнее' : 'прогноз пессимистичнее'}
                     </span>
+                  </p>
+                )}
+                {energy && (
+                  <p className={`text-[12px] ${muted}`}>
+                    Расход по авто <b className={strong}>{fmtSigned(energy.energyDelta, 2)} кВт⋅ч/100 км</b> ({fmtSigned(energy.energyDeltaPct)}%) к прогнозу
+                    {energy.kwhPer100Soc !== null && energy.capacityDevPct !== null && (
+                      <>
+                        {' · '}на 100% SoC ≈ <b className={strong}>{energy.kwhPer100Soc.toFixed(1).replace('.', ',')} кВт⋅ч</b>
+                        <span className={Math.abs(energy.capacityDevPct) > 4 ? (isDark ? ' text-amber-400' : ' text-amber-600') : ''}>
+                          {' '}({fmtSigned(energy.capacityDevPct, 0)}% к номиналу)
+                        </span>
+                      </>
+                    )}
                   </p>
                 )}
                 {(avgDiff || maxDiff) && (
@@ -234,7 +285,7 @@ export const ForecastLogCard: React.FC<ForecastLogCardProps> = ({ isDark, haptic
             <div className="space-y-2 px-4 pb-4">
               <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 Каждый расчёт маршрута сохраняется здесь. После поездки впишите фактический SoC на финише и скорости — приложение
-                покажет отклонение от прогноза. Минус означает, что финиш оказался ниже прогноза. Фактические скорости (средняя и максимальная, например по приборке или HUD) нужны для разбора причин расхождения.
+                покажет отклонение от прогноза. Минус означает, что финиш оказался ниже прогноза. Фактические скорости, дистанцию и расход берите из бортового компьютера или энергоцентра авто: по расходу в кВт⋅ч приложение отделяет физику от показаний шкалы SoC. Тип старта («Прогрев» — выезд с прогревом батареи и салона, «С колёс» — всё уже тёплое) только записывается для анализа и на расчёт не влияет.
               </p>
               {entries.length === 0 ? null : (
                 <>

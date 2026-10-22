@@ -60,19 +60,32 @@ export interface ForecastLogEntry {
   /** Расчётные скорости модели: средняя = дистанция / расчётное время, максимальная = пик профиля скорости. */
   calcAvgSpeedKmH?: number;
   calcMaxSpeedKmH?: number;
+  /** Ёмкость батареи, с которой считался прогноз (для сверки «кВт·ч на 100% SoC»). */
+  batteryCapacityKwh?: number;
   /** Заполняется вручную после поездки. */
   actualEndSoc?: number;
   actualAvgSpeedKmH?: number;
   actualMaxSpeedKmH?: number;
+  /** Фактическая дистанция по одометру/бортовому компьютеру авто. */
+  actualDistanceKm?: number;
+  /** Расход по счётчику авто за поездку, кВт·ч/100 км (отделяет физику от показаний шкалы SoC). */
+  actualConsumptionKwh100?: number;
+  /** cold — выезд с прогревом батареи и салона, warm — «с колёс» (всё уже тёплое). Только для анализа, модель не меняет. */
+  startType?: StartType;
 }
 
-type ActualFields = 'actualEndSoc' | 'actualAvgSpeedKmH' | 'actualMaxSpeedKmH';
-export type ForecastActualsPatch = Partial<Record<ActualFields, number | undefined>>;
+export type StartType = 'cold' | 'warm';
+type ActualNumericFields =
+  | 'actualEndSoc' | 'actualAvgSpeedKmH' | 'actualMaxSpeedKmH' | 'actualDistanceKm' | 'actualConsumptionKwh100';
+type ActualFields = ActualNumericFields | 'startType';
+export type ForecastActualsPatch =
+  Partial<Record<ActualNumericFields, number | undefined>> & { startType?: StartType | undefined };
 export type NewForecastLogEntry = Omit<ForecastLogEntry, 'id' | 'createdAt' | 'updatedAt' | ActualFields | 'calcAvgSpeedKmH' | 'calcMaxSpeedKmH'>;
 
 /** Есть ли у записи хоть один введённый вручную фактический показатель. */
 export const hasActuals = (e: ForecastLogEntry) =>
-  e.actualEndSoc !== undefined || e.actualAvgSpeedKmH !== undefined || e.actualMaxSpeedKmH !== undefined;
+  e.actualEndSoc !== undefined || e.actualAvgSpeedKmH !== undefined || e.actualMaxSpeedKmH !== undefined ||
+  e.actualDistanceKm !== undefined || e.actualConsumptionKwh100 !== undefined || e.startType !== undefined;
 
 function readAll(): ForecastLogEntry[] {
   try {
@@ -182,15 +195,49 @@ export function deleteForecastLogEntry(id: string): void {
  * (прогноз был оптимистичным). per100Km нормирует на длину маршрута.
  */
 export function forecastDelta(entry: ForecastLogEntry): { deltaPp: number; per100Km: number } | null {
-  if (entry.actualEndSoc === undefined || !Number.isFinite(entry.actualEndSoc) || entry.distanceKm <= 0) return null;
+  const km = entry.actualDistanceKm ?? entry.distanceKm;
+  if (entry.actualEndSoc === undefined || !Number.isFinite(entry.actualEndSoc) || km <= 0) return null;
   const deltaPp = entry.actualEndSoc - entry.forecastEndSoc;
-  return { deltaPp, per100Km: (deltaPp / entry.distanceKm) * 100 };
+  return { deltaPp, per100Km: (deltaPp / km) * 100 };
+}
+
+/**
+ * Сверка по счётчику энергии авто. energyDelta* — физический недобор/перебор прогноза (кВт·ч/100 км,
+ * плюс = авто потратило больше прогноза). kwhPer100Soc — сколько кВт·ч приходится на 100% SoC в этой поездке:
+ * заметное отличие от номинала указывает на шкалу SoC (холодная батарея, верх шкалы LFP), а не на физику.
+ */
+export function forecastEnergyCheck(entry: ForecastLogEntry): {
+  energyDelta: number;
+  energyDeltaPct: number;
+  kwhPer100Soc: number | null;
+  capacityDevPct: number | null;
+} | null {
+  const cons = entry.actualConsumptionKwh100;
+  if (cons === undefined || !Number.isFinite(cons) || entry.consumptionPer100Km <= 0) return null;
+  const energyDelta = cons - entry.consumptionPer100Km;
+  const km = entry.actualDistanceKm ?? entry.distanceKm;
+  const socDrop = entry.actualEndSoc !== undefined ? entry.startSoc - entry.actualEndSoc : NaN;
+  const cap = entry.batteryCapacityKwh ?? 51.87;
+  let kwhPer100Soc: number | null = null;
+  let capacityDevPct: number | null = null;
+  if (Number.isFinite(socDrop) && socDrop > 0 && km > 0) {
+    kwhPer100Soc = ((cons * km) / 100 / socDrop) * 100;
+    capacityDevPct = (kwhPer100Soc / cap - 1) * 100;
+  }
+  return { energyDelta, energyDeltaPct: (energyDelta / entry.consumptionPer100Km) * 100, kwhPer100Soc, capacityDevPct };
+}
+
+/** Локальное время устройства (ГГГГ-ММ-ДД ЧЧ:ММ). toISOString() давал UTC — со сдвигом на часовой пояс. */
+function localDateTime(ts: number): string {
+  const d = new Date(ts);
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
 export function forecastLogToCSV(entries: ForecastLogEntry[]): string {
   const headers = [
     'Дата', 'Откуда', 'Куда', 'Дистанция (км)', 'Старт %', 'Прогноз финиш %', 'Факт финиш %',
-    'Откл. (п.п.)', 'Откл. (п.п./100км)', 'Прогноз кВт⋅ч', 'Прогноз кВт⋅ч/100км',
+    'Откл. (п.п.)', 'Откл. (п.п./100км)', 'Факт: дистанция авто (км)', 'Факт: расход авто (кВт⋅ч/100км)', 'Откл. расхода (кВт⋅ч/100км)', 'Откл. расхода (%)', 'кВт⋅ч на 100% SoC', 'Ёмкость в расчёте (кВт⋅ч)', 'Тип старта', 'Прогноз кВт⋅ч', 'Прогноз кВт⋅ч/100км',
     'План: скорость сред. (км/ч)', 'План: скорость макс. (км/ч)', 'Модель: скорость сред. (км/ч)', 'Модель: скорость макс. (км/ч)',
     'Факт: скорость сред. (км/ч)', 'Факт: скорость макс. (км/ч)', 'Время (ч)', 'Погода: режим', 'Темп. °C',
     'Ветер км/ч', 'Угол ветра °', 'Ветер (подпись)', 'Осадки мм/ч', 'Осадки (подпись)', 'Климат',
@@ -203,9 +250,13 @@ export function forecastLogToCSV(entries: ForecastLogEntry[]): string {
   };
   const rows = entries.map((e) => {
     const d = forecastDelta(e);
+    const en = forecastEnergyCheck(e);
     return [
-      new Date(e.createdAt).toISOString().slice(0, 16).replace('T', ' '), e.from, e.to, e.distanceKm, e.startSoc,
+      localDateTime(e.createdAt), e.from, e.to, e.distanceKm, e.startSoc,
       e.forecastEndSoc, e.actualEndSoc ?? '', d ? d.deltaPp.toFixed(1) : '', d ? d.per100Km.toFixed(2) : '',
+      e.actualDistanceKm ?? '', e.actualConsumptionKwh100 ?? '', en ? en.energyDelta.toFixed(2) : '', en ? en.energyDeltaPct.toFixed(1) : '',
+      en && en.kwhPer100Soc !== null ? en.kwhPer100Soc.toFixed(1) : '', e.batteryCapacityKwh ?? '',
+      e.startType === 'cold' ? 'с прогревом' : e.startType === 'warm' ? 'с колёс' : '',
       e.energyKwh, e.consumptionPer100Km, e.plannedSpeedKmH, e.plannedMaxSpeedKmH, e.calcAvgSpeedKmH ?? '', e.calcMaxSpeedKmH ?? '',
       e.actualAvgSpeedKmH ?? '', e.actualMaxSpeedKmH ?? '', e.durationHours.toFixed(2),
       e.weatherMode === 'current' ? 'прогноз' : 'ручной', e.temperatureC, e.windKmH, Math.round(e.relativeWindAngleDeg),

@@ -1367,6 +1367,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         durationHours: segmented.durationHours,
         startSoc,
         forecastEndSoc: arrivalSoc,
+        batteryCapacityKwh: settings.batteryCapacityKwh || 51.87,
         energyKwh: Number(energyKwh.toFixed(2)),
         consumptionPer100Km: Number((energyKwh / data.distanceKm * 100).toFixed(2)),
         plannedSpeedKmH,
