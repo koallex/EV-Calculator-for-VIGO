@@ -1360,6 +1360,26 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       });
       // Persistent archive of pre-trip forecasts (the bridge above keeps only one slot and drops it
       // once a trip is saved). Lets us compare forecast vs real finish SoC after long trips.
+      // Shadow forecast: same route and inputs, but the "cruise at max" speed profile. Never shown on
+      // the Calculator screen — only written to the forecast log for later comparison with the main one.
+      let shadowForLog: Parameters<typeof upsertForecastLogEntry>[0]['shadow'];
+      try {
+        const segShadow = estimateSegmentedRouteConsumption(
+          data.points,
+          samples.map(s => ({ distanceFromStartKm: s.distanceFromStartKm, weather: s.weather, routeBearing: s.routeBearing })),
+          fallbackWeather, plannedSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, undefined, passengers, plannedMaxSpeedKmH,
+          settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true, 'cruise',
+        );
+        shadowForLog = {
+          forecastEndSoc: Math.max(0, Number((startSoc - (segShadow.energyKwh / (settings.batteryCapacityKwh || 51.87)) * 100).toFixed(1))),
+          energyKwh: Number(segShadow.energyKwh.toFixed(2)),
+          consumptionPer100Km: Number((segShadow.energyKwh / data.distanceKm * 100).toFixed(2)),
+          durationHours: segShadow.durationHours,
+          speedProfile: segShadow.speedProfile,
+        };
+      } catch {
+        shadowForLog = undefined; // the shadow is diagnostic only — it must never break the main forecast
+      }
       upsertForecastLogEntry({
         from: startMode === 'gps' ? 'Моя геопозиция' : shortPlaceLabel(startAddress, 'Точка А'),
         to: shortPlaceLabel(destinationAddress, 'Точка Б'),
@@ -1368,6 +1388,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         startSoc,
         forecastEndSoc: arrivalSoc,
         batteryCapacityKwh: settings.batteryCapacityKwh || 51.87,
+        shadow: shadowForLog,
         energyKwh: Number(energyKwh.toFixed(2)),
         consumptionPer100Km: Number((energyKwh / data.distanceKm * 100).toFixed(2)),
         plannedSpeedKmH,

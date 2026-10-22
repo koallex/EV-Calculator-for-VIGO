@@ -6,6 +6,8 @@ import {
   deleteForecastLogEntry,
   forecastDelta,
   forecastEnergyCheck,
+  forecastShadowCompare,
+  forecastShadowSummary,
   forecastLogToCSV,
   loadForecastLog,
   setForecastActuals,
@@ -80,6 +82,7 @@ const ActualField: React.FC<ActualFieldProps> = ({ id, label, value, min, max, i
 const EntryRow: React.FC<{ entry: ForecastLogEntry; isDark: boolean; haptic: boolean }> = ({ entry, isDark, haptic }) => {
   const delta = forecastDelta(entry);
   const energy = forecastEnergyCheck(entry);
+  const shadowCmp = forecastShadowCompare(entry);
   const muted = isDark ? 'text-slate-400' : 'text-slate-500';
   const strong = isDark ? 'text-slate-100' : 'text-slate-900';
 
@@ -129,6 +132,23 @@ const EntryRow: React.FC<{ entry: ForecastLogEntry; isDark: boolean; haptic: boo
       <p className={`text-[10px] ${muted}`}>
         кВт⋅ч: база {p.baseKwh.toFixed(1)} · темп. {sign(p.temperatureKwh)} · ветер {sign(p.windKwh)} · осадки {sign(p.precipitationKwh)} · стиль {sign(p.driverKwh)} · рельеф {sign(p.elevationKwh)} · климат {p.climateKwh.toFixed(1)}
       </p>
+
+      {entry.shadow && (
+        <div className={`mt-2 rounded-lg border border-dashed px-2.5 py-2 ${isDark ? 'border-violet-500/40 bg-violet-500/5' : 'border-violet-300 bg-violet-50/60'}`}>
+          <p className={`text-[11px] font-bold ${isDark ? 'text-violet-300' : 'text-violet-700'}`}>
+            Теневой прогноз · профиль «крейсер по максимуму»
+          </p>
+          <p className={`text-[12px] ${muted}`}>
+            Финиш <b className={strong}>{entry.shadow.forecastEndSoc}%</b>{' '}
+            ({fmtSigned(entry.shadow.forecastEndSoc - entry.forecastEndSoc)} п.п. к основному) ·{' '}
+            {entry.shadow.consumptionPer100Km.toFixed(1).replace('.', ',')} кВт⋅ч/100 км
+          </p>
+          <p className={`text-[11px] ${muted}`}>
+            Скорость по модели: средняя {entry.shadow.calcAvgSpeedKmH ?? '—'} · макс. {entry.shadow.calcMaxSpeedKmH ?? '—'} км/ч
+            {entry.calcMaxSpeedKmH !== undefined && <> (основной: макс. {entry.calcMaxSpeedKmH})</>}
+          </p>
+        </div>
+      )}
 
       <div className={`mt-2.5 border-t pt-2.5 ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
         <p className={`mb-1.5 text-[11px] font-bold uppercase tracking-wide ${muted}`}>Фактически</p>
@@ -187,7 +207,7 @@ const EntryRow: React.FC<{ entry: ForecastLogEntry; isDark: boolean; haptic: boo
         </div>
 
         <AnimatePresence initial={false}>
-          {(delta || avgDiff || maxDiff || energy) && (
+          {(delta || avgDiff || maxDiff || energy || shadowCmp) && (
             <motion.div
               key="deltas"
               initial={{ opacity: 0, height: 0 }}
@@ -211,6 +231,14 @@ const EntryRow: React.FC<{ entry: ForecastLogEntry; isDark: boolean; haptic: boo
                     <span className={`ml-1 font-normal ${muted}`}>
                       {Math.abs(delta.deltaPp) < 1 ? 'в норме' : delta.deltaPp < 0 ? 'прогноз оптимистичнее' : 'прогноз пессимистичнее'}
                     </span>
+                  </p>
+                )}
+                {shadowCmp && (
+                  <p className={`text-[12px] ${muted}`}>
+                    Теневой: <b className={strong}>{fmtSigned(shadowCmp.shadowErrPp)} п.п.</b> к факту (основной {fmtSigned(shadowCmp.mainErrPp)}) ·{' '}
+                    <b className={isDark ? 'text-violet-300' : 'text-violet-700'}>
+                      {shadowCmp.closer === 'shadow' ? 'ближе к факту теневой' : shadowCmp.closer === 'main' ? 'ближе к факту основной' : 'оба одинаково близки'}
+                    </b>
                   </p>
                 )}
                 {energy && (
@@ -250,6 +278,7 @@ export const ForecastLogCard: React.FC<ForecastLogCardProps> = ({ isDark, haptic
   useEffect(() => subscribeForecastLog(() => setEntries(loadForecastLog())), []);
 
   const filled = entries.filter((e) => e.actualEndSoc !== undefined).length;
+  const summary = forecastShadowSummary(entries);
 
   return (
     <div className={`rounded-2xl border ${isDark ? 'border-slate-800 bg-slate-900/90' : 'border-slate-200 bg-white shadow-sm'}`}>
@@ -289,6 +318,22 @@ export const ForecastLogCard: React.FC<ForecastLogCardProps> = ({ isDark, haptic
               </p>
               {entries.length === 0 ? null : (
                 <>
+                  {summary && (
+                    <div className={`rounded-xl border px-3 py-2 text-[12px] ${isDark ? 'border-violet-500/30 bg-violet-500/5 text-slate-300' : 'border-violet-200 bg-violet-50/60 text-slate-700'}`}>
+                      <p className={`text-[11px] font-bold ${isDark ? 'text-violet-300' : 'text-violet-700'}`}>
+                        Основной и теневой метод · поездок с фактом: {summary.n}
+                      </p>
+                      <p>
+                        Смещение (п.п./100 км, минус — прогноз оптимистичнее): основной{' '}
+                        <b>{fmtSigned(summary.mainBias)}</b>, теневой <b>{fmtSigned(summary.shadowBias)}</b>
+                      </p>
+                      <p>
+                        Средняя ошибка: основной <b>{summary.mainMae.toFixed(1).replace('.', ',')}</b>, теневой{' '}
+                        <b>{summary.shadowMae.toFixed(1).replace('.', ',')}</b> · теневой ближе в {summary.shadowCloser} из {summary.n}
+                      </p>
+                      {summary.n < 4 && <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Пока мало поездок для выводов — нужно хотя бы 4–5.</p>}
+                    </div>
+                  )}
                   <div className="max-h-[60vh] space-y-2 overflow-y-auto">
                     {entries.map((e) => (
                       <EntryRow key={e.id} entry={e} isDark={isDark} haptic={hapticFeedback} />

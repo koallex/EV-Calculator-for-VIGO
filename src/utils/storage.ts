@@ -1357,6 +1357,100 @@ const interpolateRouteWeather = (
  * forecast points, while local road bearing and elevation are calculated for every segment.
  * This keeps the API request count unchanged but removes the old "one average route" shortcut.
  */
+/**
+ * "Крейсерский" профиль скорости (теневой режим, пока не основной).
+ *
+ * Зачем: прежняя логика растягивает до заданного максимума только участки, где OSRM уже даёт
+ * скорость дороги выше 80 км/ч. На региональных трассах Беларуси OSRM даёт 65–77 км/ч, «быстрых»
+ * участков не находится, максимум не влияет, и профиль выходит ровным (~средняя везде). Реально же
+ * вы идёте на крейсерской скорости на открытой дороге и медленнее в посёлках/на поворотах, а расход
+ * растёт с ростом скорости круче линейного, поэтому ровный профиль занижает расход.
+ *
+ * Как: быстрые участки идут на (максимум − CRUISE_OFFSET_KMH), долю пути на крейсере определяет
+ * заданная средняя при опорной «медленной» скорости REFERENCE_SLOW_KMH; какие именно участки
+ * быстрые, решает рейтинг скоростей дороги OSRM по блокам ~CRUISE_BLOCK_KM км (при ровных
+ * скоростях блоки распределяются равномерно). Остальные участки масштабируются так, чтобы
+ * гармоническая средняя в точности совпала с заданной. Если крейсер почти не отличается
+ * от средней, возвращает null — работает прежняя логика.
+ */
+const CRUISE_OFFSET_KMH = 5;
+const REFERENCE_SLOW_KMH = 50;
+const CRUISE_BLOCK_KM = 4;
+
+function buildCruiseRoadSpeeds(
+  points: SegmentedRoutePoint[],
+  rawRoadSpeeds: number[],
+  lengthWeights: number[],
+  speed: number,
+  requestedMax: number,
+): number[] | null {
+  const cruise = requestedMax - CRUISE_OFFSET_KMH;
+  if (cruise < speed * 1.08) return null;
+  const slowRef = Math.min(REFERENCE_SLOW_KMH, speed * 0.8);
+  if (slowRef >= speed) return null;
+
+  const n = points.length;
+  const dist = new Array<number>(n).fill(0);
+  let total = 0;
+  for (let i = 1; i < n; i++) {
+    dist[i] = Math.max(0, points[i].distanceFromStartKm - points[i - 1].distanceFromStartKm);
+    total += dist[i];
+  }
+  if (total <= 0.001) return null;
+
+  const share = Math.max(0, Math.min(0.92, (1 / slowRef - 1 / speed) / (1 / slowRef - 1 / cruise)));
+
+  // Блоки по ~CRUISE_BLOCK_KM км; рейтинг блока — средняя скорость дороги (длинные уверенные участки весомее).
+  type Block = { idx: number[]; d: number; score: number; tie: number };
+  const blocks: Block[] = [];
+  let cur: Block = { idx: [], d: 0, score: 0, tie: 0 };
+  let scoreSum = 0;
+  for (let i = 0; i < n; i++) {
+    cur.idx.push(i);
+    cur.d += dist[i];
+    scoreSum += dist[i] * rawRoadSpeeds[i] * (0.5 + 0.5 * lengthWeights[i]);
+    if (cur.d >= CRUISE_BLOCK_KM || i === n - 1) {
+      cur.score = cur.d > 0 ? scoreSum / cur.d : rawRoadSpeeds[cur.idx[0]];
+      cur.tie = ((blocks.length * 0.6180339887) % 1) * 0.01; // равномерное «рассыпание» при равных скоростях
+      blocks.push(cur);
+      cur = { idx: [], d: 0, score: 0, tie: 0 };
+      scoreSum = 0;
+    }
+  }
+  const ranked = blocks.slice().sort((a, b) => (b.score * (1 + b.tie)) - (a.score * (1 + a.tie)));
+  const isCruise = new Array<boolean>(n).fill(false);
+  let cruiseDist = 0;
+  for (const b of ranked) {
+    if (cruiseDist >= share * total) break;
+    b.idx.forEach((i) => { isCruise[i] = true; });
+    cruiseDist += b.d;
+  }
+
+  // Подгоняем среднюю по тому же правилу, по которому потом считается скорость сегмента:
+  // среднее скоростей двух его концов (без «берём более быстрый конец», см. getSegmentSpeed).
+  const speedAt = (i: number, scale: number) =>
+    isCruise[i] ? cruise : Math.max(10, Math.min(cruise, rawRoadSpeeds[i] * scale));
+  const harmonic = (scale: number) => {
+    let dSum = 0, tSum = 0;
+    for (let i = 1; i < n; i++) {
+      if (dist[i] <= 0.001) continue;
+      const v = Math.max(10, (speedAt(i - 1, scale) + speedAt(i, scale)) / 2);
+      dSum += dist[i]; tSum += dist[i] / v;
+    }
+    return tSum > 0 ? dSum / tSum : speed;
+  };
+  let lo = 0.1, hi = 3;
+  for (let k = 0; k < 32; k++) {
+    const mid = (lo + hi) / 2;
+    if (harmonic(mid) < speed) lo = mid; else hi = mid;
+  }
+  const scale = (lo + hi) / 2;
+  return rawRoadSpeeds.map((v, i) => (isCruise[i] ? cruise : Math.max(10, Math.min(cruise, v * scale))));
+}
+
+/** Режим профиля скорости: legacy — прежний (основной), cruise — теневой «крейсер по максимуму». */
+export type SpeedProfileMode = 'legacy' | 'cruise';
+
 export function estimateSegmentedRouteConsumption(
   points: SegmentedRoutePoint[],
   weatherSamples: SegmentedWeatherSample[],
@@ -1371,6 +1465,7 @@ export function estimateSegmentedRouteConsumption(
   curbWeightKg = 1600,
   consumptionScale = 1,
   hasHeatPump = true,
+  profileMode: SpeedProfileMode = 'legacy',
 ): SegmentedRouteBreakdown {
   if (points.length < 2) {
     return {
@@ -1403,7 +1498,12 @@ export function estimateSegmentedRouteConsumption(
     Math.max(0, Math.min(1, (p.roadSegmentLengthKm ?? LENGTH_CONFIDENCE_KM) / LENGTH_CONFIDENCE_KM))
   );
   let roadSpeeds = rawRoadSpeeds.slice();
-  if (requestedMaxSpeed !== undefined) {
+  const cruiseSpeeds = requestedMaxSpeed !== undefined && profileMode === 'cruise'
+    ? buildCruiseRoadSpeeds(points, rawRoadSpeeds, lengthWeights, speed, requestedMaxSpeed)
+    : null;
+  if (cruiseSpeeds) {
+    roadSpeeds = cruiseSpeeds;
+  } else if (requestedMaxSpeed !== undefined) {
     const FAST_ROAD_THRESHOLD = 80;
     const roadMax = Math.max(...rawRoadSpeeds);
     if (roadMax > FAST_ROAD_THRESHOLD) {
@@ -1499,7 +1599,7 @@ export function estimateSegmentedRouteConsumption(
       // Do not smooth away a deliberately supplied high-speed cruising section. If either
       // endpoint belongs to the stretched fast-road profile, keep the faster endpoint for the
       // segment. Otherwise midpoint smoothing is useful at ordinary speed transitions.
-      const fastEndpoint = requestedMaxSpeed !== undefined
+      const fastEndpoint = !cruiseSpeeds && requestedMaxSpeed !== undefined
         && endpointMax >= Math.max(90, requestedMaxSpeed * 0.9);
       const chosen = fastEndpoint ? endpointMax : avg;
       return Math.max(10, Math.min(requestedMaxSpeed ?? 140, chosen));

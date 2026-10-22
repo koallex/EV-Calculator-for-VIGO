@@ -60,6 +60,12 @@ export interface ForecastLogEntry {
   /** Расчётные скорости модели: средняя = дистанция / расчётное время, максимальная = пик профиля скорости. */
   calcAvgSpeedKmH?: number;
   calcMaxSpeedKmH?: number;
+  /**
+   * Теневой прогноз: тот же маршрут и вводные, но профиль скорости «крейсер по максимуму»
+   * (см. buildCruiseRoadSpeeds в storage.ts). На экране Калькулятора не показывается — только здесь,
+   * чтобы по фактам понять, какой метод ближе к реальности, прежде чем переключать основной.
+   */
+  shadow?: ForecastShadow;
   /** Ёмкость батареи, с которой считался прогноз (для сверки «кВт·ч на 100% SoC»). */
   batteryCapacityKwh?: number;
   /** Заполняется вручную после поездки. */
@@ -74,13 +80,25 @@ export interface ForecastLogEntry {
   startType?: StartType;
 }
 
+export interface ForecastShadow {
+  forecastEndSoc: number;
+  energyKwh: number;
+  consumptionPer100Km: number;
+  durationHours: number;
+  calcAvgSpeedKmH?: number;
+  calcMaxSpeedKmH?: number;
+  speedProfile: Array<{ distanceKm: number; speedKmH: number }>;
+}
+
 export type StartType = 'cold' | 'warm';
 type ActualNumericFields =
   | 'actualEndSoc' | 'actualAvgSpeedKmH' | 'actualMaxSpeedKmH' | 'actualDistanceKm' | 'actualConsumptionKwh100';
 type ActualFields = ActualNumericFields | 'startType';
 export type ForecastActualsPatch =
   Partial<Record<ActualNumericFields, number | undefined>> & { startType?: StartType | undefined };
-export type NewForecastLogEntry = Omit<ForecastLogEntry, 'id' | 'createdAt' | 'updatedAt' | ActualFields | 'calcAvgSpeedKmH' | 'calcMaxSpeedKmH'>;
+export type NewForecastLogEntry = Omit<ForecastLogEntry, 'id' | 'createdAt' | 'updatedAt' | ActualFields | 'calcAvgSpeedKmH' | 'calcMaxSpeedKmH' | 'shadow'> & {
+  shadow?: Omit<ForecastShadow, 'calcAvgSpeedKmH' | 'calcMaxSpeedKmH'>;
+};
 
 /** Есть ли у записи хоть один введённый вручную фактический показатель. */
 export const hasActuals = (e: ForecastLogEntry) =>
@@ -151,6 +169,17 @@ export function upsertForecastLogEntry(input: NewForecastLogEntry): void {
     calcAvgSpeedKmH: input.durationHours > 0 ? Math.round(input.distanceKm / input.durationHours) : undefined,
     calcMaxSpeedKmH: profileMax > 0 ? Math.round(profileMax) : undefined,
     speedProfile: downsampleProfile(input.speedProfile),
+    shadow: input.shadow
+      ? {
+          ...input.shadow,
+          calcAvgSpeedKmH: input.shadow.durationHours > 0 ? Math.round(input.distanceKm / input.shadow.durationHours) : undefined,
+          calcMaxSpeedKmH: (() => {
+            const m = (input.shadow.speedProfile ?? []).reduce((mx, p) => Math.max(mx, p.speedKmH), 0);
+            return m > 0 ? Math.round(m) : undefined;
+          })(),
+          speedProfile: downsampleProfile(input.shadow.speedProfile),
+        }
+      : undefined,
   };
   const all = readAll().sort((a, b) => b.createdAt - a.createdAt);
   const latest = all[0];
@@ -159,7 +188,7 @@ export function upsertForecastLogEntry(input: NewForecastLogEntry): void {
     writeAll(all);
     return;
   }
-  all.unshift({ ...entry, id: `fc_${now}`, createdAt: now, updatedAt: now });
+  all.unshift({ ...entry, id: `fc_${now}_${Math.random().toString(36).slice(2, 6)}`, createdAt: now, updatedAt: now });
   // Лимит: сначала выбрасываем самые старые записи БЕЗ фактического результата — размеченные ценнее.
   while (all.length > MAX_ENTRIES) {
     let idx = -1;
@@ -227,6 +256,46 @@ export function forecastEnergyCheck(entry: ForecastLogEntry): {
   return { energyDelta, energyDeltaPct: (energyDelta / entry.consumptionPer100Km) * 100, kwhPer100Soc, capacityDevPct };
 }
 
+/** Сравнение основного и теневого прогноза с фактом. Ошибка = факт − прогноз (п.п.): минус — прогноз оптимистичнее. */
+export function forecastShadowCompare(entry: ForecastLogEntry): {
+  mainErrPp: number;
+  shadowErrPp: number;
+  closer: 'main' | 'shadow' | 'equal';
+} | null {
+  if (!entry.shadow || entry.actualEndSoc === undefined || !Number.isFinite(entry.actualEndSoc)) return null;
+  const mainErrPp = entry.actualEndSoc - entry.forecastEndSoc;
+  const shadowErrPp = entry.actualEndSoc - entry.shadow.forecastEndSoc;
+  const diff = Math.abs(mainErrPp) - Math.abs(shadowErrPp);
+  return { mainErrPp, shadowErrPp, closer: Math.abs(diff) < 0.3 ? 'equal' : diff > 0 ? 'shadow' : 'main' };
+}
+
+/** Итог по всем записям с фактом и теневым прогнозом: смещение и средняя абсолютная ошибка, п.п. на 100 км. */
+export function forecastShadowSummary(entries: ForecastLogEntry[]): {
+  n: number;
+  mainBias: number;
+  shadowBias: number;
+  mainMae: number;
+  shadowMae: number;
+  shadowCloser: number;
+} | null {
+  const rows = entries
+    .map((e) => ({ e, c: forecastShadowCompare(e) }))
+    .filter((x): x is { e: ForecastLogEntry; c: NonNullable<ReturnType<typeof forecastShadowCompare>> } => x.c !== null);
+  if (rows.length === 0) return null;
+  const per100 = (e: ForecastLogEntry, v: number) => (v / (e.actualDistanceKm ?? e.distanceKm)) * 100;
+  const main = rows.map(({ e, c }) => per100(e, c.mainErrPp));
+  const shadow = rows.map(({ e, c }) => per100(e, c.shadowErrPp));
+  const mean = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
+  return {
+    n: rows.length,
+    mainBias: mean(main),
+    shadowBias: mean(shadow),
+    mainMae: mean(main.map(Math.abs)),
+    shadowMae: mean(shadow.map(Math.abs)),
+    shadowCloser: rows.filter(({ c }) => c.closer === 'shadow').length,
+  };
+}
+
 /** Локальное время устройства (ГГГГ-ММ-ДД ЧЧ:ММ). toISOString() давал UTC — со сдвигом на часовой пояс. */
 function localDateTime(ts: number): string {
   const d = new Date(ts);
@@ -243,6 +312,8 @@ export function forecastLogToCSV(entries: ForecastLogEntry[]): string {
     'Ветер км/ч', 'Угол ветра °', 'Ветер (подпись)', 'Осадки мм/ч', 'Осадки (подпись)', 'Климат',
     'Климат кВт', 'Пассажиры', 'Набор м', 'Спуск м', 'База кВт⋅ч', 'Темп. кВт⋅ч', 'Ветер кВт⋅ч',
     'Осадки кВт⋅ч', 'Стиль кВт⋅ч', 'Рельеф кВт⋅ч', 'Климат кВт⋅ч', 'Рекуперация кВт⋅ч', 'Профиль скорости (JSON)',
+    'Теневой: прогноз финиш %', 'Теневой: расход (кВт⋅ч/100км)', 'Теневой: энергия (кВт⋅ч)', 'Теневой: скорость сред. модели (км/ч)',
+    'Теневой: скорость макс. модели (км/ч)', 'Теневой: откл. (п.п.)', 'Ближе к факту', 'Теневой: профиль скорости (JSON)',
   ];
   const esc = (v: unknown) => {
     const s = v === undefined || v === null ? '' : String(v);
@@ -251,6 +322,7 @@ export function forecastLogToCSV(entries: ForecastLogEntry[]): string {
   const rows = entries.map((e) => {
     const d = forecastDelta(e);
     const en = forecastEnergyCheck(e);
+    const sc = forecastShadowCompare(e);
     return [
       localDateTime(e.createdAt), e.from, e.to, e.distanceKm, e.startSoc,
       e.forecastEndSoc, e.actualEndSoc ?? '', d ? d.deltaPp.toFixed(1) : '', d ? d.per100Km.toFixed(2) : '',
@@ -264,6 +336,11 @@ export function forecastLogToCSV(entries: ForecastLogEntry[]): string {
       e.passengers, Math.round(e.elevationGainM), Math.round(e.elevationLossM), e.parts.baseKwh, e.parts.temperatureKwh,
       e.parts.windKwh, e.parts.precipitationKwh, e.parts.driverKwh, e.parts.elevationKwh, e.parts.climateKwh,
       e.parts.regenKwh, JSON.stringify(e.speedProfile),
+      e.shadow?.forecastEndSoc ?? '', e.shadow?.consumptionPer100Km ?? '', e.shadow?.energyKwh ?? '',
+      e.shadow?.calcAvgSpeedKmH ?? '', e.shadow?.calcMaxSpeedKmH ?? '',
+      sc ? sc.shadowErrPp.toFixed(1) : '',
+      sc ? (sc.closer === 'shadow' ? 'теневой' : sc.closer === 'main' ? 'основной' : 'одинаково') : '',
+      e.shadow ? JSON.stringify(e.shadow.speedProfile) : '',
     ].map(esc).join(';');
   });
   return '\uFEFF' + [headers.join(';'), ...rows].join('\n');
