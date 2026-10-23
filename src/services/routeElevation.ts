@@ -1,5 +1,5 @@
 export interface RoutePoint { lat:number; lon:number; elevationM:number; distanceFromStartKm:number; roadSpeedKmH?:number; roadSegmentLengthKm?:number; }
-export interface RouteElevationData { name:string; distanceKm:number; points:RoutePoint[]; startElevationM:number; endElevationM:number; elevationGainM:number; elevationLossM:number; grossClimbEnergyKwh:number; recoveredEnergyKwh:number; netElevationEnergyKwh:number; elevationAvailable:boolean; elevationNote?:string; /** Detailed [lat,lon] road geometry for DRAWING the route (only when requested via includeGeometry). Not used for calculations. */ geometry?:[number,number][]; }
+export interface RouteElevationData { name:string; distanceKm:number; points:RoutePoint[]; startElevationM:number; endElevationM:number; elevationGainM:number; elevationLossM:number; grossClimbEnergyKwh:number; recoveredEnergyKwh:number; netElevationEnergyKwh:number; elevationAvailable:boolean; elevationNote?:string; /** Duration of the routed trip as the routing service estimates it (no traffic, no stops). Used to learn the driver's real-vs-routed speed ratio. */ osrmDurationHours?:number; /** Detailed [lat,lon] road geometry for DRAWING the route (only when requested via includeGeometry). Not used for calculations. */ geometry?:[number,number][]; }
 export interface RouteProgress { stage:'geocoding'|'routing'|'sampling'|'elevation'|'calculating'; message:string; completed?:number; total?:number; }
 const EARTH_RADIUS_M=6371000, DEFAULT_MASS_KG=1600, GRAVITY=9.80665, DRIVETRAIN_EFFICIENCY=.90, REGEN_EFFICIENCY=.65, NOISE_THRESHOLD_M=3;
 // Open-Meteo's elevation endpoint accepts up to 100 coordinate pairs per request — batching at that
@@ -92,7 +92,8 @@ export const fetchDrivingRoute=async(aLat:number,aLon:number,bLat:number,bLon:nu
       }
     }
   }
-  return{distanceKm:Number(r.distance)/1000,coords:r.geometry.coordinates as [number,number][],speedSegments};
+  const totalDurationHours=Number.isFinite(Number(r.duration))&&Number(r.duration)>0?Number(r.duration)/3600:speedSegments.reduce((t,sg)=>t+(sg.endKm-sg.startKm)/Math.max(10,sg.speedKmH),0);
+  return{distanceKm:Number(r.distance)/1000,durationHours:totalDurationHours,coords:r.geometry.coordinates as [number,number][],speedSegments};
 };
 const haversineM=(a:[number,number],b:[number,number])=>{const[lo1,la1]=a,[lo2,la2]=b,dLa=(la2-la1)*Math.PI/180,dLo=(lo2-lo1)*Math.PI/180,x=Math.sin(dLa/2)**2+Math.cos(la1*Math.PI/180)*Math.cos(la2*Math.PI/180)*Math.sin(dLo/2)**2;return 2*EARTH_RADIUS_M*Math.asin(Math.min(1,Math.sqrt(x)))};
 
@@ -354,13 +355,19 @@ export const buildRouteElevation=async(aLat:number,aLon:number,bLat:number,bLon:
   }
 
   onProgress?.({stage:'calculating',message:'Считаем подъёмы, спуски и рекуперацию…'});
-  let cum=0;
+  // Sampled points are chords of the road polyline: summing straight segments between them cuts every bend,
+  // so the cumulative length came out 2-4% shorter than the real road (observed: 131.6 km of points for a
+  // 137.2 km route). The energy model integrates over these distances, so it under-counted energy by the same
+  // percentage, and the OSRM step speeds were looked up at slightly shifted positions. Scale the cumulative
+  // distance so that the last point equals the routed distance (chords can only be shorter, hence min 1).
+  const chordM:number[]=[];let cum=0;
+  profile.coords.forEach((c,i)=>{if(i>0)cum+=haversineM(profile.coords[i-1],c);chordM.push(cum)});
+  const distScale=cum>0?Math.min(1.15,Math.max(1,route.distanceKm*1000/cum)):1;
   const points=profile.coords.map((c,i)=>{
-    if(i>0)cum+=haversineM(profile.coords[i-1],c);
-    const distanceFromStartKm=Number((cum/1000).toFixed(2));
+    const distanceFromStartKm=Number((chordM[i]*distScale/1000).toFixed(2));
     const road=speedAtDistance(distanceFromStartKm,route.speedSegments);
     return{lon:c[0],lat:c[1],elevationM:profile.elevations[i],distanceFromStartKm,roadSpeedKmH:road.speedKmH,roadSegmentLengthKm:road.lengthKm};
   });
   const{gainM,lossM}=computeElevationGainLoss(profile.elevations),energy=calculateElevationEnergy(gainM,lossM);
-  return{name,distanceKm:Number(route.distanceKm.toFixed(1)),points,startElevationM:profile.elevations[0],endElevationM:profile.elevations.at(-1)!,elevationGainM:gainM,elevationLossM:lossM,...energy,elevationAvailable,elevationNote,...(opts?.includeGeometry?{geometry:simplifyRouteGeometry(route.coords)}:{})};
+  return{name,distanceKm:Number(route.distanceKm.toFixed(1)),osrmDurationHours:route.durationHours,points,startElevationM:profile.elevations[0],endElevationM:profile.elevations.at(-1)!,elevationGainM:gainM,elevationLossM:lossM,...energy,elevationAvailable,elevationNote,...(opts?.includeGeometry?{geometry:simplifyRouteGeometry(route.coords)}:{})};
 };
