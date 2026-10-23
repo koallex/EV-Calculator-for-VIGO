@@ -124,6 +124,7 @@ const EntryRow: React.FC<{ entry: ForecastLogEntry; isDark: boolean; haptic: boo
       <p className={`text-[12px] ${muted}`}>
         Расчётная скорость: средняя <b className={strong}>{entry.plannedSpeedKmH}</b> · макс. <b className={strong}>{entry.plannedMaxSpeedKmH}</b> км/ч
         {modelAvgDiffers && <span className="text-[11px]"> (по времени модели ≈ {entry.calcAvgSpeedKmH})</span>}
+        {entry.osrmAvgSpeedKmH !== undefined && <span className="text-[11px]"> · по данным маршрута ≈ {entry.osrmAvgSpeedKmH}</span>}
       </p>
       <p className={`text-[11px] ${muted}`}>
         {entry.temperatureC >= 0 ? '+' : ''}{Math.round(entry.temperatureC)}°C · ветер {windSide}

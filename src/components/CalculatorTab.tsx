@@ -1394,6 +1394,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         forecastEndSoc: arrivalSoc,
         batteryCapacityKwh: settings.batteryCapacityKwh || 51.87,
         profileMode: speedModes.main,
+        osrmAvgSpeedKmH: data.osrmDurationHours && data.osrmDurationHours > 0 ? Math.round(data.distanceKm / data.osrmDurationHours) : undefined,
         shadow: shadowForLog,
         energyKwh: Number(energyKwh.toFixed(2)),
         consumptionPer100Km: Number((energyKwh / data.distanceKm * 100).toFixed(2)),
