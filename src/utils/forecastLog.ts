@@ -66,6 +66,8 @@ export interface ForecastLogEntry {
    * чтобы по фактам понять, какой метод ближе к реальности, прежде чем переключать основной.
    */
   shadow?: ForecastShadow;
+  /** Средняя скорость маршрута по данным самого маршрутизатора (без пробок и остановок): для будущего автоподбора средней. */
+  osrmAvgSpeedKmH?: number;
   /** Метод профиля скорости основного прогноза (в старых записях не указан — это был legacy). */
   profileMode?: ProfileMode;
   /** Ёмкость батареи, с которой считался прогноз (для сверки «кВт·ч на 100% SoC»). */
@@ -338,7 +340,7 @@ export function forecastLogToCSV(entries: ForecastLogEntry[]): string {
     'Осадки кВт⋅ч', 'Стиль кВт⋅ч', 'Рельеф кВт⋅ч', 'Климат кВт⋅ч', 'Рекуперация кВт⋅ч', 'Профиль скорости (JSON)',
     'Теневой: прогноз финиш %', 'Теневой: расход (кВт⋅ч/100км)', 'Теневой: энергия (кВт⋅ч)', 'Теневой: скорость сред. модели (км/ч)',
     'Теневой: скорость макс. модели (км/ч)', 'Теневой: откл. (п.п.)', 'Ближе к факту (метод)', 'Теневой: профиль скорости (JSON)',
-    'Метод основного', 'Метод теневого',
+    'Метод основного', 'Метод теневого', 'Средняя по данным маршрута (км/ч)',
   ];
   const esc = (v: unknown) => {
     const s = v === undefined || v === null ? '' : String(v);
@@ -367,6 +369,7 @@ export function forecastLogToCSV(entries: ForecastLogEntry[]): string {
       sc ? (sc.closerMethod === 'cruise' ? 'крейсер' : sc.closerMethod === 'legacy' ? 'прежний' : 'одинаково') : '',
       e.shadow ? JSON.stringify(e.shadow.speedProfile) : '',
       mainModeOf(e) === 'cruise' ? 'крейсер' : 'прежний', e.shadow ? (shadowModeOf(e) === 'cruise' ? 'крейсер' : 'прежний') : '',
+      e.osrmAvgSpeedKmH ?? '',
     ].map(esc).join(';');
   });
   return '\uFEFF' + [headers.join(';'), ...rows].join('\n');
