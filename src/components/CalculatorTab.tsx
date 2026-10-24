@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useLayoutEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useLayoutEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Zap,
@@ -35,6 +35,7 @@ import {
 import { UserSettings, RoadType, TripSession } from '../types';
 import { BatteryVisual } from './BatteryVisual';
 import { DecimalInput } from './DecimalInput';
+import { estimateAutoAvgSpeed } from '../utils/autoAvgSpeed';
 import { getTariffForType, getOperatorLabel, estimateTripConsumption, estimateSegmentedRouteConsumption, calculateClimateImpact, resolveSpeedProfileModes } from '../utils/storage';
 import { triggerHaptic } from '../utils/haptics';
 import { openInNavigator, openWebInNewTab, webUrl, type NavFailInfo } from '../utils/openNavigator';
@@ -216,6 +217,17 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     }
   });
 
+  // Средняя скорость: «авто» — считается по маршруту и выбранному максимуму (см. utils/autoAvgSpeed.ts);
+  // «вручную» — используется значение plannedSpeedKmH, введённое пользователем.
+  const [avgSpeedAuto, setAvgSpeedAuto] = useState<boolean>(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('vigo_calculator_draft_v1') || '{}');
+      return typeof d.avgSpeedAuto === 'boolean' ? d.avgSpeedAuto : true;
+    } catch {
+      return true;
+    }
+  });
+
   // Persist last calculator inputs so a reload does not reset to 100/45/180.
   useEffect(() => {
     try {
@@ -230,6 +242,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           destinationAddress,
           plannedSpeedKmH,
           plannedMaxSpeedKmH,
+          avgSpeedAuto,
           calculatorMode,
         }),
       );
@@ -245,8 +258,25 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     destinationAddress,
     plannedSpeedKmH,
     plannedMaxSpeedKmH,
+    avgSpeedAuto,
     calculatorMode,
   ]);
+
+  /** Средняя скорость для маршрута: авто (по профилю дороги и максимуму) или введённая вручную. */
+  const resolveAvgSpeed = (route: RouteElevationData | null | undefined): { speedKmH: number; auto: boolean; fastShare?: number } => {
+    if (avgSpeedAuto && route) {
+      const est = estimateAutoAvgSpeed(route.points, plannedMaxSpeedKmH);
+      if (est) return { speedKmH: est.avgSpeedKmH, auto: true, fastShare: est.fastShare };
+    }
+    return { speedKmH: plannedSpeedKmH, auto: false };
+  };
+  const autoSpeedInfo = useMemo(
+    () => resolveAvgSpeed(routeElevation),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [avgSpeedAuto, routeElevation, plannedMaxSpeedKmH, plannedSpeedKmH],
+  );
+  /** Скорость, с которой реально считается прогноз (на экране маршрута, в HUD, в ETA). */
+  const effectiveSpeedKmH = autoSpeedInfo.speedKmH;
   const [routeWeather, setRouteWeather] = useState<{ temperature:number; windSpeed:number; windDirection:number; weatherCode:number; precipitation:number; routeBearing:number; etaMinutes:number; arrivalDate: Date; samples: RouteWeatherSample[] } | null>(null);
   const [routeForecast, setRouteForecast] = useState<{ consumption:number; energyKwh:number; arrivalSoc:number; windLabel:string; weatherLabel:string; precipitationLabel:string; relativeWindAngle:number; driverStyleFactor:number; driverStyleSource:string; climateLabel:string; climateImpactPct:number; climateDeltaKwh100:number; speedImpactPct:number; breakdown?: any } | null>(null);
   const getChargingTemperatureAtDistance = useCallback((distanceKm: number): number | undefined => {
@@ -1212,7 +1242,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   // Every input that changes the forecast except the start SoC (that one has its own quick path) and the A/B points
   // (those wait for the explicit button).
   const paramsSignature = JSON.stringify([
-    plannedSpeedKmH, plannedMaxSpeedKmH, climateOn, passengers, weatherMode, roadType,
+    avgSpeedAuto ? 'auto' : plannedSpeedKmH, plannedMaxSpeedKmH, climateOn, passengers, weatherMode, roadType,
     manualTemperature, manualWindSpeed, manualWindDirection, manualPrecipitationType, manualPrecipitationIntensity,
   ]);
 
@@ -1287,8 +1317,10 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       }
       const data = await buildRouteElevation(start.lat,start.lon,destination.lat,destination.lon,destination.displayName,onProgress,{includeGeometry:true});
       setRouteElevation(data); setDistanceKm(data.distanceKm);
+      // Средняя скорость считается по только что построенному маршруту (state ещё не обновился).
+      const speedKmH = resolveAvgSpeed(data).speedKmH;
       rememberPlace({ name: destination.displayName, lat: destination.lat, lon: destination.lon });
-      const etaMinutes=Math.max(1,Math.round((data.distanceKm/Math.max(10,plannedSpeedKmH))*60));
+      const etaMinutes=Math.max(1,Math.round((data.distanceKm/Math.max(10,speedKmH))*60));
       // Всегда используем текущее время: API прогноза корректно работает для актуального
       // погодного окна, без выбора удалённой даты отправления.
       const departureDate = new Date();
@@ -1304,7 +1336,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
       if (weatherMode === 'current') {
         setRouteStatus('Получаем прогноз погоды по маршруту…');
-        samples = await fetchForecastWeatherAlongRoute(data.points, departureDate, plannedSpeedKmH);
+        samples = await fetchForecastWeatherAlongRoute(data.points, departureDate, speedKmH);
         if (!samples.length) throw new Error('Не удалось получить актуальный прогноз погоды по маршруту. Попробуйте повторить расчёт позже.');
         avgTemperature = avg(samples.map(s=>s.weather.temperature), 20);
         avgPrecipitation = avg(samples.map(s=>s.weather.precipitation), 0);
@@ -1353,13 +1385,13 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       const segmented = estimateSegmentedRouteConsumption(
         data.points,
         samples.map(s => ({ distanceFromStartKm: s.distanceFromStartKm, weather: s.weather, routeBearing: s.routeBearing })),
-        fallbackWeather, plannedSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, undefined, passengers, plannedMaxSpeedKmH,
+        fallbackWeather, speedKmH, sessions, settings.batteryCapacityKwh, climateOn, undefined, passengers, plannedMaxSpeedKmH,
         settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true, speedModes.main,
       );
       const energyKwh = segmented.energyKwh;
       const arrivalSoc = Math.max(0, Number((startSoc - (energyKwh/(settings.batteryCapacityKwh||51.87))*100).toFixed(1)));
       const segmentedForecast = estimateTripConsumption(
-        plannedSpeedKmH, segmented.avgTemperature, sessions, settings.batteryCapacityKwh, climateOn,
+        speedKmH, segmented.avgTemperature, sessions, settings.batteryCapacityKwh, climateOn,
         segmented.avgWindSpeed, avgRelativeWindAngle, undefined, avgWeatherCode, segmented.avgPrecipitation,
         {gainM:data.elevationGainM, lossM:data.elevationLossM, distanceKm:data.distanceKm}, segmented.durationHours, segmented.climatePowerKw, passengers,
         settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true,
@@ -1372,7 +1404,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       // can attach predicted-vs-actual for comparison (see routeForecastBridge.ts).
       saveLastRouteForecast({
         distanceKm: data.distanceKm,
-        plannedSpeedKmH,
+        plannedSpeedKmH: speedKmH,
         plannedMaxSpeedKmH,
         arrivalSoc,
         consumptionPer100Km: Number((energyKwh / data.distanceKm * 100).toFixed(2)),
@@ -1389,7 +1421,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         const segShadow = estimateSegmentedRouteConsumption(
           data.points,
           samples.map(s => ({ distanceFromStartKm: s.distanceFromStartKm, weather: s.weather, routeBearing: s.routeBearing })),
-          fallbackWeather, plannedSpeedKmH, sessions, settings.batteryCapacityKwh, climateOn, undefined, passengers, plannedMaxSpeedKmH,
+          fallbackWeather, speedKmH, sessions, settings.batteryCapacityKwh, climateOn, undefined, passengers, plannedMaxSpeedKmH,
           settings.curbWeightKg ?? 1600, settings.consumptionScale ?? 1, settings.hasHeatPump ?? true, speedModes.shadow,
         );
         shadowForLog = {
@@ -1417,7 +1449,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         shadow: shadowForLog,
         energyKwh: Number(energyKwh.toFixed(2)),
         consumptionPer100Km: Number((energyKwh / data.distanceKm * 100).toFixed(2)),
-        plannedSpeedKmH,
+        plannedSpeedKmH: speedKmH,
         plannedMaxSpeedKmH,
         weatherMode: weatherMode === 'planning' ? 'planning' : 'current',
         temperatureC: Number(segmented.avgTemperature.toFixed(1)),
@@ -1664,6 +1696,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     setClimateOn(true);
     setPassengers(1);
     setPlannedSpeedKmH(70);
+    setAvgSpeedAuto(true);
     setPlannedMaxSpeedKmH(120);
     setWeatherMode('current');
     setRoadType('city');
@@ -1770,7 +1803,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     onSendToHud({
       destination: destinationAddress.trim(),
       startSoc,
-      plannedSpeedKmH,
+      plannedSpeedKmH: effectiveSpeedKmH,
       passengers,
       climateOn,
       totalDistanceKm: totalKm,
@@ -1810,7 +1843,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
   /** Parameters that differ from the calculator defaults light up the sliders button. */
   const paramsModified =
-    passengers !== 1 || !climateOn || plannedSpeedKmH !== 70 || plannedMaxSpeedKmH !== 120 || weatherMode !== 'current';
+    passengers !== 1 || !climateOn || !avgSpeedAuto || plannedMaxSpeedKmH !== 120 || weatherMode !== 'current';
 
   /** Charging plan as one list regardless of whether it came from the multi-stop planner or the single suggestion. */
   const planStops =
@@ -2260,7 +2293,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
               : 'Нужна зарядка в пути';
     const toneColor =
       tone === 'good' ? (isDark ? 'text-emerald-400' : 'text-emerald-600') : tone === 'ok' ? 'text-amber-500' : 'text-rose-500';
-    const driveMinutes = routeWeather?.etaMinutes ?? Math.max(1, Math.round((routeElevation.distanceKm / Math.max(10, plannedSpeedKmH)) * 60));
+    const driveMinutes = routeWeather?.etaMinutes ?? Math.max(1, Math.round((routeElevation.distanceKm / Math.max(10, effectiveSpeedKmH)) * 60));
     const totalTripMinutes = driveMinutes + totalChargingMinutes;
     const chargeLabel = searching
       ? '…'
@@ -3113,7 +3146,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 <div className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-slate-50'}`}>
                   <span className="text-[12px] font-semibold">Макс. (крейсер на трассе)</span>
                   <div className="flex items-center gap-1">
-                    <DecimalInput value={plannedMaxSpeedKmH} onChange={(v) => { setPlannedMaxSpeedKmH(Math.max(plannedSpeedKmH, Math.min(150, v))); dirty(); }} min={20} max={150} className="w-20 text-right" />
+                    <DecimalInput value={plannedMaxSpeedKmH} onChange={(v) => { setPlannedMaxSpeedKmH(Math.max(avgSpeedAuto ? 20 : plannedSpeedKmH, Math.min(150, v))); dirty(); }} min={20} max={150} className="w-20 text-right" />
                     <span className={`shrink-0 whitespace-nowrap text-xs ${muted}`}>км/ч</span>
                   </div>
                 </div>
@@ -3127,17 +3160,63 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   aria-expanded={avgSpeedOpen}
                   className={`flex w-full items-center justify-between px-1 py-0.5 text-[11px] font-semibold ${muted}`}
                 >
-                  <span>Подробности · средняя скорость {Math.round(plannedSpeedKmH)} км/ч</span>
+                  <span>
+                    Подробности · средняя скорость{' '}
+                    {autoSpeedInfo.auto
+                      ? `≈ ${Math.round(effectiveSpeedKmH)} км/ч · авто`
+                      : avgSpeedAuto
+                        ? 'по маршруту · авто'
+                        : `${Math.round(plannedSpeedKmH)} км/ч · вручную`}
+                  </span>
                   <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${avgSpeedOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {avgSpeedOpen && (
-                  <div className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-slate-50'}`}>
-                    <span className="text-[12px] font-semibold">Средняя скорость</span>
-                    <div className="flex items-center gap-1">
-                      <DecimalInput value={plannedSpeedKmH} onChange={(v) => { setPlannedSpeedKmH(v); setPlannedMaxSpeedKmH((prev) => Math.max(prev, v)); dirty(); }} min={20} max={140} className="w-20 text-right" />
-                      <span className={`shrink-0 whitespace-nowrap text-xs ${muted}`}>км/ч</span>
+                  <>
+                    <div className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-slate-50'}`}>
+                      <span className="text-[12px] font-semibold">Средняя скорость</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          aria-pressed={avgSpeedAuto}
+                          onClick={() => {
+                            triggerHaptic('light', settings.hapticFeedback);
+                            if (avgSpeedAuto) setPlannedSpeedKmH(Math.max(20, Math.min(140, Math.round(effectiveSpeedKmH)))); // фиксируем текущее значение, чтобы оно не «прыгало»
+                            setAvgSpeedAuto((v) => !v);
+                            dirty();
+                          }}
+                          className={`rounded-lg border px-2 py-1 text-[11px] font-bold ${
+                            avgSpeedAuto
+                              ? isDark ? 'border-cyan-500/60 bg-cyan-950/70 text-cyan-300' : 'border-cyan-700 bg-cyan-600 text-white'
+                              : isDark ? 'border-slate-700 bg-slate-950 text-slate-400' : 'border-slate-200 bg-white text-slate-600'
+                          }`}
+                        >
+                          Авто
+                        </button>
+                        <DecimalInput
+                          value={Math.round(effectiveSpeedKmH)}
+                          onChange={(v) => {
+                            // Простое касание/выход из поля тоже вызывает onChange с тем же числом — это не правка.
+                            if (avgSpeedAuto && autoSpeedInfo.auto && v === Math.round(effectiveSpeedKmH)) return;
+                            setAvgSpeedAuto(false);
+                            setPlannedSpeedKmH(v);
+                            setPlannedMaxSpeedKmH((prev) => Math.max(prev, v));
+                            dirty();
+                          }}
+                          min={20}
+                          max={140}
+                          className="w-20 text-right"
+                        />
+                        <span className={`shrink-0 whitespace-nowrap text-xs ${muted}`}>км/ч</span>
+                      </div>
                     </div>
-                  </div>
+                    <p className={`px-1 text-[11px] leading-snug ${muted}`}>
+                      {avgSpeedAuto
+                        ? autoSpeedInfo.auto
+                          ? `Считается по маршруту и максимуму: скоростных участков ≈ ${Math.round((autoSpeedInfo.fastShare ?? 0) * 100)}% пути. Чтобы задать своё значение — просто введите его.`
+                          : 'Будет рассчитана автоматически после построения маршрута. Чтобы задать своё значение — введите его.'
+                        : 'Задано вручную. Нажмите «Авто», чтобы считать по маршруту и максимальной скорости.'}
+                    </p>
+                  </>
                 )}
               </section>
 
