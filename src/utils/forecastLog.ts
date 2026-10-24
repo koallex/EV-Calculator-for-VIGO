@@ -11,9 +11,9 @@
 const STORAGE_KEY = 'vigo_forecast_log_v1';
 const CHANGE_EVENT = 'vigo-forecast-log-changed';
 const MAX_ENTRIES = 40;
-// Повторный расчёт того же маршрута с теми же вводными в течение этого окна обновляет
-// последнюю запись, а не плодит дубли (Калькулятор пересчитывается при любой правке).
-const DEDUPE_WINDOW_MS = 30 * 60 * 1000;
+// Повторный расчёт того же маршрута (в том числе после смены скорости, климата и т. п.) в течение этого окна
+// обновляет последнюю запись, пока в ней не введён факт: запись всегда отражает последний расчёт на экране.
+const DEDUPE_WINDOW_MS = 6 * 60 * 60 * 1000;
 const MAX_PROFILE_POINTS = 30;
 
 export interface ForecastLogParts {
@@ -124,13 +124,46 @@ function readAll(): ForecastLogEntry[] {
   }
 }
 
-function writeAll(entries: ForecastLogEntry[]): void {
+export interface ForecastLogStatus {
+  ok: boolean;
+  at: number;
+  action?: 'created' | 'updated' | 'start_soc' | 'actuals' | 'deleted';
+  /** Причина, если сохранить не удалось (например, QuotaExceededError — хранилище браузера переполнено). */
+  message?: string;
+}
+let lastStatus: ForecastLogStatus | null = null;
+/** Итог последней записи в журнал — карточка в Истории показывает его, чтобы сбой сохранения не оставался незамеченным. */
+export const getForecastLogStatus = (): ForecastLogStatus | null => lastStatus;
+
+function tryWrite(entries: ForecastLogEntry[]): string | null {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-    window.dispatchEvent(new Event(CHANGE_EVENT));
-  } catch {
-    // localStorage недоступен/переполнен — журнал вспомогательный, расчёт маршрута из-за него не ломаем.
+    return null;
+  } catch (e) {
+    return e instanceof Error ? (e.name || e.message) : String(e);
   }
+}
+
+/**
+ * Пишет журнал. Если браузерное хранилище переполнено, сначала сжимает старые записи (убирает профили скорости),
+ * затем выбрасывает самые старые записи без введённого факта. Результат попадает в lastStatus.
+ */
+function writeAll(entries: ForecastLogEntry[], action: ForecastLogStatus['action'] = 'updated'): boolean {
+  let work = entries;
+  let err = tryWrite(work);
+  if (err) {
+    work = entries.map((e, i) => (i < 3 ? e : { ...e, speedProfile: [], shadow: e.shadow ? { ...e.shadow, speedProfile: [] } : undefined }));
+    err = tryWrite(work);
+  }
+  while (err && work.length > 1) {
+    let idx = -1;
+    for (let i = work.length - 1; i > 0; i--) { if (!hasActuals(work[i])) { idx = i; break; } }
+    work = work.filter((_, i) => i !== (idx === -1 ? work.length - 1 : idx));
+    err = tryWrite(work);
+  }
+  lastStatus = err ? { ok: false, at: Date.now(), action, message: err } : { ok: true, at: Date.now(), action };
+  try { window.dispatchEvent(new Event(CHANGE_EVENT)); } catch { /* ignore */ }
+  return !err;
 }
 
 /** Новые записи — первыми. */
@@ -157,15 +190,10 @@ function downsampleProfile(profile: Array<{ distanceKm: number; speedKmH: number
   return out;
 }
 
+// Один и тот же маршрут (откуда, куда, длина) — записи сливаются; скорости, климат, погода и заряд в запись просто
+// обновляются. Другой маршрут — новая запись.
 const sameRoute = (a: NewForecastLogEntry, b: ForecastLogEntry) =>
-  a.to === b.to &&
-  a.from === b.from &&
-  Math.abs(a.distanceKm - b.distanceKm) < 0.5 &&
-  a.plannedSpeedKmH === b.plannedSpeedKmH &&
-  a.plannedMaxSpeedKmH === b.plannedMaxSpeedKmH &&
-  a.startSoc === b.startSoc &&
-  a.climateOn === b.climateOn &&
-  a.weatherMode === b.weatherMode;
+  a.to === b.to && a.from === b.from && Math.abs(a.distanceKm - b.distanceKm) < 0.5;
 
 /** Сохраняет прогноз; почти мгновенный повторный расчёт того же маршрута обновляет последнюю запись. */
 export function upsertForecastLogEntry(input: NewForecastLogEntry): void {
@@ -193,7 +221,7 @@ export function upsertForecastLogEntry(input: NewForecastLogEntry): void {
   const latest = all[0];
   if (latest && !hasActuals(latest) && now - latest.updatedAt < DEDUPE_WINDOW_MS && sameRoute(entry, latest)) {
     all[0] = { ...latest, ...entry, id: latest.id, createdAt: latest.createdAt, updatedAt: now };
-    writeAll(all);
+    writeAll(all, 'updated');
     return;
   }
   all.unshift({ ...entry, id: `fc_${now}_${Math.random().toString(36).slice(2, 6)}`, createdAt: now, updatedAt: now });
@@ -205,7 +233,7 @@ export function upsertForecastLogEntry(input: NewForecastLogEntry): void {
     }
     all.splice(idx === -1 ? all.length - 1 : idx, 1);
   }
-  writeAll(all);
+  writeAll(all, 'created');
 }
 
 /** Обновляет фактические показатели записи; ключ со значением undefined очищает поле. */
@@ -216,15 +244,35 @@ export function setForecastActuals(id: string, patch: ForecastActualsPatch): voi
   const next = { ...all[i], ...patch, updatedAt: Date.now() };
   (Object.keys(patch) as ActualFields[]).forEach((k) => { if (patch[k] === undefined) delete next[k]; });
   all[i] = next;
-  writeAll(all);
+  writeAll(all, 'actuals');
 }
 
 export function setForecastActualEndSoc(id: string, actualEndSoc: number | undefined): void {
   setForecastActuals(id, { actualEndSoc });
 }
 
+/**
+ * Заряд на старте поменяли на экране уже после расчёта (быстрый путь без полного пересчёта): обновляем
+ * последнюю запись без введённого факта — старт и прогноз финиша (основной и для сравнения) по уже посчитанной энергии.
+ */
+export function updateLatestForecastStartSoc(startSoc: number): void {
+  const all = readAll().sort((a, b) => b.createdAt - a.createdAt);
+  const e = all[0];
+  if (!e || hasActuals(e)) return;
+  const cap = e.batteryCapacityKwh ?? 51.87;
+  const endSoc = (energyKwh: number) => Math.max(0, Number((startSoc - (energyKwh / cap) * 100).toFixed(1)));
+  all[0] = {
+    ...e,
+    startSoc,
+    forecastEndSoc: endSoc(e.energyKwh),
+    shadow: e.shadow ? { ...e.shadow, forecastEndSoc: endSoc(e.shadow.energyKwh) } : undefined,
+    updatedAt: Date.now(),
+  };
+  writeAll(all, 'start_soc');
+}
+
 export function deleteForecastLogEntry(id: string): void {
-  writeAll(readAll().filter((e) => e.id !== id));
+  writeAll(readAll().filter((e) => e.id !== id), 'deleted');
 }
 
 /**
