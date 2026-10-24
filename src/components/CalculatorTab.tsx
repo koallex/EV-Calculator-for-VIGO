@@ -30,6 +30,7 @@ import {
   Route,
   BatteryCharging,
   ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { UserSettings, RoadType, TripSession } from '../types';
 import { BatteryVisual } from './BatteryVisual';
@@ -39,7 +40,7 @@ import { triggerHaptic } from '../utils/haptics';
 import { openInNavigator, openWebInNewTab, webUrl, type NavFailInfo } from '../utils/openNavigator';
 import { useFeedback } from './ui/Feedback';
 import { saveLastRouteForecast } from '../utils/routeForecastBridge';
-import { upsertForecastLogEntry } from '../utils/forecastLog';
+import { upsertForecastLogEntry, updateLatestForecastStartSoc } from '../utils/forecastLog';
 import { buildRouteElevation, geocodeAddress, RouteElevationData, RouteProgress } from '../services/routeElevation';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { fetchForecastWeatherAt, fetchForecastWeatherAlongRoute, RouteWeatherSample } from '../services/weatherForecast';
@@ -383,6 +384,13 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
   const [paramsOpen, setParamsOpen] = useState(false);
   /** True when a parameter that needs a recalculation changed while the sheet was open. */
   const [paramsDirty, setParamsDirty] = useState(false);
+  // Point A was edited after the last calculation: wait for the explicit "Рассчитать поездку" button instead of
+  // recalculating on every address pick.
+  const [abDirty, setAbDirty] = useState(false);
+  // Average speed is a detail now: hidden behind a small toggle in the parameters sheet.
+  const [avgSpeedOpen, setAvgSpeedOpen] = useState(false);
+  // Signature of the inputs the last calculation was made with — lets us detect changed parameters reliably.
+  const calcSigRef = useRef<string>('');
   /** Bumped to recalculate with the latest state (A/B edits made through the search card). */
   const [recalcTick, setRecalcTick] = useState(0);
   const [recentPlaces, setRecentPlaces] = useState<RecentPlace[]>(() => {
@@ -1201,9 +1209,17 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
   const getClimateModeLabel = () => climateOn ? 'Включен · AUTO' : 'Выключен';
 
+  // Every input that changes the forecast except the start SoC (that one has its own quick path) and the A/B points
+  // (those wait for the explicit button).
+  const paramsSignature = JSON.stringify([
+    plannedSpeedKmH, plannedMaxSpeedKmH, climateOn, passengers, weatherMode, roadType,
+    manualTemperature, manualWindSpeed, manualWindDirection, manualPrecipitationType, manualPrecipitationIntensity,
+  ]);
+
   const updateRouteStartSoc = (value: number) => {
     const next = Math.max(1, Math.min(100, Math.round(value)));
     setStartSoc(next);
+    if (routeForecast) updateLatestForecastStartSoc(next);
     setRouteForecast((prev) => {
       if (!prev) return prev;
       const cap = settings.batteryCapacityKwh || 51.87;
@@ -1236,6 +1252,8 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     if (!dest && !destinationAddress.trim()) { setRouteError('Введите адрес точки Б'); return; }
     if (startMode === 'address' && !startAddress.trim()) { setRouteError('Введите адрес точки А'); return; }
     setRouteLoading(true); setRouteError(''); setRouteElevation(null); setRouteWeather(null); setRouteForecast(null);
+    calcSigRef.current = paramsSignature;
+    setAbDirty(false);
     const onProgress = (p: RouteProgress) => setRouteStatus(p.message);
     try {
       let start: { lat:number; lon:number; displayName:string };
@@ -1385,6 +1403,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
       } catch {
         shadowForLog = undefined; // the shadow is diagnostic only — it must never break the main forecast
       }
+      try {
       upsertForecastLogEntry({
         from: startMode === 'gps' ? 'Моя геопозиция' : shortPlaceLabel(startAddress, 'Точка А'),
         to: shortPlaceLabel(destinationAddress, 'Точка Б'),
@@ -1425,6 +1444,9 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
         },
         speedProfile: segmented.speedProfile,
       });
+      } catch (logErr) {
+        console.error('Forecast log write failed', logErr); // the log is auxiliary — never break the forecast
+      }
       // Keep secondary panels collapsed so the hero result stays in view
       setConsumptionOpen(false);
       setSheetMode('peek');
@@ -1603,6 +1625,18 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recalcTick]);
   const requestRecalc = () => setRecalcTick((n) => n + 1);
+
+  // Parameters (speed, climate, passengers, weather …) changed while a route is on screen: recalculate once the
+  // parameters sheet is closed and the inputs have settled. Independent of the sheet's "dirty" flag, so a missed flag
+  // can no longer leave a stale forecast (and a stale forecast-log entry) on screen. Waits while point A is being edited.
+  useEffect(() => {
+    if (!routeElevation || routeLoading || paramsOpen || abDirty) return;
+    if (!destinationAddress.trim() && !destinationPin) return;
+    if (calcSigRef.current === paramsSignature) return;
+    const t = window.setTimeout(() => { void calculateRouteProfile(); }, 700);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramsSignature, paramsOpen, routeLoading, routeElevation, abDirty]);
 
   /** Clear the route on screen and go back to the "Куда едем?" state. */
   const resetRoute = () => {
@@ -2800,7 +2834,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 <>
                   <button
                     type="button"
-                    onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartMode('gps'); setStartAddress(''); setStartPin(null); }}
+                    onClick={() => { triggerHaptic('light', settings.hapticFeedback); setStartMode('gps'); setStartAddress(''); setStartPin(null); setAbDirty(true); }}
                     aria-label="Начать от моей геопозиции"
                     className="absolute left-2 z-10 rounded-full p-1 text-cyan-500"
                   >
@@ -2808,11 +2842,11 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   </button>
                   <AddressAutocomplete
                     value={startAddress}
-                    onChange={(v) => { setStartAddress(v); setStartPin(null); }}
+                    onChange={(v) => { setStartAddress(v); setStartPin(null); setAbDirty(true); }}
                     onSelect={(s) => {
                       setStartAddress(s.displayName);
                       setStartPin({ lat: s.lat, lon: s.lon });
-                      if (destinationAddress.trim()) requestRecalc();
+                      setAbDirty(true); // the route is calculated by the explicit button, not right after the address pick
                     }}
                     placeholder="Откуда? Город, улица, дом"
                     isDark={isDark}
@@ -2842,7 +2876,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                     setDestinationAddress(from);
                     setStartPin(destinationPin);
                     setDestinationPin(fromPin);
-                    if (from.trim() && destinationAddress.trim()) requestRecalc();
+                    if (from.trim() && destinationAddress.trim()) setAbDirty(true);
                   }}
                   aria-label="Поменять местами А и Б"
                   className={`absolute -top-3 right-8 z-10 rounded-full border p-1 active:scale-90 ${isDark ? 'border-slate-600 bg-slate-800 text-slate-300' : 'border-slate-300 bg-white text-slate-500'}`}
@@ -2889,6 +2923,20 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                 >
                   <ChevronUp className="h-3.5 w-3.5" /> Свернуть
                 </button>
+              </div>
+            )}
+            {abDirty && destinationAddress.trim() && !routeLoading && (startMode === 'gps' || startAddress.trim()) && (
+              <div className="px-2 pb-2">
+                <button
+                  type="button"
+                  onClick={() => { triggerHaptic('light', settings.hapticFeedback); void calculateRouteProfile(); }}
+                  className="vigo-press vigo-cta-sheen flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-600 py-2.5 text-[13px] font-bold text-white shadow-sm shadow-cyan-600/30 hover:bg-cyan-500"
+                >
+                  <Navigation className="h-4 w-4" /> Рассчитать поездку
+                </button>
+                {routeElevation && (
+                  <p className={`mt-1 text-center text-[11px] ${muted}`}>Точка А изменена — результат на экране устарел</p>
+                )}
               </div>
             )}
             {destinationAddress.trim() && !destinationPin && !routeLoading && (
@@ -3063,13 +3111,6 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
 
               <section className="mt-4 space-y-2">
                 <div className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-slate-50'}`}>
-                  <span className="text-[12px] font-semibold">Средняя скорость</span>
-                  <div className="flex items-center gap-1">
-                    <DecimalInput value={plannedSpeedKmH} onChange={(v) => { setPlannedSpeedKmH(v); setPlannedMaxSpeedKmH((prev) => Math.max(prev, v)); dirty(); }} min={20} max={140} className="w-20 text-right" />
-                    <span className={`shrink-0 whitespace-nowrap text-xs ${muted}`}>км/ч</span>
-                  </div>
-                </div>
-                <div className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-slate-50'}`}>
                   <span className="text-[12px] font-semibold">Макс. (крейсер на трассе)</span>
                   <div className="flex items-center gap-1">
                     <DecimalInput value={plannedMaxSpeedKmH} onChange={(v) => { setPlannedMaxSpeedKmH(Math.max(plannedSpeedKmH, Math.min(150, v))); dirty(); }} min={20} max={150} className="w-20 text-right" />
@@ -3080,6 +3121,24 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
                   Быстрые участки считаются на 5 км/ч ниже этого значения, остальные подстраиваются под среднюю. Укажите скорость,
                   которую держите на открытой дороге. Значение 120 (по умолчанию) — прежний расчёт.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => setAvgSpeedOpen((v) => !v)}
+                  aria-expanded={avgSpeedOpen}
+                  className={`flex w-full items-center justify-between px-1 py-0.5 text-[11px] font-semibold ${muted}`}
+                >
+                  <span>Подробности · средняя скорость {Math.round(plannedSpeedKmH)} км/ч</span>
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${avgSpeedOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {avgSpeedOpen && (
+                  <div className={`flex items-center justify-between gap-3 rounded-xl px-3 py-2 ${isDark ? 'bg-slate-950/70' : 'bg-slate-50'}`}>
+                    <span className="text-[12px] font-semibold">Средняя скорость</span>
+                    <div className="flex items-center gap-1">
+                      <DecimalInput value={plannedSpeedKmH} onChange={(v) => { setPlannedSpeedKmH(v); setPlannedMaxSpeedKmH((prev) => Math.max(prev, v)); dirty(); }} min={20} max={140} className="w-20 text-right" />
+                      <span className={`shrink-0 whitespace-nowrap text-xs ${muted}`}>км/ч</span>
+                    </div>
+                  </div>
+                )}
               </section>
 
               </div>{/* /calc-params-col (заряд, люди, скорость) */}
@@ -3160,7 +3219,7 @@ export const CalculatorTab: React.FC<CalculatorTabProps> = ({
           if (pickerFor === 'start') {
             setStartAddress(displayName);
             setStartPin({ lat, lon });
-            if (destinationAddress.trim()) requestRecalc();
+            setAbDirty(true);
           } else if (pickerFor === 'destination') {
             setDestinationAddress(displayName);
             setDestinationPin({ lat, lon });

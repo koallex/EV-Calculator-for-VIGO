@@ -8,6 +8,8 @@ import {
   forecastEnergyCheck,
   forecastShadowCompare,
   forecastShadowSummary,
+  getForecastLogStatus,
+  type ForecastLogStatus,
   forecastLogToCSV,
   loadForecastLog,
   setForecastActuals,
@@ -276,8 +278,12 @@ const EntryRow: React.FC<{ entry: ForecastLogEntry; isDark: boolean; haptic: boo
 export const ForecastLogCard: React.FC<ForecastLogCardProps> = ({ isDark, hapticFeedback }) => {
   const [entries, setEntries] = useState<ForecastLogEntry[]>(() => loadForecastLog());
   const [open, setOpen] = useState(false);
+  const [status, setStatus] = useState<ForecastLogStatus | null>(() => getForecastLogStatus());
 
-  useEffect(() => subscribeForecastLog(() => setEntries(loadForecastLog())), []);
+  useEffect(
+    () => subscribeForecastLog(() => { setEntries(loadForecastLog()); setStatus(getForecastLogStatus()); }),
+    [],
+  );
 
   const filled = entries.filter((e) => e.actualEndSoc !== undefined).length;
   const summary = forecastShadowSummary(entries);
@@ -300,6 +306,17 @@ export const ForecastLogCard: React.FC<ForecastLogCardProps> = ({ isDark, haptic
               ? 'Появится после первого расчёта маршрута'
               : `Расчётов: ${entries.length} · с фактом: ${filled}`}
           </p>
+          {status && !status.ok && (
+            <p className={`text-[11px] font-semibold ${isDark ? 'text-rose-400' : 'text-rose-600'}`}>
+              Не удалось сохранить журнал{status.message ? ` (${status.message})` : ''} — хранилище браузера переполнено?
+            </p>
+          )}
+          {status && status.ok && (status.action === 'created' || status.action === 'updated' || status.action === 'start_soc') && (
+            <p className={`text-[11px] ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              {status.action === 'created' ? 'Записан расчёт' : 'Запись обновлена'} в{' '}
+              {new Date(status.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+            </p>
+          )}
         </div>
         <ChevronDown className={`h-4 w-4 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''} ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
       </button>
@@ -315,7 +332,7 @@ export const ForecastLogCard: React.FC<ForecastLogCardProps> = ({ isDark, haptic
           >
             <div className="space-y-2 px-4 pb-4">
               <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                Каждый расчёт маршрута сохраняется здесь. После поездки впишите фактический SoC на финише и скорости — приложение
+                Расчёт маршрута сохраняется здесь; при смене параметров (скорость, климат, погода, заряд) запись обновляется. После поездки впишите фактический SoC на финише и скорости — приложение
                 покажет отклонение от прогноза. Минус означает, что финиш оказался ниже прогноза. Фактические скорости, дистанцию и расход берите из бортового компьютера или энергоцентра авто: по расходу в кВт⋅ч приложение отделяет физику от показаний шкалы SoC. Тип старта («Прогрев» — выезд с прогревом батареи и салона, «С колёс» — всё уже тёплое) только записывается для анализа и на расчёт не влияет.
               </p>
               {entries.length === 0 ? null : (
